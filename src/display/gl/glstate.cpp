@@ -29,6 +29,13 @@
 
 #include <SDL_rect.h>
 
+#if TARGET_OS_IPHONE
+#include <atomic>
+extern "C" int mkxp_getMetalMaxTextureSize(void);
+#include "ios_bridge.h"
+extern std::atomic<MKXPRenderer> s_currentRenderer;
+#endif
+
 static void applyBool(GLenum state, bool mode) {
   mode ? gl.Enable(state) : gl.Disable(state);
 }
@@ -103,7 +110,20 @@ void GLViewport::apply(const IntRect &value) {
 
 void GLProgram::apply(const unsigned int &value) { gl.UseProgram(value); }
 
-GLState::Caps::Caps() { gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexSize); }
+GLState::Caps::Caps() {
+  gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexSize);
+  realMaxTexSize = maxTexSize;
+
+#if TARGET_OS_IPHONE
+  if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+    int metalMax = mkxp_getMetalMaxTextureSize();
+    if (metalMax > 0 && metalMax < maxTexSize) {
+      maxTexSize = metalMax;
+      realMaxTexSize = metalMax;
+    }
+  }
+#endif
+}
 
 GLState::GLState(const Config &conf) {
   gl.Disable(GL_DEPTH_TEST);

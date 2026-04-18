@@ -127,6 +127,7 @@ public:
 	struct Caps
 	{
 		int maxTexSize;
+		int realMaxTexSize; /* True hardware-reported GL_MAX_TEXTURE_SIZE */
 
 		Caps();
 
