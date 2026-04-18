@@ -588,7 +588,9 @@ void Sprite::setBitmap(Bitmap *bitmap)
     
     p->bitmapDispCon = bitmap->wasDisposed.connect(&SpritePrivate::bitmapDisposal, p);
     
-    bitmap->ensureNonMega();
+    /* Don't call ensureNonMega() — mega surface bitmaps are
+     * supported for sprites via on-demand src_rect uploading
+     * in draw(). */
     
     *p->srcRect = bitmap->rect();
     p->onSrcRectChange();
@@ -740,7 +742,14 @@ void Sprite::setPattern(Bitmap *value)
     p->pattern = value;
     
     if (!nullOrDisposed(value))
-        value->ensureNonMega();
+    {
+        /* Pattern textures shouldn't be mega surfaces in practice,
+         * but guard against it gracefully */
+        if (!value->megaSurface())
+            ; /* normal path */
+        else
+            return; /* can't use mega surface as pattern */
+    }
 }
 
 void Sprite::setPatternBlendType(int type)
@@ -977,7 +986,35 @@ void Sprite::draw()
     
     glState.blendMode.pushSet(p->blendType);
     
-    p->bitmap->bindTex(*base, false);
+    /* Mega surface path: upload only the visible src_rect
+     * region to a temp GL texture and bind that. */
+    bool isMega = p->bitmap->megaSurface() != nullptr;
+    FloatRect savedTexRect;
+    
+    if (isMega)
+    {
+        IntRect megaSrc(
+            (int)p->adjustedSrcRect.x,
+            (int)p->adjustedSrcRect.y,
+            (int)p->adjustedSrcRect.w,
+            (int)p->adjustedSrcRect.h);
+        
+        if (!p->bitmap->bindTexMega(*base, megaSrc))
+        {
+            glState.blendMode.pop();
+            return;
+        }
+        
+        /* The temp texture contains just the src_rect region
+         * starting at (0,0), so adjust quad tex coords. */
+        savedTexRect = p->adjustedSrcRect;
+        FloatRect megaTexRect(0, 0, megaSrc.w, megaSrc.h);
+        p->quad.setTexRect(p->mirrored ? megaTexRect.hFlipped() : megaTexRect);
+    }
+    else
+    {
+        p->bitmap->bindTex(*base, false);
+    }
 
 #ifdef MKXPZ_SSL
     if (scalingMethod == xBRZ)
@@ -995,6 +1032,10 @@ void Sprite::draw()
         p->quad.draw();
     
     TEX::setSmooth(false);
+
+    /* Restore quad tex coords after mega surface rendering */
+    if (isMega)
+        p->quad.setTexRect(p->mirrored ? savedTexRect.hFlipped() : savedTexRect);
 
     glState.blendMode.pop();
 }

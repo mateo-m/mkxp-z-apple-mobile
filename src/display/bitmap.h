@@ -160,6 +160,12 @@ public:
 	 * texture size uniform in shader */
 	void bindTex(ShaderBase &shader, bool substituteLoresSize = true);
 
+	/* For mega surface bitmaps: extracts the given rect from
+	 * the CPU-side surface, uploads to a temp GL texture, binds
+	 * it, and sets the shader's texSize to the rect dimensions.
+	 * Returns false if this bitmap is not a mega surface. */
+	bool bindTexMega(ShaderBase &shader, const IntRect &srcRect);
+
 	/* Adds 'rect' to tainted area */
 	void taintArea(const IntRect &rect);
 

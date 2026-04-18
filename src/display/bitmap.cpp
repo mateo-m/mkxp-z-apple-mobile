@@ -639,6 +639,28 @@ Bitmap::Bitmap(int width, int height, bool isHires)
     if (width <= 0 || height <= 0)
         throw Exception(Exception::RGSSError, "failed to create bitmap");
     
+    /* If either dimension exceeds the real GPU texture limit,
+     * create as a mega surface (CPU-side SDL_Surface).  This lets
+     * oversized bitmaps (animated sprite sheets, tileset work
+     * buffers, etc.) work without corrupting GL state. */
+    if (width > glState.caps.maxTexSize || height > glState.caps.maxTexSize)
+    {
+        p = new BitmapPrivate(this);
+        p->megaSurface = SDL_CreateRGBSurface(
+            0, width, height,
+            p->format->BitsPerPixel,
+            p->format->Rmask, p->format->Gmask,
+            p->format->Bmask, p->format->Amask);
+        if (!p->megaSurface)
+            throw Exception(Exception::SDLError,
+                "Error creating bitmap (%dx%d): %s",
+                width, height, SDL_GetError());
+        SDL_SetSurfaceBlendMode(p->megaSurface, SDL_BLENDMODE_NONE);
+        /* SDL_CreateRGBSurface zeros the pixel data, so the
+         * surface is already cleared — no need to call clear(). */
+        return;
+    }
+
     Bitmap *hiresBitmap = nullptr;
 
     if (shState->config().enableHires && !isHires) {
@@ -839,7 +861,13 @@ void Bitmap::initFromSurface(SDL_Surface *imgSurf, Bitmap *hiresBitmap, bool for
 {
     p->ensureFormat(imgSurf, SDL_PIXELFORMAT_ABGR8888);
     
-    if (imgSurf->w > glState.caps.maxTexSize || imgSurf->h > glState.caps.maxTexSize || forceMega)
+    /* Use realMaxTexSize (true hardware limit) for the mega surface
+     * decision.  maxTexSize may be inflated on iOS to let the empty
+     * Bitmap(w,h) constructor succeed for animated-sprite work buffers,
+     * but file-loaded images must respect the real GPU limit — otherwise
+     * glTexImage2D produces a corrupt/black texture. */
+    const int hwMax = glState.caps.realMaxTexSize;
+    if (imgSurf->w > hwMax || imgSurf->h > hwMax || forceMega)
     {
         /* Mega surface */
 
@@ -1084,6 +1112,59 @@ void Bitmap::stretchBlt(IntRect destRect,
         return;
     if(shrinkRects(sourceRect.y, sourceRect.h, source.height(), destRect.y, destRect.h, height()))
         return;
+    
+    /* Mega surface DESTINATION: pure CPU blit path.
+     * The destination has no GL texture, so we must
+     * operate entirely on SDL_Surfaces. */
+    if (p->megaSurface)
+    {
+        SDL_Surface *srcSurfM = source.megaSurface();
+        SDL_Surface *srcTmp = nullptr;
+        
+        if (srcSurfM)
+        {
+            /* Both source and dest are mega surfaces (or at least SDL) */
+            srcTmp = nullptr; /* use srcSurfM directly */
+        }
+        else
+        {
+            /* Source is a GL texture — download it to a temp surface */
+            int sw = source.width();
+            int sh = source.height();
+            srcTmp = SDL_CreateRGBSurface(0, sw, sh,
+                p->format->BitsPerPixel,
+                p->format->Rmask, p->format->Gmask,
+                p->format->Bmask, p->format->Amask);
+            if (!srcTmp) return;
+            
+            FBO::bind(source.getGLTypes().fbo);
+            glState.viewport.pushSet(IntRect(0, 0, sw, sh));
+            gl.ReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, srcTmp->pixels);
+            glState.viewport.pop();
+            srcSurfM = srcTmp;
+        }
+        
+        SDL_Rect sdlSrc = { sourceRect.x, sourceRect.y,
+                            sourceRect.w, sourceRect.h };
+        SDL_Rect sdlDst = { destRect.x, destRect.y,
+                            destRect.w, destRect.h };
+        
+        if (opacity < 255)
+            SDL_SetSurfaceAlphaMod(srcSurfM, (Uint8)opacity);
+        
+        if (sourceRect.w == destRect.w && sourceRect.h == destRect.h)
+            SDL_BlitSurface(srcSurfM, &sdlSrc, p->megaSurface, &sdlDst);
+        else
+            SDL_BlitScaled(srcSurfM, &sdlSrc, p->megaSurface, &sdlDst);
+        
+        if (opacity < 255)
+            SDL_SetSurfaceAlphaMod(srcSurfM, 255);
+        
+        if (srcTmp)
+            SDL_FreeSurface(srcTmp);
+        
+        return;
+    }
     
     SDL_Surface *srcSurf = source.megaSurface();
     SDL_Surface *blitTemp = 0;
@@ -1336,8 +1417,19 @@ void Bitmap::fillRect(const IntRect &rect, const Vec4 &color)
 {
     guardDisposed();
     
-    GUARD_MEGA;
     GUARD_ANIMATED;
+    
+    if (p->megaSurface)
+    {
+        SDL_Rect sdlRect = { rect.x, rect.y, rect.w, rect.h };
+        uint32_t pixel = SDL_MapRGBA(p->megaSurface->format,
+            (uint8_t)(color.x * 255),
+            (uint8_t)(color.y * 255),
+            (uint8_t)(color.z * 255),
+            (uint8_t)(color.w * 255));
+        SDL_FillRect(p->megaSurface, &sdlRect, pixel);
+        return;
+    }
     
     if (hasHires()) {
         int destX, destY, destWidth, destHeight;
@@ -1432,8 +1524,14 @@ void Bitmap::clearRect(const IntRect &rect)
 {
     guardDisposed();
     
-    GUARD_MEGA;
     GUARD_ANIMATED;
+    
+    if (p->megaSurface)
+    {
+        SDL_Rect sdlRect = { rect.x, rect.y, rect.w, rect.h };
+        SDL_FillRect(p->megaSurface, &sdlRect, 0);
+        return;
+    }
     
     if (hasHires()) {
         int destX, destY, destWidth, destHeight;
@@ -1607,8 +1705,13 @@ void Bitmap::clear()
 {
     guardDisposed();
     
-    GUARD_MEGA;
     GUARD_ANIMATED;
+    
+    if (p->megaSurface)
+    {
+        SDL_FillRect(p->megaSurface, NULL, 0);
+        return;
+    }
     
     if (hasHires()) {
         p->selfHires->clear();
@@ -1639,8 +1742,19 @@ Color Bitmap::getPixel(int x, int y) const
 {
     guardDisposed();
     
-    GUARD_MEGA;
     GUARD_ANIMATED;
+    
+    if (p->megaSurface)
+    {
+        if (x < 0 || y < 0 || x >= p->megaSurface->w || y >= p->megaSurface->h)
+            return Vec4();
+        
+        uint32_t pixel = getPixelAt(p->megaSurface, p->format, x, y);
+        return Color((pixel >> p->format->Rshift) & 0xFF,
+                     (pixel >> p->format->Gshift) & 0xFF,
+                     (pixel >> p->format->Bshift) & 0xFF,
+                     (pixel >> p->format->Ashift) & 0xFF);
+    }
     
     if (hasHires()) {
         Debug() << "GAME BUG: Game is calling getPixel on low-res Bitmap; you may want to patch the game to improve graphics quality.";
@@ -1713,8 +1827,21 @@ void Bitmap::setPixel(int x, int y, const Color &color)
 {
     guardDisposed();
     
-    GUARD_MEGA;
     GUARD_ANIMATED;
+    
+    if (p->megaSurface)
+    {
+        if (x < 0 || y < 0 || x >= p->megaSurface->w || y >= p->megaSurface->h)
+            return;
+        
+        uint32_t &surfPixel = getPixelAt(p->megaSurface, p->format, x, y);
+        surfPixel = SDL_MapRGBA(p->format,
+            (uint8_t)clamp<double>(color.red,   0, 255),
+            (uint8_t)clamp<double>(color.green, 0, 255),
+            (uint8_t)clamp<double>(color.blue,  0, 255),
+            (uint8_t)clamp<double>(color.alpha, 0, 255));
+        return;
+    }
     
     if (hasHires()) {
         Debug() << "GAME BUG: Game is calling setPixel on low-res Bitmap; you may want to patch the game to improve graphics quality.";
@@ -2462,16 +2589,18 @@ IntRect Bitmap::textSize(const char *str)
     if (p->font->getItalic() && *endPtr == '\0')
         TTF_GlyphMetrics(sdlFont, ucs2, 0, 0, 0, 0, &w);
 
-    if (shState->config().fontHeightReporting == 0) {
-        if(!w) {
-            h = 0;
-        } else {
-            /* RGSS normalizes the reported heights.
-             * Note that this may result in the bottoms
-             * of some characters being cut off. */
-             h = TTF_FontHeight(sdlFont);
-        }
-    }
+	if (shState->config().fontHeightReporting == 0) {
+		if(!w) {
+			h = 0;
+		} else {
+			/* RGSS normalizes the reported heights.
+			 * Use abs(ascent) + abs(descent) instead of TTF_FontHeight
+			 * to handle fonts with buggy positive descender values
+			 * (e.g. hhea.descent = +512 instead of -512), where
+			 * TTF_FontHeight (ascent - descent) gives half the correct value. */
+			h = abs(TTF_FontAscent(sdlFont)) + abs(TTF_FontDescent(sdlFont));
+		}
+	}
     
     return IntRect(0, 0, w, h);
 }
@@ -2853,6 +2982,56 @@ void Bitmap::bindTex(ShaderBase &shader, bool substituteLoresSize)
     // Hires mode is handled by p->bindTexture.
 
     p->bindTexture(shader, substituteLoresSize);
+}
+
+bool Bitmap::bindTexMega(ShaderBase &shader, const IntRect &srcRect)
+{
+    if (!p->megaSurface)
+        return false;
+    
+    int x = clamp(srcRect.x, 0, p->megaSurface->w);
+    int y = clamp(srcRect.y, 0, p->megaSurface->h);
+    int w = clamp(srcRect.w, 0, p->megaSurface->w - x);
+    int h = clamp(srcRect.h, 0, p->megaSurface->h - y);
+    
+    if (w <= 0 || h <= 0)
+        return false;
+    
+    /* Use the shared general-purpose TexFBO as our temp texture */
+    TEXFBO &gpTF = shState->gpTexFBO(w, h);
+    
+    /* Extract the src_rect region and upload it */
+    if (gl.unpack_subimage)
+    {
+        TEX::bind(gpTF.tex);
+        gl.PixelStorei(GL_UNPACK_ROW_LENGTH, p->megaSurface->pitch / p->format->BytesPerPixel);
+        gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, x);
+        gl.PixelStorei(GL_UNPACK_SKIP_ROWS, y);
+        TEX::uploadSubImage(0, 0, w, h, p->megaSurface->pixels, GL_RGBA);
+        GLMeta::subRectImageEnd();
+    }
+    else
+    {
+        /* No sub-image extension: crop to a temp surface first */
+        SDL_Surface *tmp = SDL_CreateRGBSurface(
+            0, w, h,
+            p->format->BitsPerPixel,
+            p->format->Rmask, p->format->Gmask,
+            p->format->Bmask, p->format->Amask);
+        if (!tmp)
+            return false;
+        
+        SDL_Rect sdlSrc = { x, y, w, h };
+        SDL_BlitSurface(p->megaSurface, &sdlSrc, tmp, NULL);
+        
+        TEX::bind(gpTF.tex);
+        TEX::uploadSubImage(0, 0, w, h, tmp->pixels, GL_RGBA);
+        SDL_FreeSurface(tmp);
+    }
+    
+    shader.setTexSize(Vec2i(gpTF.width, gpTF.height));
+    
+    return true;
 }
 
 void Bitmap::taintArea(const IntRect &rect)
