@@ -186,7 +186,132 @@ json5pp::value rb2json(VALUE v);
 
 RB_METHOD(mkxpParseCSV);
 
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+#if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
+static VALUE legacy_array_choice(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "choice");
+    return rb_funcallv(self, rb_intern("sample"), argc, argv);
+}
+
+static VALUE legacy_array_indexes(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "indexes");
+    rb_warn("Array#indexes is deprecated; use Array#values_at");
+    return rb_funcallv(self, rb_intern("values_at"), argc, argv);
+}
+
+static VALUE legacy_array_indices(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "indices");
+    rb_warn("Array#indices is deprecated; use Array#values_at");
+    return rb_funcallv(self, rb_intern("values_at"), argc, argv);
+}
+
+static VALUE legacy_hash_indexes(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "indexes");
+    rb_warn("Hash#indexes is deprecated; use Hash#values_at");
+    return rb_funcallv(self, rb_intern("values_at"), argc, argv);
+}
+
+static VALUE legacy_hash_indices(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "indices");
+    rb_warn("Hash#indices is deprecated; use Hash#values_at");
+    return rb_funcallv(self, rb_intern("values_at"), argc, argv);
+}
+
+static VALUE legacy_kernel_id(VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "id");
+    rb_warn("Object#id will be deprecated; use Object#object_id");
+    return rb_obj_id(self);
+}
+
+static VALUE legacy_kernel_type(VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "type");
+    rb_warn("Object#type is deprecated; use Object#class");
+    return rb_obj_class(self);
+}
+
+static VALUE legacy_symbol_to_i(VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "to_i");
+    return RB_LONG2FIX(rb_sym2id(self));
+}
+
+static VALUE legacy_symbol_to_int(VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "to_int");
+    rb_warning("treating Symbol as an integer");
+    return RB_LONG2FIX(rb_sym2id(self));
+}
+#endif // RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
+
+#if RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
+static VALUE legacy_hash_index(int argc, VALUE *argv, VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(2, 7, -1))
+        mkxp_raise_no_method_exception(self, "index");
+    rb_warn("Hash#index is deprecated; use Hash#key instead");
+    return rb_funcallv(self, rb_intern("key"), argc, argv);
+}
+#endif // RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
+
+#if RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
+static VALUE legacy_dir_exists(VALUE self, VALUE path) {
+    if (!mkxp_ec_is_syntax_transform_active(3, 1, -1))
+        mkxp_raise_no_method_exception(self, "exists?");
+    return rb_funcall(rb_cDir, rb_intern("exist?"), 1, path);
+}
+
+static VALUE legacy_file_exists(VALUE self, VALUE path) {
+    if (!mkxp_ec_is_syntax_transform_active(3, 1, -1))
+        mkxp_raise_no_method_exception(self, "exists?");
+    return rb_funcall(rb_cFile, rb_intern("exist?"), 1, path);
+}
+
+static VALUE legacy_file_test_exists(VALUE self, VALUE path) {
+    if (!mkxp_ec_is_syntax_transform_active(3, 1, -1))
+        mkxp_raise_no_method_exception(self, "exists?");
+    return rb_funcall(rb_mFileTest, rb_intern("exist?"), 1, path);
+}
+
+static VALUE legacy_kernel_match(VALUE self, VALUE other) {
+    if (mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        return Qfalse;
+    else if (!mkxp_ec_is_syntax_transform_active(3, 1, -1))
+        mkxp_raise_no_method_exception(self, "=~");
+    return Qnil;
+}
+#endif // RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+
 static void mriBindingInit() {
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+#if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
+    rb_define_method(rb_cArray, "choice", legacy_array_choice, -1);
+    rb_define_method(rb_cArray, "indexes", legacy_array_indexes, -1);
+    rb_define_method(rb_cArray, "indices", legacy_array_indices, -1);
+    rb_define_method(rb_cHash, "indexes", legacy_hash_indexes, -1);
+    rb_define_method(rb_cHash, "indices", legacy_hash_indices, -1);
+    rb_define_method(rb_mKernel, "id", legacy_kernel_id, 0);
+    rb_define_method(rb_mKernel, "type", legacy_kernel_type, 0);
+    rb_define_method(rb_cSymbol, "to_i", legacy_symbol_to_i, 0);
+    rb_define_method(rb_cSymbol, "to_int", legacy_symbol_to_int, 0);
+#endif // RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
+#if RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
+    rb_define_method(rb_cHash, "index", legacy_hash_index, -1);
+#endif // RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
+#if RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
+    rb_define_singleton_method(rb_cDir, "exists?", legacy_dir_exists, 1);
+    rb_define_singleton_method(rb_cFile, "exists?", legacy_file_exists, 1);
+    rb_define_module_function(rb_mFileTest, "exists?", legacy_file_test_exists, 1);
+    rb_define_method(rb_mKernel, "=~", legacy_kernel_match, 1);
+#endif // RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+
     tableBindingInit();
     etcBindingInit();
     fontBindingInit();
@@ -226,7 +351,7 @@ static void mriBindingInit() {
         _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
         _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
         
-        rb_define_global_const("RGSS_VERSION", rb_utf8_str_new_cstr("3.0.1"));
+        rb_define_global_const("RGSS_VERSION", mkxp_str_new_cstr("3.0.1"));
     } else {
         _rb_define_module_function(rb_mKernel, "print", mriPrint);
         _rb_define_module_function(rb_mKernel, "p", mriP);
@@ -316,9 +441,9 @@ static void mriBindingInit() {
     
 #ifdef MKXPZ_BUILD_XCODE
     std::string version = std::string(MKXPZ_VERSION "/") + getPlistValue("GIT_COMMIT_HASH");
-    VALUE vers = rb_utf8_str_new_cstr(version.c_str());
+    VALUE vers = mkxp_str_new_cstr(version.c_str());
 #else
-    VALUE vers = rb_utf8_str_new_cstr(MKXPZ_VERSION "/" MKXPZ_GIT_HASH);
+    VALUE vers = mkxp_str_new_cstr(MKXPZ_VERSION "/" MKXPZ_GIT_HASH);
 #endif
     rb_str_freeze(vers);
     rb_define_const(mod, "VERSION", vers);
@@ -397,7 +522,7 @@ RB_METHOD(mkxpDataDirectory) {
     const char *s = path.empty() ? "." : path.c_str();
     
     std::string s_nml = shState->fileSystem().normalize(s, 1, 1);
-    VALUE ret = rb_utf8_str_new_cstr(s_nml.c_str());
+    VALUE ret = mkxp_str_new_cstr(s_nml.c_str());
     
     return ret;
 }
@@ -418,7 +543,7 @@ RB_METHOD(mkxpGetTitle) {
     
     rb_check_argc(argc, 0);
     
-    return rb_utf8_str_new_cstr(SDL_GetWindowTitle(shState->sdlWindow()));
+    return mkxp_str_new_cstr(SDL_GetWindowTitle(shState->sdlWindow()));
 }
 
 RB_METHOD(mkxpDesensitize) {
@@ -428,8 +553,7 @@ RB_METHOD(mkxpDesensitize) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
     
-    return rb_utf8_str_new_cstr(
-                                shState->fileSystem().desensitize(RSTRING_PTR(filename)));
+    return mkxp_str_new_cstr(shState->fileSystem().desensitize(RSTRING_PTR(filename)));
 }
 
 RB_METHOD(mkxpPuts) {
@@ -476,7 +600,7 @@ RB_METHOD(mkxpPlatform) {
     std::string platform("Linux");
 #endif
     
-    return rb_utf8_str_new_cstr(platform.c_str());
+    return mkxp_str_new_cstr(platform.c_str());
 }
 
 RB_METHOD(mkxpIsMacHost) {
@@ -526,7 +650,7 @@ RB_METHOD(mkxpIsReallyWindowsHost) {
 RB_METHOD(mkxpUserLanguage) {
     RB_UNUSED_PARAM;
     
-    return rb_utf8_str_new_cstr(mkxp_sys::getSystemLanguage().c_str());
+    return mkxp_str_new_cstr(mkxp_sys::getSystemLanguage().c_str());
 }
 
 RB_METHOD(mkxpUserName) {
@@ -538,14 +662,14 @@ RB_METHOD(mkxpUserName) {
     VALUE env = rb_const_get(rb_mKernel, rb_intern("ENV"));
     return rb_funcall(env, rb_intern("[]"), 1, rb_str_new_cstr("USERNAME"));
 #else
-    return rb_utf8_str_new_cstr(mkxp_sys::getUserName().c_str());
+    return mkxp_str_new_cstr(mkxp_sys::getUserName().c_str());
 #endif
 }
 
 RB_METHOD(mkxpGameTitle) {
     RB_UNUSED_PARAM;
     
-    return rb_utf8_str_new_cstr(shState->config().game.title.c_str());
+    return mkxp_str_new_cstr(shState->config().game.title.c_str());
 }
 
 RB_METHOD(mkxpPowerState) {
@@ -717,7 +841,7 @@ RB_METHOD_GUARD(mkxpStringToUTF8) {
     std::string ret(RSTRING_PTR(self), RSTRING_LEN(self));
     ret = Encoding::convertString(ret);
     
-    return rb_utf8_str_new(ret.c_str(), ret.length());
+    return mkxp_str_new(ret.c_str(), ret.length());
 }
 RB_METHOD_GUARD_END
 
@@ -733,7 +857,7 @@ RB_METHOD_GUARD(mkxpStringToUTF8Bang) {
     memcpy(RSTRING_PTR(self), ret.c_str(), RSTRING_LEN(self));
     
 #if RAPI_FULL >= 190
-    rb_funcall(self, rb_intern("force_encoding"), 1, rb_enc_from_encoding(rb_utf8_encoding()));
+    rb_enc_set_index(self, rb_utf8_encindex());
 #endif
     
     return self;
@@ -811,7 +935,7 @@ RB_METHOD_GUARD(mkxpParseCSV) {
             VALUE col = rb_ary_new();
             for (int c = 0; c < doc.GetColumnCount(); c++) {
                 std::string str = doc.GetCell<std::string>(c, r);
-                rb_ary_push(col, rb_utf8_str_new(str.c_str(), str.length()));
+                rb_ary_push(col, mkxp_str_new(str.c_str(), str.length()));
             }
             rb_ary_push(ret, col);
         }
@@ -825,7 +949,7 @@ RB_METHOD_GUARD_END
 
 json5pp::value loadUserSettings() {
     json5pp::value ret;
-    VALUE cpath = rb_utf8_str_new_cstr(shState->config().userConfPath.c_str());
+    VALUE cpath = mkxp_str_new_cstr(shState->config().userConfPath.c_str());
     
     if (rb_funcall(rb_cFile, rb_intern("exists?"), 1, cpath) == Qtrue) {
         VALUE f = rb_funcall(rb_cFile, rb_intern("open"), 2, cpath, rb_str_new("r", 1));
@@ -841,9 +965,9 @@ json5pp::value loadUserSettings() {
 }
 
 void saveUserSettings(json5pp::value &settings) {
-    VALUE cpath = rb_utf8_str_new_cstr(shState->config().userConfPath.c_str());
+    VALUE cpath = mkxp_str_new_cstr(shState->config().userConfPath.c_str());
     VALUE f = rb_funcall(rb_cFile, rb_intern("open"), 2, cpath, rb_str_new("w", 1));
-    rb_funcall(f, rb_intern("write"), 1, rb_utf8_str_new_cstr(settings.stringify5(json5pp::rule::space_indent<>()).c_str()));
+    rb_funcall(f, rb_intern("write"), 1, mkxp_str_new_cstr(settings.stringify5(json5pp::rule::space_indent<>()).c_str()));
     rb_funcall(f, rb_intern("close"), 0);
 }
 
@@ -914,14 +1038,6 @@ static bool processReset(bool rubyExc) {
 	return 0;
 }
 
-#if RAPI_FULL > 187
-static VALUE newStringUTF8(const char *string, long length) {
-    return rb_enc_str_new(string, length, rb_utf8_encoding());
-}
-#else
-#define newStringUTF8 rb_str_new
-#endif
-
 struct evalArg {
     VALUE string;
     VALUE filename;
@@ -945,8 +1061,8 @@ static void runCustomScript(const std::string &filename) {
         return;
     }
     
-    evalString(newStringUTF8(scriptData.c_str(), scriptData.size()),
-               newStringUTF8(filename.c_str(), filename.size()), NULL);
+    evalString(mkxp_str_new(scriptData.c_str(), scriptData.size()),
+               mkxp_str_new(filename.c_str(), filename.size()), NULL);
 }
 
 RB_METHOD_GUARD(mriRgssMain) {
@@ -1022,7 +1138,7 @@ RB_METHOD(_kernelCaller) {
         return trace;
     
     /* RMXP does this, not sure if specific or 1.8 related */
-    VALUE args[] = {rb_utf8_str_new_cstr(":in `<main>'"), rb_utf8_str_new_cstr("")};
+    VALUE args[] = {mkxp_str_new_cstr(":in `<main>'"), mkxp_str_new_cstr("")};
     rb_funcall2(rb_ary_entry(trace, len - 1), rb_intern("gsub!"), 2, args);
     
     return trace;
@@ -1038,7 +1154,7 @@ struct BacktraceData {
 bool evalScript(VALUE string, const char *filename)
 {
     int state;
-    evalString(string, rb_utf8_str_new_cstr(filename), &state);
+    evalString(string, mkxp_str_new_cstr(filename), &state);
     if (state) return false;
     return true;
 }
@@ -1133,16 +1249,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             break;
         }
         
-        /* Store as ASCII-8BIT initially; the preprocessing step below
-         * will add a magic encoding comment before evaluation.
-         * Use bufferLen (actual decompressed size) not decodeBuffer.size(). */
-        {
-            VALUE decoded = rb_str_new(decodeBuffer.c_str(), bufferLen);
-#if RAPI_FULL >= 190
-            rb_enc_associate(decoded, rb_ascii8bit_encoding());
-#endif
-            rb_ary_store(script, 3, decoded);
-        }
+        rb_ary_store(script, 3, mkxp_str_new(decodeBuffer.c_str(), bufferLen));
     }
     
 #if RAPI_FULL > 187
@@ -1371,7 +1478,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             VALUE script = rb_ary_entry(scriptArray, i);
             VALUE scriptDecoded = rb_ary_entry(script, 3);
             VALUE string =
-            newStringUTF8(RSTRING_PTR(scriptDecoded), RSTRING_LEN(scriptDecoded));
+            mkxp_str_new(RSTRING_PTR(scriptDecoded), RSTRING_LEN(scriptDecoded));
             
             VALUE fname;
             const char *scriptName = RSTRING_PTR(rb_ary_entry(script, 1));
@@ -1383,7 +1490,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             else
                 len = snprintf(buf, sizeof(buf), SCRIPT_SECTION_FMT, i);
             
-            fname = newStringUTF8(buf, len);
+            fname = mkxp_str_new(buf, len);
             btData.scriptNames.insert(buf, scriptName);
             
             
@@ -1424,91 +1531,28 @@ static void runRMXPScripts(BacktraceData &btData) {
             }
 #endif
 
-            evalString(string, fname, &state);
-            
-            /* RGSS allows reopening a class with a different superclass
-             * and mixing up class/module definitions. Standard Ruby raises
-             * TypeError for these cases:
-             *   - "superclass mismatch for class X"
-             *   - "X is not a module"
-             *   - "X is not a class"
-             * Handle by removing the conflicting constant and retrying. */
-            for (int retries = 0; state && retries < 64; ++retries) {
-                VALUE exc = rb_gv_get("$!");
-                if (exc == Qnil || !rb_obj_is_kind_of(exc, rb_eTypeError))
-                    break;
-                
-                VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
-                const char *msgStr = StringValueCStr(msg);
-                
-                std::string clsName;
-                
-                /* "superclass mismatch for class X" */
-                const char *prefix = "superclass mismatch for class ";
-                const char *match = strstr(msgStr, prefix);
-                if (match) {
-                    const char *className = match + strlen(prefix);
-                    for (const char *p = className; *p && (isalnum(*p) || *p == '_'); ++p)
-                        clsName += *p;
-                }
-                
-                /* "X is not a module" / "X is not a class" /
-                 * "X is not a class/module" (Ruby 1.8) */
-                if (clsName.empty()) {
-                    static const char *suffixes[] = {
-                        " is not a class/module",
-                        " is not a module",
-                        " is not a class",
-                        nullptr,
-                    };
-                    const char *found = nullptr;
-                    for (int si = 0; suffixes[si]; ++si) {
-                        found = strstr(msgStr, suffixes[si]);
-                        if (found) break;
+            {
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+                extern thread_local int mkxp_syntax_transform_next_eval;
+                struct SyntaxTransformGuard {
+                    SyntaxTransformGuard() {
+                        mkxp_syntax_transform_next_eval = 1;
                     }
-                    if (found) {
-                        /* Walk backwards from the suffix to extract the name.
-                         * Messages look like:
-                         *   "(eval):98350: PBTerrain is not a module"
-                         *   "213:Bambo Reward: Foo is not a class/module" */
-                        const char *end = found;
-                        const char *start = end;
-                        while (start > msgStr && (isalnum(start[-1]) || start[-1] == '_'))
-                            --start;
-                        if (start < end)
-                            clsName.assign(start, end);
+                    ~SyntaxTransformGuard() {
+                        mkxp_syntax_transform_next_eval = 0;
                     }
-                }
-                
-                if (clsName.empty())
-                    break;
-                
-                Debug() << "TypeError for" << clsName.c_str()
-                        << "- removing and retrying (RGSS compat)";
-                
-                {
-                    char buf[512];
-                    snprintf(buf, sizeof(buf), "Script '%s': TypeError for %s (%s) - removing and retrying",
-                             scriptName, clsName.c_str(), msgStr);
-                    logRubyError("RETRY", buf);
-                }
-                
-                std::string removeCode =
-                    "Object.send(:remove_const, :" + clsName + ") rescue nil";
-                int rmState = 0;
-                rb_eval_string_protect(removeCode.c_str(), &rmState);
-                
-                rb_gv_set("$!", Qnil);
-                state = 0;
+                };
+                SyntaxTransformGuard guard;
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
                 evalString(string, fname, &state);
             }
-            
+
 #if TARGET_OS_IPHONE
             /* On iOS, native DLL/library loading (LoadError) and missing
              * native methods (NoMethodError from DLL-provided extensions)
              * are expected to fail. Many game scripts have optional native
              * extensions (e.g. RGSS Linker, F-mod, screenshot DLLs).
-             * Skip these errors and continue to the next script section —
+             * Skip these errors and continue to the next script section -
              * the game typically has fallback code paths. */
             if (state) {
                 VALUE exc = rb_gv_get("$!");
@@ -1545,7 +1589,6 @@ static void runRMXPScripts(BacktraceData &btData) {
                 }
             }
 #endif
-            
             if (state)
                 break;
 
@@ -1652,6 +1695,9 @@ static void mriBindingExecute() {
     ruby_init();
     
     std::vector<const char*> rubyArgsC{"mkxp-z"};
+#if RAPI_FULL >= 190
+    rubyArgsC.push_back(mkxpUsingRuby18Encoding() ? "-EASCII-8BIT" : "-EUTF-8");
+#endif // RAPI_FULL >= 190
     rubyArgsC.push_back("-e ");
     void *node;
     if (conf.jit.enabled) {
@@ -1703,29 +1749,14 @@ static void mriBindingExecute() {
         shState->rtData().rqTermAck.set();
         return;
     }
-    rb_enc_set_default_internal(rb_enc_from_encoding(rb_utf8_encoding()));
-    rb_enc_set_default_external(rb_enc_from_encoding(rb_utf8_encoding()));
 #else
-    /* Ruby 1.8: ruby_init() and Init_* must only be called once.
-     * On iOS, the engine runs multiple game sessions in a single process.
-     * ruby_cleanup() partially destructs the VM and ruby_init() doesn't
-     * fully reinitialize it, causing SIGSEGV on the second run.
-     * Keep the VM alive across sessions. */
-    static bool rubyVMInitialized = false;
-    if (!rubyVMInitialized) {
-        ruby_init();
-        rb_eval_string("$KCODE='U'");
-
-        /* Initialize statically-linked extensions for Ruby 1.8 */
-        Init_zlib();
-        Init_stringio();
-        Init_strscan();
-        Init_thread();
-        Init_digest();
-        Init_fcntl();
-
-        rubyVMInitialized = true;
-    } else {
+    ruby_init();
+    // TODO (Phase 3): multi-session cleanup for Ruby 3.1 goes here.
+    // The previous implementation was 1.8-specific. Ruby 3.1 supports
+    // ruby_cleanup()/ruby_init() cycles, but Object.constants diff and
+    // Input singleton method cleanup still apply.
+#if 0 /* DISABLED: 1.8-only session cleanup, to be rewritten for 3.1 */
+    if (false) {
         /* The RGSS thread is now persistent on iOS — same thread for all
          * sessions. rb_gc_stack_start should still be valid, but update
          * it as a safety measure in case the stack frame shifted. */
@@ -1853,6 +1884,7 @@ static void mriBindingExecute() {
         /* 5. Force GC to collect stale Ruby objects from previous session. */
         rb_gc();
     }
+#endif /* DISABLED: 1.8-only session cleanup */
 #ifdef __WIN32__
     if (!conf.winConsole) {
         VALUE iostr = rb_str_new2("NUL");
@@ -1862,6 +1894,10 @@ static void mriBindingExecute() {
     }
 #endif
 #endif
+
+    // Set the default encoding for regular expressions to UTF-8 when using syntax transform targeting Ruby <= 1.8
+    rb_gv_set("$KCODE", rb_str_new_cstr("UTF8"));
+    rb_gv_set("$-K", rb_str_new_cstr("UTF8"));
     
     topSelf = rgssVer == 1 ? Qnil : rb_eval_string("self");
     // Register as a GC root so Ruby doesn't collect the value between
@@ -1878,7 +1914,7 @@ static void mriBindingExecute() {
     VALUE rbArgv = rb_argv;
 #endif
     for (const auto &str : conf.launchArgs)
-        rb_ary_push(rbArgv, rb_utf8_str_new_cstr(str.c_str()));
+        rb_ary_push(rbArgv, mkxp_str_new_cstr(str.c_str()));
     
     // Duplicates get pushed for some reason
     rb_funcall(rbArgv, rb_intern("uniq!"), 0);
@@ -1897,13 +1933,13 @@ static void mriBindingExecute() {
         for (size_t i = 0; i < conf.rubyLoadpaths.size(); ++i) {
             std::string &path = conf.rubyLoadpaths[i];
             
-            VALUE pathv = rb_str_new(path.c_str(), path.size());
+            VALUE pathv = mkxp_str_new(path.c_str(), path.size());
             rb_ary_push(lpaths, pathv);
         }
     }
 #ifndef WORKDIR_CURRENT
     else {
-        rb_ary_push(lpaths, rb_utf8_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
+        rb_ary_push(lpaths, mkxp_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
     }
 #endif
     
