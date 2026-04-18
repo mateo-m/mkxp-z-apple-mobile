@@ -23,6 +23,8 @@
 #define BINDING_UTIL_H
 
 #include <ruby.h>
+#include <stdarg.h>
+#include <stdio.h>
 #ifndef MKXPZ_LEGACY_RUBY
 #include <ruby/version.h>
 #else
@@ -41,6 +43,14 @@
 #define RAPI_TEENY RUBY_VERSION_TEENY
 #endif
 #define RAPI_FULL ((RAPI_MAJOR * 100) + (RAPI_MINOR * 10) + RAPI_TEENY)
+
+/* JoiPlay's Ruby 1.8 branch reports as 1.8.8 (development head),
+ * but all the RAPI_FULL > 187 guards were written for 1.8.7.
+ * Clamp to 187 so the Ruby 1.8 code paths are used correctly. */
+#if RAPI_MAJOR == 1 && RAPI_MINOR == 8
+#undef RAPI_FULL
+#define RAPI_FULL 187
+#endif
 
 enum RbException {
     RGSS = 0,
@@ -453,16 +463,27 @@ inline void rb_check_argc(int actual, int expected) {
 #if RAPI_MAJOR < 2
 static inline void rb_error_arity(int argc, int min, int max) {
     if (argc > max || argc < min)
-        rb_raise(rb_eArgError, "Finish me! rb_error_arity()"); // TODO
+        rb_raise(rb_eArgError, "wrong number of arguments (%d for %d..%d)", argc, min, max);
 }
 
 #if RAPI_MINOR < 9
 static inline VALUE rb_sprintf(const char *fmt, ...) {
-    return rb_str_new2("Finish me! rb_sprintf()"); // TODO
+    va_list args;
+    va_start(args, fmt);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    return rb_str_new2(buf);
 }
 
 static inline VALUE rb_str_catf(VALUE obj, const char *fmt, ...) {
-    return rb_str_new2("Finish me! rb_str_catf()"); // TODO
+    va_list args;
+    va_start(args, fmt);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    rb_str_cat2(obj, buf);
+    return obj;
 }
 
 static inline VALUE rb_file_open_str(VALUE filename, const char *mode) {
@@ -539,7 +560,7 @@ if (NIL_P(propObj))                                                        \
 prop = 0;                                                                \
 else                                                                       \
 prop = getPrivateDataCheck<PropKlass>(propObj, PropKlass##Type);         \
-k->set##PropName(prop)                                                     \
+k->set##PropName(prop);                                                    \
 rb_iv_set(self, prop_iv, propObj);                                         \
 return propObj;                                                            \
 }                                                                          \
@@ -560,7 +581,7 @@ if (NIL_P(propObj))                                                        \
 prop = 0;                                                                \
 else                                                                       \
 prop = getPrivateDataCheck<PropKlass>(propObj, #PropKlass);              \
-k->set##PropName(prop)                                                     \
+k->set##PropName(prop);                                                    \
 rb_iv_set(self, prop_iv, propObj);                                         \
 return propObj;                                                            \
 }                                                                          \

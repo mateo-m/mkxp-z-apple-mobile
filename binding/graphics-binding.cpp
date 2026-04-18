@@ -91,9 +91,8 @@ RB_METHOD_GUARD(graphicsTransition)
     
     rb_get_args(argc, argv, "|izi", &duration, &filename, &vague RB_ARG_END);
     
-    TransitionArgs args = {duration, filename, vague};
-    
 #if RAPI_MAJOR >= 2
+    TransitionArgs args = {duration, filename, vague};
     drop_gvl_guard([](void *args) -> void* {
         TransitionArgs &a = *((TransitionArgs*)args);
         GFX_GUARD_EXC( shState->graphics().transition(a.duration,
