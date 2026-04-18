@@ -1,44 +1,50 @@
 # ruby_classic_wrap.rb
-# Author: WaywardHeart (2023)
+# Minimal compatibility layer for Ruby 1.8 on mkxp-z.
+#
+# iOS ships Ruby 1.8 (see ios/Empo/project.yml -lruby18-static).
+# Ruby 1.8 has no concept of string encoding, so methods that games
+# written for Ruby 1.9+ expect (force_encoding, encode, encoding, ...)
+# raise NoMethodError. Stub them as no-ops so scripts that sprinkle
+# `.force_encoding("UTF-8")` on strings don't crash.
 
-# Creative Commons CC0: To the extent possible under law, WaywardHeart has
-# dedicated all copyright and related and neighboring rights to this script
-# to the public domain worldwide.
-# https://creativecommons.org/publicdomain/zero/1.0/
+class String
+  unless method_defined?(:force_encoding)
+    def force_encoding(*_args)
+      self
+    end
+  end
 
-# This preload script provides functions that existed in RPG Maker's versions of Ruby,
-# but were renamed or changed in the current Ruby version used in mkxp-z, so that games
-# (or other preload scripts) that expect the older Ruby behavior can function.
+  unless method_defined?(:encode)
+    # Real String#encode returns a NEW string (unlike #force_encoding
+    # which mutates in place and returns self). Returning `self` would
+    # alias the receiver into whatever the caller does next, so game
+    # code that does `s = x.encode("UTF-8"); s.gsub!(...)` would end
+    # up mutating `x`. Return a dup to preserve copy-on-encode.
+    def encode(*_args)
+      dup
+    end
+  end
 
-class Hash
-	alias_method :index, :key unless method_defined?(:index)
+  unless method_defined?(:encoding)
+    def encoding
+      "ASCII-8BIT"
+    end
+  end
+
+  unless method_defined?(:valid_encoding?)
+    def valid_encoding?
+      true
+    end
+  end
+
+  unless method_defined?(:b)
+    def b
+      dup
+    end
+  end
 end
 
-class Object
-	TRUE = true unless const_defined?("TRUE")
-	FALSE = false unless const_defined?("FALSE")
-	NIL = nil unless const_defined?("NIL")
-	
-	alias_method :id, :object_id unless method_defined?(:id)
-	alias_method :type, :class unless method_defined?(:type)
-end
-
-class NilClass
-	def id
-		4 # Starting with Ruby2, 64-bit builds of ruby make this 8
-	end
-end
-
-class TrueClass
-	def id
-		2 # Starting with Ruby2, 64-bit builds of ruby make this 20
-	end
-end
-
-if defined?(BasicObject) && BasicObject.instance_method(:initialize).arity == 0
-	# In ruby 1.9.2, and only ruby 1.9.2, BasicObject.initialize accepted any number of arguments
-	class BasicObject
-		def initialize(*args)
-		end
-	end
-end
+# The Encoding class doesn't exist in Ruby 1.8 either. Games that
+# reference Encoding::UTF_8 or similar still error out with NameError.
+# The String#force_encoding stub above tolerates any argument type, so
+# a dedicated Encoding stub is not required in the common case.

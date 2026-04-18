@@ -19,17 +19,13 @@
 # TOLERATE_ERRORS=false
 # LOG_NATIVE=true
 
-# RGSS Linker compatibility stubs.
-# RGSS Linker (by berka_91) is a widely-used Windows-only native DLL loader.
-# When present it defines Berka:: error constants and adds Kernel#load_module.
-# Games that use it (e.g. for FMOD audio or network access) reference those
-# constants from other scripts. Define them as no-ops so the game doesn't crash
-# with NameError / NoMethodError when RGSS Linker fails to load on iOS.
-module Berka
-  class Error < StandardError; end
-  class NetErrorErr < Error; end
-end unless defined?(Berka)
-
+# RGSS Linker (berka_91) compatibility: stub Kernel#load_module so
+# games that call it (FMODEX wrapper, network loaders, etc.) don't
+# crash with NoMethodError. Real Windows games rely on the linker
+# DLL side-effect of defining module constants; on iOS we can't load
+# DLLs, so the constants reference later in the script will raise
+# NameError - which binding-mri.cpp's SKIPPED handler swallows for
+# LoadError/NoMethodError cases.
 module Kernel
   def load_module(*args)
     # No-op on iOS - Win32 DLL loading is not supported.
@@ -185,7 +181,9 @@ $win32KeyStates = nil
 
 module Graphics
 	class << self
-		alias_method(:win32wrap_update, :update)
+		unless method_defined?(:win32wrap_update)
+			alias_method(:win32wrap_update, :update)
+		end
 		def update
 			win32wrap_update
 			$win32KeyStates = nil
@@ -236,7 +234,7 @@ end
 def memcpy_string(dst, src)
 	i = 0
 	src.each_byte do |b|
-		dst.setbyte(i, b)
+		dst[i] = b
 		i += 1
 	end
 end
@@ -283,13 +281,17 @@ module Win32API_Impl
 
 		class GetKeyState
 			def call(vkey)
-				return common_keystate(vkey[0])
+				# Use C-level asyncKeyState which reads directly from
+				# EventThread::keyStates[], bypassing Input::update().
+				# This is critical because games like Pokemon Essentials
+				# override Input.update at the Ruby level.
+				return Input.asyncKeyState(vkey[0]) > 0 ? 1 : 0
 			end
 		end
 		class GetAsyncKeyState
 			PRESSED_BIT = (1 << 15)
 			def call(vkey)
-				return common_keystate(vkey[0]) == 1 ? PRESSED_BIT : 0
+				return Input.asyncKeyState(vkey[0])
 			end
 		end
 		class GetKeyboardState
@@ -298,9 +300,9 @@ module Win32API_Impl
 				out_states = args[0]
 
 				Scancodes::WIN32.each do |name, val|
-					pressed = common_keystate(val) == 1
+					pressed = Input.asyncKeyState(val) > 0
 
-					out_states.setbyte(val, pressed ? PRESSED_BIT : 0)
+					out_states[val] = pressed ? PRESSED_BIT : 0
 				end
 				return 1
 			end
@@ -351,18 +353,66 @@ module Win32API_Impl
 
 		class FindWindowA
 			def call(args)
-				if args[0] == "RGSS Player"
+				if args[0] == "RGSS Player" || args[1] == "RGSS Player"
 					return 42
 				else
 					return 0
 				end
 			end
 		end
+
+		class FindWindowEx
+			def call(args)
+				# FindWindowEx(parent, childAfter, className, windowName)
+				# args[2] is className, args[3] is windowName
+				if args[2] == "RGSS Player" || args[3] == "RGSS Player"
+					return 42
+				else
+					return 0
+				end
+			end
+		end
+
+		# Alias for FindWindowExA (same as FindWindowEx)
+		FindWindowExA = FindWindowEx
+
+		class GetForegroundWindow
+			def call(args)
+				return 42
+			end
+		end
+
+		class RegisterHotKey
+			def call(args)
+				return 1
+			end
+		end
+
+		class GetWindowThreadProcessId
+			def call(args)
+				# Write a fake process ID to output buffer
+				if args[1].is_a?(String) && args[1].length >= 4
+					memcpy_string(args[1], [1].pack('l'))
+				end
+				return 1  # Return thread ID
+			end
+		end
+	end
+
+	module Kernel32
+		class GetCurrentThreadId
+			def call(args)
+				return 1
+			end
+		end
 	end
 end
 
 def kappatalize(s)
-	s[0] = s[0].upcase
+	# Sanitize to a valid Ruby constant name: strip non-alphanumeric/underscore
+	# chars (e.g. "RGSS Linker" -> "RGSSLinker") and ensure first char is uppercase.
+	s = s.gsub(/[^A-Za-z0-9_]/, '')
+	s[0] = s[0, 1].upcase if s.length > 0
 	return s
 end
 
@@ -371,7 +421,7 @@ class Win32API
 	TOLERATE_ERRORS = true unless const_defined?("TOLERATE_ERRORS")
 	LOG_NATIVE = false unless const_defined?("LOG_NATIVE")
 
-	alias_method :mkxp_native_initialize, :initialize
+	alias_method :mkxp_native_initialize, :initialize unless method_defined?(:mkxp_native_initialize)
 	def initialize(dll, func, *args)
 		@dll = dll
 		@func = func
@@ -400,7 +450,7 @@ class Win32API
 
 	end
 
-	alias_method :mkxp_native_call, :call
+	alias_method :mkxp_native_call, :call unless method_defined?(:mkxp_native_call)
 	def call(*args)
 		if @mkxp_wrap_impl
 			return @mkxp_wrap_impl.call(args)
