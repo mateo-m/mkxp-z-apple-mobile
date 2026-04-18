@@ -52,7 +52,7 @@
 #include <TargetConditionals.h>
 #endif
 #if TARGET_OS_IPHONE
-#include "ios_bridge.h"
+#include "app_bridge.h"
 extern void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h);
 extern void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h);
 #endif
