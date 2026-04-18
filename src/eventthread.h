@@ -39,6 +39,8 @@
 
 struct RGSSThreadData;
 typedef struct MKXPZ_ALCDEVICE ALCdevice;
+struct ALCcontext_struct;
+typedef struct ALCcontext_struct ALCcontext;
 struct SDL_Window;
 union SDL_Event;
 
@@ -82,6 +84,9 @@ public:
     
 
 	static bool allocUserEvents();
+
+	/* Reset all input state arrays (for session transitions on iOS) */
+	static void resetAllInputStates();
 
 	EventThread();
     ~EventThread();
@@ -257,6 +262,7 @@ struct RGSSThreadData
 
 	SDL_Window *window;
 	ALCdevice *alcDev;
+	ALCcontext *alcCtx;
     
     SDL_GLContext glContext;
 
@@ -273,6 +279,7 @@ struct RGSSThreadData
 	               const char *argv0,
 	               SDL_Window *window,
 	               ALCdevice *alcDev,
+	               ALCcontext *alcCtx,
 	               int refreshRate,
                    int scalingFactor,
 	               const Config& newconf,
@@ -281,6 +288,7 @@ struct RGSSThreadData
 	      argv0(argv0),
 	      window(window),
 	      alcDev(alcDev),
+	      alcCtx(alcCtx),
 	      sizeResoRatio(1, 1),
 	      refreshRate(refreshRate),
           scale(scalingFactor),

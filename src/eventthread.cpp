@@ -48,6 +48,15 @@
 #include "al-util.h"
 #include "debugwriter.h"
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if TARGET_OS_IPHONE
+#include "ios_bridge.h"
+extern void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h);
+extern void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h);
+#endif
+
 #ifndef __APPLE__
 #include "util/string-util.h"
 #endif
@@ -130,12 +139,19 @@ showCursor(false)
     textInputLock = SDL_CreateMutex();
 }
 
+SDL_TimerID hideCursorTimerID = 0;
+
 EventThread::~EventThread()
 {
+    // Cancel any pending cursor-hide timer so its callback can't fire with
+    // a dangling `this` pointer after a session switch creates a new EventThread.
+    if (hideCursorTimerID) {
+        SDL_RemoveTimer(hideCursorTimerID);
+        hideCursorTimerID = 0;
+    }
     SDL_DestroyMutex(textInputLock);
 }
 
-SDL_TimerID hideCursorTimerID = 0;
 Uint32 cursorTimerCallback(Uint32 interval, void* param)
 {
 	EventThread *ethread = static_cast<EventThread*>(param);
@@ -270,7 +286,18 @@ void EventThread::process(RGSSThreadData &rtData)
                         winH = event.window.data2;
                         
                         int drwW, drwH;
+#if TARGET_OS_IPHONE
+                        // Use the refreshing variant so ANGLE's
+                        // CAMetalLayer drawableSize gets pushed to the
+                        // new orientation BEFORE we post to the RGSS
+                        // thread. Otherwise eglQuerySurface returns
+                        // stale pre-rotation pixel dims and
+                        // Graphics::checkResize computes a nonsense
+                        // backingScaleFactor / winSize / scOffset.
+                        mkxpGL_RefreshDrawableSize(win, &drwW, &drwH);
+#else
                         SDL_GL_GetDrawableSize(win, &drwW, &drwH);
+#endif
                         
                         windowSizeMsg.post(Vec2i(winW, winH));
                         drawableSizeMsg.post(Vec2i(drwW, drwH));
@@ -537,7 +564,9 @@ void EventThread::process(RGSSThreadData &rtData)
                         
                     case REQUEST_MESSAGEBOX :
                     {
-#ifndef __APPLE__
+#if TARGET_OS_IPHONE
+                        mkxp_setErrorMessage((const char*)event.user.data1);
+#elif !defined(__APPLE__)
                         // Try to format the message with additional newlines
                         std::string message = copyWithNewlines((const char*) event.user.data1,
                                                                70);
@@ -686,10 +715,19 @@ void EventThread::cleanup()
 
 void EventThread::resetInputStates()
 {
-    memset(&keyStates, 0, sizeof(keyStates));
-    memset(&controllerState, 0, sizeof(controllerState));
-    memset(&mouseState.buttons, 0, sizeof(mouseState.buttons));
-    memset(&touchState, 0, sizeof(touchState));
+	memset(&keyStates, 0, sizeof(keyStates));
+	memset(&controllerState, 0, sizeof(controllerState));
+	memset(&mouseState.buttons, 0, sizeof(mouseState.buttons));
+	memset(&touchState, 0, sizeof(touchState));
+}
+
+void EventThread::resetAllInputStates()
+{
+	memset(&keyStates, 0, sizeof(keyStates));
+	memset(&controllerState, 0, sizeof(controllerState));
+	memset(&mouseState, 0, sizeof(mouseState));
+	memset(&touchState, 0, sizeof(touchState));
+	SDL_AtomicSet(&verticalScrollDistance, 0);
 }
 
 void EventThread::setFullscreen(SDL_Window *win, bool mode)
