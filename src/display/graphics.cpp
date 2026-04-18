@@ -62,16 +62,18 @@
 #ifdef MKXPZ_HAS_ANGLE
 #include <atomic>
 #include <EGL/egl.h>
-#include "ios_bridge.h"
+#include "app_bridge.h"
 extern std::atomic<MKXPRenderer> s_currentRenderer;
 extern EGLDisplay s_eglDisplay;
 extern EGLSurface s_eglSurface;
 extern EGLContext s_eglContext;
 #else
-#include "ios_bridge.h"
+#include "app_bridge.h"
 static const MKXPRenderer s_currentRenderer = MKXP_RENDERER_OPENGL_ES;
 #endif
 #endif
+// Local copies of mkxpGL_SwapWindow / mkxpGL_MakeCurrent from main.cpp.
+// Duplicated because both TUs need static access to the ANGLE globals.
 static inline void graphicsGL_SwapWindow(SDL_Window *win) {
 #ifdef MKXPZ_HAS_ANGLE
     if (s_currentRenderer == MKXP_RENDERER_ANGLE) { eglSwapBuffers(s_eglDisplay, s_eglSurface); return; }
@@ -93,10 +95,6 @@ static inline void graphicsGL_MakeCurrent(SDL_Window *win, SDL_GLContext ctx) {
 #include <unistd.h>
 #include <time.h>
 #include <cmath>
-
-#if TARGET_OS_IPHONE
-#include "ios_bridge.h"
-#endif
 
 #define DEF_SCREEN_W (rgssVer == 1 ? 640 : 544)
 #define DEF_SCREEN_H (rgssVer == 1 ? 480 : 416)

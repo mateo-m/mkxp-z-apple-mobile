@@ -456,6 +456,25 @@ const unsigned char *mkxp_getSnapshotRGBA(int *width, int *height) {
     return s_snapshotData.data();
 }
 
+bool mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width, int *height) {
+    std::lock_guard<std::mutex> lock(s_snapshotMutex);
+    if (s_snapshotData.empty()) return false;
+    int size = (int)s_snapshotData.size();
+    if (destSize < size) return false;
+    memcpy(dest, s_snapshotData.data(), size);
+    if (width) *width = s_snapshotWidth;
+    if (height) *height = s_snapshotHeight;
+    return true;
+}
+
+bool mkxp_getSnapshotSize(int *width, int *height) {
+    std::lock_guard<std::mutex> lock(s_snapshotMutex);
+    if (s_snapshotData.empty()) return false;
+    if (width) *width = s_snapshotWidth;
+    if (height) *height = s_snapshotHeight;
+    return true;
+}
+
 void mkxp_setPausedCallback(mkxp_PausedCallback cb, void *userdata) {
     s_pausedCb.set(cb, userdata);
 }

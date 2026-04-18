@@ -48,17 +48,10 @@ static void closeMovie(THEORAPLAY_Io *io)
 Movie::Movie(bool skippable_)
 : skippable(skippable_)
 {
-    // All other members are default-initialized via NSDMI in movie.h.
-    // That matters on preparePlayback() early-abort paths where the
-    // destructor runs before hasAudio / audioMutex / alBuffers etc.
-    // would otherwise be assigned real values.
 }
 
 Movie::~Movie()
 {
-    // hasAudio starts false (NSDMI) and only becomes true once the
-    // audio path is fully set up, so this guard is sufficient to
-    // avoid freeing uninitialized AL handles on abort paths.
     if (hasAudio) {
         if (audioQueueTail) {
             THEORAPLAY_freeAudio(audioQueueTail->audio);
