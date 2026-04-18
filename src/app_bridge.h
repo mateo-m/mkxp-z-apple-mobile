@@ -199,10 +199,16 @@ void        mkxp_checkPause(void);
 bool        mkxp_isPauseRequested(void);
 bool        mkxp_isPaused(void);
 
-// Snapshot: RGBA pixel buffer captured before blocking. Valid until
-// next pause. The UI must NOT free this pointer.
+// Snapshot: RGBA pixel buffer captured before blocking.
 void        mkxp_setSnapshot(const unsigned char *data, int width, int height);
-const unsigned char *mkxp_getSnapshotRGBA(int *width, int *height);
+
+// Copy the snapshot into `dest` (must be at least width*height*4 bytes).
+// Returns true if a snapshot was available, false if empty.
+bool        mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width, int *height);
+
+// Returns the snapshot dimensions without copying. Use to pre-allocate
+// the buffer for mkxp_copySnapshotRGBA.
+bool        mkxp_getSnapshotSize(int *width, int *height);
 
 // Fires on engine thread when paused (snapshot captured, audio suspended).
 typedef void (*mkxp_PausedCallback)(void *userdata);

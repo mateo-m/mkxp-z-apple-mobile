@@ -468,12 +468,18 @@ static inline void rb_error_arity(int argc, int min, int max) {
 
 #if RAPI_MINOR < 9
 static inline VALUE rb_sprintf(const char *fmt, ...) {
-    va_list args;
+    va_list args, args2;
     va_start(args, fmt);
-    char buf[1024];
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_copy(args2, args);
+    int len = vsnprintf(nullptr, 0, fmt, args);
     va_end(args);
-    return rb_str_new2(buf);
+    if (len < 0) { va_end(args2); return rb_str_new2(""); }
+    char *buf = (char *)malloc(len + 1);
+    vsnprintf(buf, len + 1, fmt, args2);
+    va_end(args2);
+    VALUE str = rb_str_new(buf, len);
+    free(buf);
+    return str;
 }
 
 static inline VALUE rb_str_catf(VALUE obj, const char *fmt, ...) {

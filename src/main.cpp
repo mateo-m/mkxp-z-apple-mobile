@@ -39,7 +39,7 @@
 #include <regex>
 
 #if TARGET_OS_IPHONE
-#include "ios_bridge.h"
+#include "app_bridge.h"
 #include <CoreFoundation/CoreFoundation.h>
 #ifdef MKXPZ_HAS_ANGLE
 #include <EGL/egl.h>
@@ -111,6 +111,14 @@ static inline const char *glGetStringInt(GLenum name) {
   return (const char *)gl.GetString(name);
 }
 
+#ifdef GLES2_HEADER
+static void setGLES2Attributes() {
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+}
+#endif
+
 static void printGLInfo() {
     const std::string renderer(glGetStringInt(GL_RENDERER));
     const std::string version(glGetStringInt(GL_VERSION));
@@ -150,7 +158,7 @@ static SDL_GLContext initGL(SDL_Window *win, Config &conf,
  * return 0 (because SharedState::finiInstance deleted all game FBOs
  * and GL reverts the binding to 0), which is wrong on iOS. */
 #if TARGET_OS_IPHONE
-static GLuint s_iosScreenFBO = 0;
+static GLuint s_screenFBO = 0;
 // Atomic because the RGSS thread reads this every frame (swapGLBuffer,
 // makeCurrent) while the main thread writes it at startup and on
 // renderer hot-swap. Though both writes happen when the RGSS thread
@@ -246,7 +254,7 @@ int rgssThreadFun(void *userdata) {
   mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
 
   /* Set the screen framebuffer ID and reset the binding tracker. */
-  FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+  FBO::screenFramebufferID = FBO::ID(s_screenFBO);
   gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
   FBO::boundFramebufferID = FBO::screenFramebufferID;
 
@@ -258,7 +266,7 @@ int rgssThreadFun(void *userdata) {
   while (true) {
     /* Re-set FBO state for this session (SharedState::finiInstance
      * may have unbound it). */
-    FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+    FBO::screenFramebufferID = FBO::ID(s_screenFBO);
     gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
     FBO::boundFramebufferID = FBO::screenFramebufferID;
 
@@ -311,7 +319,7 @@ int rgssThreadFun(void *userdata) {
 
     /* Screen FBO may differ between renderers (EAGL uses a non-zero
      * FBO, ANGLE typically uses 0). */
-    FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+    FBO::screenFramebufferID = FBO::ID(s_screenFBO);
     gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
     FBO::boundFramebufferID = FBO::screenFramebufferID;
   }
@@ -566,9 +574,7 @@ int main(int argc, char *argv[]) {
     if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
         winFlags |= SDL_WINDOW_OPENGL;
 #ifdef GLES2_HEADER
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        setGLES2Attributes();
 #endif
     }
 
@@ -606,7 +612,7 @@ int main(int argc, char *argv[]) {
         Debug() << "Using" << mkxp_rendererName(s_currentRenderer);
 #endif
     } else {
-        persistGLCtx = initGL(persistWin, initConf, 0);
+        persistGLCtx = initGL(persistWin, initConf, nullptr);
         if (!persistGLCtx) {
             SDL_DestroyWindow(persistWin);
             return 0;
@@ -780,7 +786,7 @@ int main(int argc, char *argv[]) {
      * NOTE: GL context is held by the RGSS thread (which is blocked
      * on s_rgssSessionReady). Temporarily claim it here. */
     mkxpGL_MakeCurrent(persistWin, persistGLCtx);
-    gl.BindFramebuffer(GL_FRAMEBUFFER, s_iosScreenFBO);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, s_screenFBO);
     gl.ClearColor(0, 0, 0, 1);
     gl.Clear(GL_COLOR_BUFFER_BIT);
     mkxpGL_SwapWindow(persistWin);
@@ -817,9 +823,7 @@ int main(int argc, char *argv[]) {
         Uint32 newFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
         if (wantRenderer != MKXP_RENDERER_ANGLE) {
           newFlags |= SDL_WINDOW_OPENGL;
-          SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-          SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-          SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+          setGLES2Attributes();
         }
 
         SDL_SetHint(SDL_HINT_ORIENTATIONS,
@@ -853,7 +857,7 @@ int main(int argc, char *argv[]) {
           char swapBuf[256];
           snprintf(swapBuf, sizeof(swapBuf),
                    "Renderer swap complete - %s screenFBO:%u glCtx:%s",
-                   mkxp_rendererName(s_currentRenderer), s_iosScreenFBO,
+                   mkxp_rendererName(s_currentRenderer), s_screenFBO,
                    persistGLCtx ? "valid" : "NULL");
           mkxp_debugLog("HOTSWAP", "main.cpp", swapBuf);
         } else {
@@ -864,9 +868,7 @@ int main(int argc, char *argv[]) {
           Uint32 fallbackFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
           if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
             fallbackFlags |= SDL_WINDOW_OPENGL;
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            setGLES2Attributes();
           }
 
           persistWin = SDL_CreateWindow(
@@ -960,9 +962,7 @@ int main(int argc, char *argv[]) {
       winFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     
 #ifdef GLES2_HEADER
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  setGLES2Attributes();
 
     // LoadLibrary properly initializes EGL, it won't work otherwise.
     // Doesn't completely do it though, needs a small patch to SDL
@@ -1050,7 +1050,7 @@ int main(int argc, char *argv[]) {
     EventThread eventThread;
 
 #ifndef MKXPZ_INIT_GL_LATER
-    SDL_GLContext glCtx = initGL(win, conf, 0);
+    SDL_GLContext glCtx = initGL(win, conf, nullptr);
 #else
     SDL_GLContext glCtx = NULL;
 #endif
@@ -1217,7 +1217,7 @@ static bool initANGLE(SDL_Window *win) {
   // Capture screen FBO (may be 0 under ANGLE, unlike Apple's EAGL)
   GLint fbo = 0;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
-  s_iosScreenFBO = static_cast<GLuint>(fbo);
+  s_screenFBO = static_cast<GLuint>(fbo);
 
   try {
     initGLFunctions();
@@ -1279,7 +1279,7 @@ static SDL_GLContext initGL(SDL_Window *win, Config &conf,
   {
     GLint fbo = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
-    s_iosScreenFBO = static_cast<GLuint>(fbo);
+    s_screenFBO = static_cast<GLuint>(fbo);
   }
 #endif
 

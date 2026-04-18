@@ -63,13 +63,8 @@ struct MovieOpenHandler : FileSystem::OpenHandler
 
 struct Movie
 {
-    // Default member initializers so every field has a defined value
-    // even on error paths where preparePlayback() returns before
-    // touching them. The destructor reads hasAudio / audioMutex /
-    // audioQueue{Head,Tail} / audioSource / alBuffers unconditionally;
-    // if any were uninitialized, aborting on a bad movie file would
-    // produce UB (dereferencing garbage pointers or freeing bogus
-    // AL handles). See preparePlayback() early-abort paths.
+    // NSDMI: every field has a safe default so the destructor can run
+    // even on early-abort paths without touching uninitialized state.
     THEORAPLAY_Decoder *decoder = nullptr;
     const THEORAPLAY_AudioPacket *audio = nullptr;
     const THEORAPLAY_VideoFrame *video = nullptr;

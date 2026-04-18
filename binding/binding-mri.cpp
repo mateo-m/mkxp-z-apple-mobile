@@ -50,7 +50,7 @@
 #endif
 
 #if TARGET_OS_IPHONE
-#include "ios_bridge.h"
+#include "app_bridge.h"
 #endif
 #include "util/rapidcsv.h"
 
@@ -1046,7 +1046,7 @@ bool evalScript(VALUE string, const char *filename)
 
 #define SCRIPT_SECTION_FMT (rgssVer >= 3 ? "{%04ld}" : "Section%03ld")
 
-// Declared in ios_bridge.cpp - returns the debug log path set by the UI,
+// Declared in app_bridge.cpp - returns the debug log path set by the UI,
 // or empty string if debug logging is disabled.
 std::string mkxp_getDebugLogPath(void);
 extern "C" void mkxp_debugLog(const char *tag, const char *source, const char *message);
@@ -1183,11 +1183,12 @@ static void runRMXPScripts(BacktraceData &btData) {
                In Ruby 3.x, retry is only valid in rescue blocks.
                We replace retry with redo only when it's NOT inside a rescue block. */
             {
-                /* Simple heuristic: track begin/rescue/end nesting.
-                   If retry appears outside any rescue context, replace with redo. */
                 std::string result;
                 result.reserve(src.size());
-                int rescueDepth = 0;
+                /* Stack of block contexts: true = this block (or an ancestor)
+                   has entered a rescue section. We check any_of() so nested
+                   blocks inside rescue correctly inherit the rescue context. */
+                std::vector<bool> blockStack;
                 size_t pos = 0;
                 size_t len = src.size();
                 
@@ -1211,16 +1212,34 @@ static void runRMXPScripts(BacktraceData &btData) {
                         return true;
                     };
                     
+                    /* Block-opening keywords that close with `end` */
+                    bool pushed = false;
+                    for (const char *opener : {"begin", "def", "class", "module",
+                                               "if", "unless", "while", "until",
+                                               "for", "case", "do"}) {
+                        if (matchKeyword(opener)) {
+                            blockStack.push_back(false);
+                            size_t kwlen = strlen(opener);
+                            result.append(opener, kwlen);
+                            pos += kwlen;
+                            pushed = true;
+                            break;
+                        }
+                    }
+                    if (pushed) continue;
+                    
                     if (matchKeyword("rescue")) {
-                        rescueDepth++;
+                        if (!blockStack.empty()) blockStack.back() = true;
                         result += "rescue";
                         pos += 6;
                     } else if (matchKeyword("end")) {
-                        if (rescueDepth > 0) rescueDepth--;
+                        if (!blockStack.empty()) blockStack.pop_back();
                         result += "end";
                         pos += 3;
-                    } else if (matchKeyword("retry") && rescueDepth == 0) {
-                        result += "redo";
+                    } else if (matchKeyword("retry")) {
+                        bool inRescue = false;
+                        for (bool b : blockStack) { if (b) { inRescue = true; break; } }
+                        result += inRescue ? "retry" : "redo";
                         pos += 5;
                     } else {
                         result += src[pos++];
@@ -1247,11 +1266,11 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
 #endif /* RAPI_FULL > 187 - preprocessing */
     
-    /* Execute engine-bundled preload scripts (iOS compatibility layer) */
+    /* Execute engine-bundled preload scripts (platform compatibility layer) */
 #if TARGET_OS_IPHONE
     {
         const char *enginePreloads[] = {
-            "ios_compat",
+            "platform_compat",
             "pokemon_compat",
             "ruby_classic_wrap",
             "win32_wrap",
@@ -1720,8 +1739,11 @@ static void mriBindingExecute() {
          * the baseline, so it would be removed during constant cleanup. */
         VALUE nullMouseInstance = Qnil;
         {
-            VALUE mkxpNullMouseClass = rb_const_get(rb_cObject, rb_intern("MkxpNullMouse"));
-            nullMouseInstance = rb_class_new_instance(0, NULL, mkxpNullMouseClass);
+            ID mkxpNullMouseId = rb_intern("MkxpNullMouse");
+            if (rb_const_defined(rb_cObject, mkxpNullMouseId)) {
+                VALUE mkxpNullMouseClass = rb_const_get(rb_cObject, mkxpNullMouseId);
+                nullMouseInstance = rb_class_new_instance(0, NULL, mkxpNullMouseClass);
+            }
         }
 
         /* 1. Remove game-defined constants from Object.
