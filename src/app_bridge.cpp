@@ -1,7 +1,7 @@
-// ios_bridge.cpp — Minimal C bridge for iOS overlay to query engine state.
+// app_bridge.cpp - Minimal C bridge for host overlay to query engine state.
 // Kept separate from engine code. No UIKit imports. No game logic.
 
-#include "ios_bridge.h"
+#include "app_bridge.h"
 #include "sharedstate.h"
 #include "graphics.h"
 #include "audio.h"

@@ -1,5 +1,5 @@
-# ios_compat.rb
-# Engine-level iOS compatibility layer.
+# platform_compat.rb
+# Engine-level platform compatibility layer.
 # Auto-loaded before game scripts to ensure compatibility.
 # Game-specific patches live in separate files (e.g. pokemon_compat.rb).
 

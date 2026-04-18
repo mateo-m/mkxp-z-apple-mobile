@@ -32,7 +32,7 @@
 #if TARGET_OS_IPHONE
 #include <atomic>
 extern "C" int mkxp_getMetalMaxTextureSize(void);
-#include "ios_bridge.h"
+#include "app_bridge.h"
 extern std::atomic<MKXPRenderer> s_currentRenderer;
 #endif
 

@@ -1,11 +1,11 @@
 # pokemon_compat.rb
 # Compatibility patches for Pokemon Essentials / Pokemon fangames.
-# Separated from ios_compat.rb to keep engine-generic code clean.
+# Separated from platform_compat.rb to keep engine-generic code clean.
 
 # --- Uranium hard-reset prevention ---
 # Pokemon Uranium checks $game_exists on startup and calls
 # system('Uranium') + exit to relaunch itself. On iOS, system() is
-# neutralized (see ios_compat.rb), but we also clear the flag so the
+# neutralized (see platform_compat.rb), but we also clear the flag so the
 # hard-reset code path is never reached.
 $game_exists = nil
 

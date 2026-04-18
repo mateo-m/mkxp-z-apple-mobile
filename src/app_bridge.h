@@ -1,4 +1,4 @@
-// ios_bridge.h — C-linkage bridge between mkxp-z engine and iOS UI layer.
+// app_bridge.h - C-linkage bridge between mkxp-z engine and host UI layer.
 //
 // This header is the ONLY interface between the engine and the UI.
 // The UI side must not import any engine headers (SDL, SharedState, etc.).
@@ -151,7 +151,7 @@ float       mkxp_getScreenScale(void);
 //
 // To add a new setting:
 //   1. Add a parameter to mkxp_applyPerGameSettings()
-//   2. Add an atomic + getter in ios_bridge.cpp
+//   2. Add an atomic + getter in app_bridge.cpp
 //   3. Add the field to GameSettings.swift, pass from AppState.selectGame()
 
 typedef enum {
