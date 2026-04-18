@@ -118,6 +118,7 @@ namespace FBO
 	DEF_GL_ID
 
 	extern ID boundFramebufferID;
+	extern ID screenFramebufferID; // On iOS, the default FBO is not 0
 
 	inline ID gen()
 	{
@@ -140,7 +141,7 @@ namespace FBO
 
 	static inline void unbind()
 	{
-		bind(ID(0));
+		bind(screenFramebufferID);
 	}
 
 	static inline void setTarget(TEX::ID target, unsigned colorAttach = 0)
@@ -207,17 +208,27 @@ typedef struct GenericBO<GL_ELEMENT_ARRAY_BUFFER> IBO;
 #undef DEF_GL_ID
 
 /* Convenience struct wrapping a framebuffer
- * and a 2D texture as its target */
+ * and a 2D texture as its target.
+ *
+ * `generation` is the session counter at creation time. Caches that
+ * might receive a TEXFBO GC'd from a previous session compare it
+ * against the current generation and reject stale handles, preventing
+ * dead GL IDs from contaminating the new session's GL context. */
 struct TEXFBO
 {
 	TEX::ID tex;
 	FBO::ID fbo;
 	int width, height;
+	unsigned generation;
 
 	TEXFBO *selfHires;
 
+	// Incremented on each SharedState::initInstance. Used to detect GL
+	// handles that belong to a prior session's (possibly destroyed) context.
+	static unsigned currentGeneration;
+
 	TEXFBO()
-	    : tex(0), fbo(0), width(0), height(0), selfHires(nullptr)
+	    : tex(0), fbo(0), width(0), height(0), generation(0), selfHires(nullptr)
 	{}
 
 	bool operator==(const TEXFBO &other) const
@@ -229,6 +240,7 @@ struct TEXFBO
 	{
 		obj.tex = TEX::gen();
 		obj.fbo = FBO::gen();
+		obj.generation = currentGeneration;
 		TEX::bind(obj.tex);
 		TEX::setRepeat(false);
 		TEX::setSmooth(false);
