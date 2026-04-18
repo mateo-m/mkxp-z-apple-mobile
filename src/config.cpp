@@ -106,7 +106,14 @@ json::value readConfFile(const char *path) {
     
     try {
         std::string cfg = mkxp_fs::contentsOfFileAsString(path);
-        ret = json::parse5(Encoding::convertString(cfg));
+        std::string converted;
+        try {
+            converted = Encoding::convertString(cfg);
+        } catch (...) {
+            // If encoding detection fails, assume UTF-8 (the common case for mkxp.json)
+            converted = cfg;
+        }
+        ret = json::parse5(converted);
     }
     catch (const std::exception &e) {
         Debug() << "Failed to parse" << path << ":" << e.what();
