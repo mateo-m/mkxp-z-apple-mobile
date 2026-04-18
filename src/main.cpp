@@ -23,6 +23,8 @@
 #include "icon.png.xxd"
 #endif
 
+#include <atomic>
+
 #include <alc.h>
 
 #include <SDL.h>
@@ -36,13 +38,29 @@
 #include <unistd.h>
 #include <regex>
 
+#if TARGET_OS_IPHONE
+#include "ios_bridge.h"
+#include <CoreFoundation/CoreFoundation.h>
+#ifdef MKXPZ_HAS_ANGLE
+#include <EGL/egl.h>
+#include <SDL_syswm.h>
+#endif
+#else
+// Stubs so the LSP doesn't complain when TARGET_OS_IPHONE is undefined
+static inline const char *mkxp_waitForGamePath(void) { return ""; }
+static inline void mkxp_setEngineTerminated(void) {}
+static inline void mkxp_resetBridgeState(void) {}
+#endif
+
 #include "binding.h"
 #include "sharedstate.h"
 #include "eventthread.h"
+#include "display/graphics.h"
 #include "util/debugwriter.h"
 #include "util/exception.h"
 #include "display/gl/gl-debug.h"
 #include "display/gl/gl-fun.h"
+#include "display/gl/gl-util.h"
 
 #include "filesystem/filesystem.h"
 
@@ -68,8 +86,9 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 #ifdef MKXPZ_BUILD_XCODE
 #include <Availability.h>
+#include <TargetConditionals.h>
 #include "TouchBar.h"
-#if !defined(__MAC_10_15) || __MAC_OS_X_VERSION_MAX_ALLOWED < __MAC_10_15
+#if !TARGET_OS_IPHONE && (!defined(__MAC_10_15) || __MAC_OS_X_VERSION_MAX_ALLOWED < __MAC_10_15)
 #define MKXPZ_INIT_GL_LATER
 #endif
 #endif
@@ -82,6 +101,11 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
 static void showInitError(const std::string &msg);
+#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+static bool initANGLE(SDL_Window *win);
+static void teardownANGLE();
+extern "C" void *mkxp_getANGLENativeLayer(void *sdlWindow);
+#endif
 
 static inline const char *glGetStringInt(GLenum name) {
   return (const char *)gl.GetString(name);
@@ -103,18 +127,202 @@ static void printGLInfo() {
         if (std::regex_search(version, vmatches, std::regex("\\(ANGLE (.+) git hash: .+\\)"))) {
             Debug() << "ANGLE Version     :" << vmatches[1].str();
         }
-        return;
+    } else {
+      Debug() << "Backend      :" << "OpenGL";
+      Debug() << "GL Vendor    :" << glGetStringInt(GL_VENDOR);
+      Debug() << "GL Renderer  :" << renderer;
+      Debug() << "GL Version   :" << version;
+      Debug() << "GLSL Version :" << glGetStringInt(GL_SHADING_LANGUAGE_VERSION);
     }
-    
-  Debug() << "Backend      :" << "OpenGL";
-  Debug() << "GL Vendor    :" << glGetStringInt(GL_VENDOR);
-  Debug() << "GL Renderer  :" << renderer;
-  Debug() << "GL Version   :" << version;
-  Debug() << "GLSL Version :" << glGetStringInt(GL_SHADING_LANGUAGE_VERSION);
+
+    GLint maxTexSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexSize);
+    Debug() << "Max Tex Size :" << maxTexSize;
 }
 
 static SDL_GLContext initGL(SDL_Window *win, Config &conf,
                             RGSSThreadData *threadData);
+
+/* On iOS, the screen FBO is non-zero (SDL creates an FBO backed by
+ * CAEAGLLayer). This ID is captured once during initGL() and reused
+ * for all sessions, since the window and GL context persist.
+ * Re-querying GL_FRAMEBUFFER_BINDING on subsequent sessions would
+ * return 0 (because SharedState::finiInstance deleted all game FBOs
+ * and GL reverts the binding to 0), which is wrong on iOS. */
+#if TARGET_OS_IPHONE
+static GLuint s_iosScreenFBO = 0;
+// Atomic because the RGSS thread reads this every frame (swapGLBuffer,
+// makeCurrent) while the main thread writes it at startup and on
+// renderer hot-swap. Though both writes happen when the RGSS thread
+// is not actually running concurrently (init / session-boundary
+// semaphore), plain loads/stores on a non-atomic are UB under the
+// C++ memory model and the compiler may emit unsafe codegen.
+std::atomic<MKXPRenderer> s_currentRenderer{MKXP_RENDERER_OPENGL_ES};
+#ifdef MKXPZ_HAS_ANGLE
+EGLDisplay s_eglDisplay = EGL_NO_DISPLAY;
+EGLSurface s_eglSurface = EGL_NO_SURFACE;
+EGLContext s_eglContext = EGL_NO_CONTEXT;
+#endif
+#endif
+
+#if TARGET_OS_IPHONE
+// Wrappers that dispatch to EGL or SDL depending on renderer.
+static void mkxpGL_MakeCurrent(SDL_Window *win, SDL_GLContext ctx) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+        if (ctx)
+            eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
+        else
+            eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        return;
+    }
+#endif
+    SDL_GL_MakeCurrent(win, ctx);
+}
+
+static void mkxpGL_SwapWindow(SDL_Window *win) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+        eglSwapBuffers(s_eglDisplay, s_eglSurface);
+        return;
+    }
+#endif
+    SDL_GL_SwapWindow(win);
+}
+
+// SDL_GL_GetDrawableSize returns logical points under ANGLE (no SDL GL
+// context). Query the EGL surface for the real pixel dimensions instead.
+void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+        EGLint eglW = 0, eglH = 0;
+        eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_WIDTH, &eglW);
+        eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_HEIGHT, &eglH);
+        if (w) *w = eglW;
+        if (h) *h = eglH;
+        return;
+    }
+#endif
+    SDL_GL_GetDrawableSize(win, w, h);
+}
+
+#ifdef MKXPZ_HAS_ANGLE
+extern "C" void mkxp_refreshANGLENativeLayerSize(void *sdlWindow, int *outW, int *outH);
+#endif
+
+// Use at rotation / resize events. Under ANGLE, eglQuerySurface
+// returns a drawable size cached during the last obtainNextDrawable
+// call - i.e., last frame's pre-rotation dims. Instead of trusting
+// that cache, we drive the Metal layer update ourselves on the main
+// thread and return the resulting pixel size. Under OpenGL ES this
+// falls through to the normal query since SDL's EAGL view updates
+// its backing dims synchronously in layoutSubviews.
+void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+        mkxp_refreshANGLENativeLayerSize(win, w, h);
+        return;
+    }
+#endif
+    SDL_GL_GetDrawableSize(win, w, h);
+}
+#endif
+
+#if TARGET_OS_IPHONE
+/* Persistent RGSS thread for iOS.
+ * Ruby 1.8's VM has internal state (parser, symbol table, thread-local
+ * storage) bound to the thread that called ruby_init(). Creating a new
+ * thread for each game session causes crashes because the VM's stack
+ * boundaries and TLS references become stale.
+ * Solution: keep the RGSS thread alive across sessions. The main thread
+ * posts new RGSSThreadData via these shared variables. */
+static SDL_sem *s_rgssSessionReady = nullptr;   // main → RGSS: "new session available"
+static SDL_sem *s_rgssSessionDone  = nullptr;    // RGSS → main: "session finished"
+static RGSSThreadData *s_nextRTData = nullptr;   // the data for the next session
+
+int rgssThreadFun(void *userdata) {
+  RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
+
+  mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
+
+  /* Set the screen framebuffer ID and reset the binding tracker. */
+  FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
+  FBO::boundFramebufferID = FBO::screenFramebufferID;
+
+  /* AL context — persistent, just activate on this thread. */
+  ALCcontext *alcCtx = threadData->alcCtx;
+  alcMakeContextCurrent(alcCtx);
+
+  /* --- Session loop: runs on the SAME thread forever --- */
+  while (true) {
+    /* Re-set FBO state for this session (SharedState::finiInstance
+     * may have unbound it). */
+    FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
+    FBO::boundFramebufferID = FBO::screenFramebufferID;
+
+    try {
+      SharedState::initInstance(threadData);
+    } catch (const Exception &exc) {
+      rgssThreadError(threadData, exc.msg);
+      break;
+    }
+
+    mkxp_setGameReady();
+
+    /* Run game scripts */
+    scriptBinding->execute();
+
+    /* Detach disposables before destroying SharedState */
+    shState->graphics().detachAllDisposables();
+
+    threadData->rqTermAck.set();
+    threadData->ethread->requestTerminate();
+
+    /* Ensure the OpenAL context is current before tearing down Audio.
+     * mkxp_checkPause() never nulls the context, so this is a no-op
+     * in normal operation; kept as a safety net. */
+    alcMakeContextCurrent(alcCtx);
+
+    SharedState::finiInstance();
+
+    /* Release GL context so the main thread can safely claim or
+     * destroy it during a hot-swap. Deleting/reusing a context
+     * that's still current on another thread is undefined behavior. */
+    mkxpGL_MakeCurrent(threadData->window, NULL);
+
+    /* Signal main thread that session is done */
+    SDL_SemPost(s_rgssSessionDone);
+
+    /* Wait for the main thread to provide the next session's data.
+     * This blocks until main calls SDL_SemPost(s_rgssSessionReady). */
+    SDL_SemWait(s_rgssSessionReady);
+
+    /* Pick up the new RGSSThreadData */
+    threadData = s_nextRTData;
+    if (!threadData)
+      break; // null = quit
+
+    /* Reclaim the GL context for this thread. Required after a
+     * renderer hot-swap, where the old context was destroyed and
+     * a new one created on the main thread. */
+    mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
+
+    /* Screen FBO may differ between renderers (EAGL uses a non-zero
+     * FBO, ANGLE typically uses 0). */
+    FBO::screenFramebufferID = FBO::ID(s_iosScreenFBO);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
+    FBO::boundFramebufferID = FBO::screenFramebufferID;
+  }
+
+  alcMakeContextCurrent(NULL);
+  mkxpGL_MakeCurrent(threadData ? threadData->window : nullptr, NULL);
+
+  return 0;
+}
+
+#else // !TARGET_OS_IPHONE — original single-session thread
 
 int rgssThreadFun(void *userdata) {
   RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
@@ -128,12 +336,24 @@ int rgssThreadFun(void *userdata) {
   SDL_GL_MakeCurrent(threadData->window, threadData->glContext);
 #endif
 
-  /* Setup AL context */
-  ALCcontext *alcCtx = alcCreateContext(threadData->alcDev, 0);
+  /* Set the screen framebuffer ID and reset the binding tracker. */
+  {
+    /* On other platforms, query the real default framebuffer ID. */
+    GLint defaultFBO = 0;
+    gl.GetIntegerv(GL_FRAMEBUFFER_BINDING, &defaultFBO);
+    FBO::screenFramebufferID = FBO::ID(static_cast<GLuint>(defaultFBO));
+    gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
+    FBO::boundFramebufferID = FBO::screenFramebufferID;
+  }
+
+  ALCcontext *alcCtx = threadData->alcCtx;
 
   if (!alcCtx) {
-    rgssThreadError(threadData, "Error creating OpenAL context");
-    return 0;
+    alcCtx = alcCreateContext(threadData->alcDev, 0);
+    if (!alcCtx) {
+      rgssThreadError(threadData, "Error creating OpenAL context");
+      return 0;
+    }
   }
 
   alcMakeContextCurrent(alcCtx);
@@ -143,11 +363,9 @@ int rgssThreadFun(void *userdata) {
   } catch (const Exception &exc) {
     rgssThreadError(threadData, exc.msg);
     alcDestroyContext(alcCtx);
-
     return 0;
   }
 
-  /* Start script execution */
   scriptBinding->execute();
 
   threadData->rqTermAck.set();
@@ -159,6 +377,7 @@ int rgssThreadFun(void *userdata) {
 
   return 0;
 }
+#endif
 
 static void printRgssVersion(int ver) {
   const char *const makers[] = {"", "XP", "VX", "VX Ace"};
@@ -201,7 +420,77 @@ static void setupWindowIcon(const Config &conf, SDL_Window *win) {
   }
 }
 
+// Initialize SDL and its subsidiary libs in the order they depend on
+// each other: SDL core (video+controller+timer) -> user events ->
+// SDL_image -> SDL_ttf -> SDL_sound. If anything fails, tear down
+// the previous ones before returning false so the process leaves
+// no resources dangling even on init failure.
+//
+// Returns true on full success. On failure the caller should return
+// from main() - an error message box has already been shown via
+// showInitError().
+static bool initSDLLibs() {
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) < 0) {
+    showInitError(std::string("Error initializing SDL: ") + SDL_GetError());
+    return false;
+  }
+
+  if (!EventThread::allocUserEvents()) {
+    showInitError("Error allocating SDL user events");
+    SDL_Quit();
+    return false;
+  }
+
+  const int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+  if (IMG_Init(imgFlags) != imgFlags) {
+    showInitError(std::string("Error initializing SDL_image: ") + SDL_GetError());
+    SDL_Quit();
+    return false;
+  }
+
+  if (TTF_Init() < 0) {
+    showInitError(std::string("Error initializing SDL_ttf: ") + SDL_GetError());
+    IMG_Quit();
+    SDL_Quit();
+    return false;
+  }
+
+  if (Sound_Init() == 0) {
+    showInitError(std::string("Error initializing SDL_sound: ") + Sound_GetError());
+    TTF_Quit();
+    IMG_Quit();
+    SDL_Quit();
+    return false;
+  }
+
+  return true;
+}
+
+// Reverse order of initSDLLibs. Safe to call even if only some libs
+// were initialized (each *_Quit is idempotent-ish; SDL_sound's Quit
+// is Sound_Quit).
+static void shutdownSDLLibs() {
+  Sound_Quit();
+  TTF_Quit();
+  IMG_Quit();
+  SDL_Quit();
+}
+
 int main(int argc, char *argv[]) {
+  try {
+
+#if TARGET_OS_IPHONE
+    // --- FIRST LAUNCH: wait for Library UI before SDL_Init ---
+    // SDL_Init creates an OpenGL window that would cover the Library UI,
+    // so we wait for the user to pick a game first.
+    char dataDir[512]{};
+    const char *selectedPath = mkxp_waitForGamePath();
+    if (selectedPath && selectedPath[0]) {
+        // snprintf always null-terminates, unlike strncpy.
+        snprintf(dataDir, sizeof(dataDir), "%s", selectedPath);
+    }
+#endif
+
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 
@@ -211,32 +500,433 @@ int main(int argc, char *argv[]) {
 
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
 
-    /* initialize SDL first */
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) < 0) {
-      showInitError(std::string("Error initializing SDL: ") + SDL_GetError());
-      return 0;
-    }
-
-    if (!EventThread::allocUserEvents()) {
-      showInitError("Error allocating SDL user events");
+    if (!initSDLLibs()) {
+#ifdef MKXPZ_STEAM
+      STEAMSHIM_deinit();
+#endif
       return 0;
     }
 
 #ifndef WORKDIR_CURRENT
+#if !TARGET_OS_IPHONE
     char dataDir[512]{};
+#endif
 #if defined(__linux__)
     char *tmp{};
     tmp = getenv("SRCDIR");
     if (tmp) {
-      strncpy(dataDir, tmp, sizeof(dataDir));
+      snprintf(dataDir, sizeof(dataDir), "%s", tmp);
     }
 #endif
     if (!dataDir[0]) {
-        strncpy(dataDir, mkxp_fs::getDefaultGameRoot().c_str(), sizeof(dataDir));
+        snprintf(dataDir, sizeof(dataDir), "%s", mkxp_fs::getDefaultGameRoot().c_str());
     }
-    mkxp_fs::setCurrentDirectory(dataDir);
+    bool cwdOk = mkxp_fs::setCurrentDirectory(dataDir);
+    (void)cwdOk;
 #endif
-    
+
+#ifdef MKXPZ_STEAM
+    if (!STEAMSHIM_init()) {
+      showInitError("Failed to initialize Steamworks. The application cannot "
+                    "continue launching.");
+      shutdownSDLLibs();
+      return 0;
+    }
+#endif
+
+#if defined(__WIN32__)
+    WSAData wsadata = {0};
+    if (WSAStartup(0x101, &wsadata) || wsadata.wVersion != 0x101) {
+      char buf[200];
+      snprintf(buf, sizeof(buf), "Error initializing winsock: %08X",
+               WSAGetLastError());
+      showInitError(std::string(buf));
+    }
+#endif
+
+    // ================================================================
+    // iOS: Create persistent window, GL context, and AL device ONCE.
+    // These survive across game sessions to avoid GL context issues.
+    // ================================================================
+#if TARGET_OS_IPHONE
+    // Set working directory for the first game (needed to read Config)
+    mkxp_fs::setCurrentDirectory(dataDir);
+
+    /* Read initial config to get window title/size (Config is re-read
+     * per session, but we need one now for window creation). */
+    Config initConf;
+    initConf.read(argc, argv);
+
+#ifdef MKXPZ_HAS_ANGLE
+    s_currentRenderer.store(mkxp_getSelectedRenderer(), std::memory_order_release);
+#endif
+
+    Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
+
+    if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
+        winFlags |= SDL_WINDOW_OPENGL;
+#ifdef GLES2_HEADER
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
+    }
+
+    /* Allow all orientations. Without this, SDL infers supported
+     * orientations from the window w/h: a landscape-shaped game
+     * (e.g. 640x480) would lock the window to landscape only,
+     * preventing portrait gameplay. */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS,
+                "Portrait LandscapeLeft LandscapeRight");
+
+    SDL_Window *persistWin = SDL_CreateWindow(
+        initConf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
+        SDL_WINDOWPOS_UNDEFINED, initConf.defScreenW,
+        initConf.defScreenH, winFlags);
+
+    if (!persistWin) {
+      showInitError(std::string("Error creating window: ") + SDL_GetError());
+      return 0;
+    }
+
+    SDL_GLContext persistGLCtx = nullptr;
+
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+#ifdef MKXPZ_HAS_ANGLE
+        if (!initANGLE(persistWin)) {
+            SDL_DestroyWindow(persistWin);
+            return 0;
+        }
+        // Use the EGL context pointer as a non-null sentinel so
+        // mkxpGL_MakeCurrent can distinguish bind from unbind.
+        persistGLCtx = (SDL_GLContext)s_eglContext;
+        // Release from main thread — the RGSS thread will claim it.
+        // EGL contexts can only be current on one thread at a time.
+        mkxpGL_MakeCurrent(persistWin, NULL);
+        Debug() << "Using" << mkxp_rendererName(s_currentRenderer);
+#endif
+    } else {
+        persistGLCtx = initGL(persistWin, initConf, 0);
+        if (!persistGLCtx) {
+            SDL_DestroyWindow(persistWin);
+            return 0;
+        }
+        Debug() << "Using" << mkxp_rendererName(s_currentRenderer);
+    }
+
+    ALCdevice *persistAlcDev = alcOpenDevice(0);
+    if (!persistAlcDev) {
+      showInitError("Could not detect an available audio device.");
+      if (persistGLCtx) SDL_GL_DeleteContext(persistGLCtx);
+      SDL_DestroyWindow(persistWin);
+      return 0;
+    }
+
+    ALCcontext *persistAlcCtx = alcCreateContext(persistAlcDev, 0);
+    if (persistAlcCtx)
+      alcMakeContextCurrent(persistAlcCtx);
+
+    SDL_DisplayMode mode;
+    SDL_GetDisplayMode(0, 0, &mode);
+
+    // ================================================================
+    // Game session loop — persistent RGSS thread
+    // ================================================================
+    s_rgssSessionReady = SDL_CreateSemaphore(0);
+    s_rgssSessionDone  = SDL_CreateSemaphore(0);
+    SDL_Thread *rgssThread = nullptr;
+    bool firstSession = true;
+    while (true) {
+    // On subsequent sessions, wait for the library to provide a new game path
+    if (!firstSession) {
+        mkxp_setEngineTerminated();
+        EventThread::resetAllInputStates();
+        const char *nextPath = mkxp_waitForGamePath();
+        if (nextPath && nextPath[0]) {
+            snprintf(dataDir, sizeof(dataDir), "%s", nextPath);
+        } else {
+            break; // empty path = quit
+        }
+        // Reset bridge state AFTER copying the path, so the UI has had time
+        // to observe mkxp_isEngineTerminated() during mkxp_waitForGamePath().
+        mkxp_resetBridgeState();
+
+        // Set working directory to the selected game
+        mkxp_fs::setCurrentDirectory(dataDir);
+    }
+    firstSession = false;
+
+    /* Read the game's config */
+    Config conf;
+    conf.read(argc, argv);
+
+    if (conf.windowTitle.empty())
+      conf.windowTitle = conf.game.title;
+
+    assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
+    printRgssVersion(conf.rgssVersion);
+
+    /* Update the persistent window for this game session */
+    SDL_SetWindowTitle(persistWin, conf.windowTitle.c_str());
+
+    if (!mode.refresh_rate)
+      conf.syncToRefreshrate = false;
+
+    EventThread eventThread;
+
+    RGSSThreadData rtData(&eventThread, argv[0], persistWin, persistAlcDev,
+                          persistAlcCtx, mode.refresh_rate,
+                          mkxp_sys::getScalingFactor(), conf, persistGLCtx);
+
+    int winW, winH, drwW, drwH;
+    SDL_GetWindowSize(persistWin, &winW, &winH);
+    rtData.windowSizeMsg.post(Vec2i(winW, winH));
+
+    mkxpGL_GetDrawableSize(persistWin, &drwW, &drwH);
+    rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
+
+    /* Load and post key bindings */
+    rtData.bindingUpdateMsg.post(loadBindings(conf));
+
+    /* Drain stale events (especially SDL_QUIT) left over from the
+     * previous session so the event loop doesn't exit immediately. */
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+
+    if (!rgssThread) {
+        /* First session: create the persistent RGSS thread.
+         * Use 16 MB stack for Ruby 1.8's GC stack scanning. */
+        rgssThread = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
+                                                   16 * 1024 * 1024, &rtData);
+    } else {
+        /* Subsequent sessions: signal the persistent RGSS thread
+         * with the new session data. */
+        s_nextRTData = &rtData;
+        SDL_SemPost(s_rgssSessionReady);
+    }
+
+    /* Start event processing (blocks until game ends) */
+    eventThread.process(rtData);
+
+    /* Request RGSS thread to stop */
+    rtData.rqTerm.set();
+
+    /* Wait for RGSS thread to finish THIS session (not the thread itself).
+     * The thread stays alive, waiting for the next session.
+     * On iOS, pump the run loop so SwiftUI can render (e.g. transition
+     * back to library after an error alert). SDL_Delay alone blocks
+     * the main thread and freezes the UI. */
+    for (int i = 0; i < 1000; ++i) {
+      if (rtData.rqTermAck) {
+        Debug() << "RGSS thread ack'd request after" << i * 10 << "ms";
+        break;
+      }
+#if TARGET_OS_IPHONE
+      CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+#else
+      SDL_Delay(10);
+#endif
+    }
+
+    if (rtData.rqTermAck) {
+        /* Wait for the RGSS thread to finish cleanup (SharedState::finiInstance)
+         * before we proceed. It will post s_rgssSessionDone then block on
+         * s_rgssSessionReady.
+         * On iOS, use non-blocking SemTryWait + run loop pump so the
+         * UI stays responsive during teardown. */
+#if TARGET_OS_IPHONE
+        while (SDL_SemTryWait(s_rgssSessionDone) != 0) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+        }
+#else
+        SDL_SemWait(s_rgssSessionDone);
+#endif
+    } else {
+#if TARGET_OS_IPHONE
+      // The RGSS thread is still running (probably in an infinite loop)
+      // and never called checkShutdown(). Our single-reused-thread
+      // architecture cannot respawn a new VM while the old one is
+      // blocked, so the only safe recovery is to force-quit the app.
+      // Mark the state and post the alert; the UI will terminate the
+      // process when the user taps OK.
+      mkxp_setEngineHung();
+      // Intentionally generic - by the time this alert is seen, the
+      // user may have already selected a different game in the Library.
+      // Referring to the stuck game by title would confuse them.
+      mkxp_setErrorMessage(
+          "The previous game stopped responding. The app will now close.");
+#else
+      SDL_ShowSimpleMessageBox(
+          SDL_MESSAGEBOX_ERROR, conf.game.title.c_str(),
+          std::string("The RGSS script seems to be stuck. "+conf.game.title+" will now force quit.").c_str(),
+          persistWin);
+#endif
+    }
+
+    if (!rtData.rgssErrorMsg.empty()) {
+      Debug() << rtData.rgssErrorMsg;
+#if TARGET_OS_IPHONE
+      mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
+#else
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, conf.game.title.c_str(),
+                               rtData.rgssErrorMsg.c_str(), persistWin);
+#endif
+    }
+
+    /* Clean up any remaining events */
+    eventThread.cleanup();
+
+    /* Clear the framebuffer to black so the next session doesn't
+     * briefly flash the last frame of the previous session.
+     * NOTE: GL context is held by the RGSS thread (which is blocked
+     * on s_rgssSessionReady). Temporarily claim it here. */
+    mkxpGL_MakeCurrent(persistWin, persistGLCtx);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, s_iosScreenFBO);
+    gl.ClearColor(0, 0, 0, 1);
+    gl.Clear(GL_COLOR_BUFFER_BIT);
+    mkxpGL_SwapWindow(persistWin);
+    mkxpGL_MakeCurrent(persistWin, NULL);
+
+    Debug() << "Game session ended.";
+
+#ifdef MKXPZ_HAS_ANGLE
+    /* Hot-swap renderer if the user changed the setting between sessions.
+     * The SDL window must be destroyed and recreated because SDL bakes
+     * the layer type (CAEAGLLayer vs plain CALayer) at creation time
+     * based on the SDL_WINDOW_OPENGL flag. */
+    {
+      MKXPRenderer wantRenderer = mkxp_getSelectedRenderer();
+      if (wantRenderer != s_currentRenderer) {
+        Debug() << "Renderer change requested:"
+                << mkxp_rendererName(s_currentRenderer)
+                << "->"
+                << mkxp_rendererName(wantRenderer);
+
+        /* Tear down current renderer */
+        if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+          teardownANGLE();
+        } else if (persistGLCtx) {
+          SDL_GL_DeleteContext(persistGLCtx);
+          persistGLCtx = nullptr;
+        }
+
+        /* Destroy old window — layer type can't be changed after creation */
+        SDL_DestroyWindow(persistWin);
+        persistWin = nullptr;
+
+        /* Recreate window with correct flags */
+        Uint32 newFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
+        if (wantRenderer != MKXP_RENDERER_ANGLE) {
+          newFlags |= SDL_WINDOW_OPENGL;
+          SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+          SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+          SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+        }
+
+        SDL_SetHint(SDL_HINT_ORIENTATIONS,
+                     "Portrait LandscapeLeft LandscapeRight");
+
+        persistWin = SDL_CreateWindow(
+            conf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
+            SDL_WINDOWPOS_UNDEFINED, conf.defScreenW,
+            conf.defScreenH, newFlags);
+
+        if (!persistWin) {
+          Debug() << "Failed to recreate window for renderer swap:"
+                  << SDL_GetError();
+          /* Fatal — can't continue without a window */
+          break;
+        }
+
+        /* Init new renderer */
+        bool swapOK = false;
+        if (wantRenderer == MKXP_RENDERER_ANGLE) {
+          swapOK = initANGLE(persistWin);
+          if (swapOK)
+            persistGLCtx = (SDL_GLContext)s_eglContext;
+        } else {
+          persistGLCtx = initGL(persistWin, conf, nullptr);
+          swapOK = (persistGLCtx != nullptr);
+        }
+
+        if (swapOK) {
+          s_currentRenderer.store(wantRenderer, std::memory_order_release);
+          char swapBuf[256];
+          snprintf(swapBuf, sizeof(swapBuf),
+                   "Renderer swap complete - %s screenFBO:%u glCtx:%s",
+                   mkxp_rendererName(s_currentRenderer), s_iosScreenFBO,
+                   persistGLCtx ? "valid" : "NULL");
+          mkxp_debugLog("HOTSWAP", "main.cpp", swapBuf);
+        } else {
+          /* Swap failed — recreate with the old renderer */
+          Debug() << "Renderer swap failed, reverting...";
+          SDL_DestroyWindow(persistWin);
+
+          Uint32 fallbackFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
+          if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
+            fallbackFlags |= SDL_WINDOW_OPENGL;
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+          }
+
+          persistWin = SDL_CreateWindow(
+              conf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
+              SDL_WINDOWPOS_UNDEFINED, conf.defScreenW,
+              conf.defScreenH, fallbackFlags);
+
+          if (!persistWin) {
+            Debug() << "Failed to recreate fallback window — fatal";
+            break;
+          }
+
+          if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+            if (!initANGLE(persistWin)) {
+              Debug() << "Failed to reinit ANGLE — fatal";
+              break;
+            }
+            persistGLCtx = (SDL_GLContext)s_eglContext;
+          } else {
+            persistGLCtx = initGL(persistWin, conf, nullptr);
+            if (!persistGLCtx) {
+              Debug() << "Failed to reinit OpenGL ES — fatal";
+              break;
+            }
+          }
+          Debug() << "Reverted to" << mkxp_rendererName(s_currentRenderer);
+        }
+
+        /* Release GL — the RGSS thread will reclaim it */
+        mkxpGL_MakeCurrent(persistWin, NULL);
+      }
+    }
+#endif
+
+    continue;
+    } // end while(true) game session loop
+
+    /* Signal the RGSS thread to exit */
+    s_nextRTData = nullptr;
+    SDL_SemPost(s_rgssSessionReady);
+    SDL_WaitThread(rgssThread, 0);
+    SDL_DestroySemaphore(s_rgssSessionReady);
+    SDL_DestroySemaphore(s_rgssSessionDone);
+
+    /* Cleanup persistent resources (unreachable in normal flow,
+     * but good form in case we ever break out of the loop) */
+    if (persistGLCtx)
+      SDL_GL_DeleteContext(persistGLCtx);
+    alcMakeContextCurrent(NULL);
+    if (persistAlcCtx)
+      alcDestroyContext(persistAlcCtx);
+    alcCloseDevice(persistAlcDev);
+    SDL_DestroyWindow(persistWin);
+
+#else // !TARGET_OS_IPHONE — original single-session flow
+
+    // ================================================================
+    // Non-iOS: single-pass flow (no session loop)
+    // ================================================================
+
     /* now we load the config */
     Config conf;
     conf.read(argc, argv);
@@ -255,70 +945,11 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-#ifdef MKXPZ_STEAM
-    if (!STEAMSHIM_init()) {
-      showInitError("Failed to initialize Steamworks. The application cannot "
-                    "continue launching.");
-      SDL_Quit();
-      return 0;
-    }
-#endif
-
     if (conf.windowTitle.empty())
       conf.windowTitle = conf.game.title;
 
     assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
     printRgssVersion(conf.rgssVersion);
-
-    int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
-    if (IMG_Init(imgFlags) != imgFlags) {
-      showInitError(std::string("Error initializing SDL_image: ") +
-                    SDL_GetError());
-      SDL_Quit();
-
-#ifdef MKXPZ_STEAM
-      STEAMSHIM_deinit();
-#endif
-
-      return 0;
-    }
-
-    if (TTF_Init() < 0) {
-      showInitError(std::string("Error initializing SDL_ttf: ") +
-                    SDL_GetError());
-      IMG_Quit();
-      SDL_Quit();
-
-#ifdef MKXPZ_STEAM
-      STEAMSHIM_deinit();
-#endif
-
-      return 0;
-    }
-
-    if (Sound_Init() == 0) {
-      showInitError(std::string("Error initializing SDL_sound: ") +
-                    Sound_GetError());
-      TTF_Quit();
-      IMG_Quit();
-      SDL_Quit();
-
-#ifdef MKXPZ_STEAM
-      STEAMSHIM_deinit();
-#endif
-
-      return 0;
-    }
-#if defined(__WIN32__)
-    WSAData wsadata = {0};
-    if (WSAStartup(0x101, &wsadata) || wsadata.wVersion != 0x101) {
-      char buf[200];
-      snprintf(buf, sizeof(buf), "Error initializing winsock: %08X",
-               WSAGetLastError());
-      showInitError(
-          std::string(buf)); // Not an error worth ending the program over
-    }
-#endif
 
     SDL_Window *win;
     Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
@@ -335,7 +966,7 @@ int main(int argc, char *argv[]) {
 
     // LoadLibrary properly initializes EGL, it won't work otherwise.
     // Doesn't completely do it though, needs a small patch to SDL
-#ifdef MKXPZ_BUILD_XCODE
+#if defined(MKXPZ_BUILD_XCODE) && !TARGET_OS_IPHONE
     SDL_setenv("ANGLE_DEFAULT_PLATFORM", (conf.preferMetalRenderer) ? "metal" : "opengl", true);
     SDL_GL_LoadLibrary("@rpath/libEGL.dylib");
 #endif
@@ -347,14 +978,13 @@ int main(int argc, char *argv[]) {
 
     if (!win) {
       showInitError(std::string("Error creating window: ") + SDL_GetError());
-
 #ifdef MKXPZ_STEAM
       STEAMSHIM_deinit();
 #endif
       return 0;
     }
     
-#ifdef MKXPZ_BUILD_XCODE
+#if defined(MKXPZ_BUILD_XCODE) && !TARGET_OS_IPHONE
     {
         std::string downloadsPath = "/Users/" + mkxp_sys::getUserName() + "/Downloads";
         
@@ -399,15 +1029,16 @@ int main(int argc, char *argv[]) {
     if (!alcDev) {
       showInitError("Could not detect an available audio device.");
       SDL_DestroyWindow(win);
-      TTF_Quit();
-      IMG_Quit();
-      SDL_Quit();
-
+      shutdownSDLLibs();
 #ifdef MKXPZ_STEAM
       STEAMSHIM_deinit();
 #endif
       return 0;
     }
+
+    ALCcontext *alcCtx = alcCreateContext(alcDev, 0);
+    if (alcCtx)
+      alcMakeContextCurrent(alcCtx);
 
     SDL_DisplayMode mode;
     SDL_GetDisplayMode(0, 0, &mode);
@@ -424,14 +1055,14 @@ int main(int argc, char *argv[]) {
     SDL_GLContext glCtx = NULL;
 #endif
 
-    RGSSThreadData rtData(&eventThread, argv[0], win, alcDev, mode.refresh_rate,
+    RGSSThreadData rtData(&eventThread, argv[0], win, alcDev, alcCtx, mode.refresh_rate,
                           mkxp_sys::getScalingFactor(), conf, glCtx);
 
     int winW, winH, drwW, drwH;
     SDL_GetWindowSize(win, &winW, &winH);
     rtData.windowSizeMsg.post(Vec2i(winW, winH));
     
-    SDL_GL_GetDrawableSize(win, &drwW, &drwH);
+    mkxpGL_GetDrawableSize(win, &drwW, &drwH);
     rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
 
     /* Load and post key bindings */
@@ -482,13 +1113,20 @@ int main(int argc, char *argv[]) {
     if (rtData.glContext)
       SDL_GL_DeleteContext(rtData.glContext);
 
-    /* Clean up any remainin events */
+    /* Clean up any remaining events */
     eventThread.cleanup();
 
-    Debug() << "Shutting down.";
+    Debug() << "Game session ended.";
 
+    alcMakeContextCurrent(NULL);
+    if (alcCtx)
+      alcDestroyContext(alcCtx);
     alcCloseDevice(alcDev);
     SDL_DestroyWindow(win);
+
+#endif // TARGET_OS_IPHONE
+
+    Debug() << "Shutting down.";
 
 #if defined(__WIN32__)
     if (wsadata.wVersion)
@@ -498,13 +1136,124 @@ int main(int argc, char *argv[]) {
 #ifdef MKXPZ_STEAM
     STEAMSHIM_deinit();
 #endif
-    Sound_Quit();
-    TTF_Quit();
-    IMG_Quit();
-    SDL_Quit();
+    shutdownSDLLibs();
 
     return 0;
+  } catch (const Exception &exc) {
+    Debug() << "FATAL uncaught Exception:" << exc.msg;
+    return 1;
+  } catch (const std::exception &e) {
+    Debug() << "FATAL uncaught std::exception:" << e.what();
+    return 1;
+  } catch (...) {
+    Debug() << "FATAL unknown exception caught";
+    return 1;
+  }
 }
+
+#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+static bool initANGLE(SDL_Window *win) {
+  s_eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  if (s_eglDisplay == EGL_NO_DISPLAY) {
+    showInitError("ANGLE: eglGetDisplay failed");
+    return false;
+  }
+
+  EGLint major, minor;
+  if (!eglInitialize(s_eglDisplay, &major, &minor)) {
+    showInitError("ANGLE: eglInitialize failed");
+    return false;
+  }
+  Debug() << "ANGLE: EGL" << major << "." << minor;
+
+  EGLint configAttribs[] = {
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
+    EGL_RED_SIZE,        8,
+    EGL_GREEN_SIZE,      8,
+    EGL_BLUE_SIZE,       8,
+    EGL_ALPHA_SIZE,      8,
+    EGL_DEPTH_SIZE,      0,
+    EGL_STENCIL_SIZE,    0,
+    EGL_NONE
+  };
+  EGLConfig eglConfig;
+  EGLint numConfigs;
+  if (!eglChooseConfig(s_eglDisplay, configAttribs, &eglConfig, 1, &numConfigs) || numConfigs == 0) {
+    showInitError("ANGLE: eglChooseConfig failed");
+    return false;
+  }
+
+  // Upstream ANGLE's Metal backend expects a CALayer* as native window
+  EGLNativeWindowType nativeWindow = (EGLNativeWindowType)mkxp_getANGLENativeLayer(win);
+  if (!nativeWindow) {
+    showInitError("ANGLE: failed to get native layer from SDL window");
+    return false;
+  }
+
+  s_eglSurface = eglCreateWindowSurface(s_eglDisplay, eglConfig, nativeWindow, NULL);
+  if (s_eglSurface == EGL_NO_SURFACE) {
+    showInitError("ANGLE: eglCreateWindowSurface failed");
+    return false;
+  }
+
+  EGLint contextAttribs[] = {
+    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_NONE
+  };
+  s_eglContext = eglCreateContext(s_eglDisplay, eglConfig, EGL_NO_CONTEXT, contextAttribs);
+  if (s_eglContext == EGL_NO_CONTEXT) {
+    showInitError("ANGLE: eglCreateContext failed");
+    return false;
+  }
+
+  if (!eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext)) {
+    showInitError("ANGLE: eglMakeCurrent failed");
+    return false;
+  }
+
+  glGetProcAddressOverride = (GLGetProcAddressFunc)eglGetProcAddress;
+
+  // Capture screen FBO (may be 0 under ANGLE, unlike Apple's EAGL)
+  GLint fbo = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  s_iosScreenFBO = static_cast<GLuint>(fbo);
+
+  try {
+    initGLFunctions();
+  } catch (const Exception &exc) {
+    showInitError(exc.msg);
+    return false;
+  }
+
+  gl.ClearColor(0, 0, 0, 1);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  eglSwapBuffers(s_eglDisplay, s_eglSurface);
+
+  printGLInfo();
+
+  eglSwapInterval(s_eglDisplay, 1);
+
+  return true;
+}
+
+static void teardownANGLE() {
+  eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  if (s_eglContext != EGL_NO_CONTEXT) {
+    eglDestroyContext(s_eglDisplay, s_eglContext);
+    s_eglContext = EGL_NO_CONTEXT;
+  }
+  if (s_eglSurface != EGL_NO_SURFACE) {
+    eglDestroySurface(s_eglDisplay, s_eglSurface);
+    s_eglSurface = EGL_NO_SURFACE;
+  }
+  if (s_eglDisplay != EGL_NO_DISPLAY) {
+    eglTerminate(s_eglDisplay);
+    s_eglDisplay = EGL_NO_DISPLAY;
+  }
+  glGetProcAddressOverride = nullptr;
+}
+#endif
 
 static SDL_GLContext initGL(SDL_Window *win, Config &conf,
                             RGSSThreadData *threadData) {
@@ -522,6 +1271,17 @@ static SDL_GLContext initGL(SDL_Window *win, Config &conf,
     GLINIT_SHOWERROR(std::string("Could not create OpenGL context: ") + SDL_GetError());
     return 0;
   }
+
+#if TARGET_OS_IPHONE
+  /* Capture the screen FBO right after context creation, while SDL's
+   * CAEAGLLayer-backed FBO is still bound. This value persists for the
+   * lifetime of the window and is reused by all game sessions. */
+  {
+    GLint fbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+    s_iosScreenFBO = static_cast<GLuint>(fbo);
+  }
+#endif
 
   try {
     initGLFunctions();
