@@ -1412,7 +1412,7 @@ static void runRMXPScripts(BacktraceData &btData) {
 
             {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-                extern thread_local int mkxp_syntax_transform_next_eval;
+                extern __thread int mkxp_syntax_transform_next_eval;
                 struct SyntaxTransformGuard {
                     SyntaxTransformGuard() {
                         mkxp_syntax_transform_next_eval = 1;
