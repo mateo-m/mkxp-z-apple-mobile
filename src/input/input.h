@@ -105,6 +105,8 @@ public:
     const char *getControllerName();
     int getControllerPowerLevel();
     
+    int asyncKeyState(int vKey);
+    
     bool getTextInputMode();
     void setTextInputMode(bool mode);
     const char *getText();

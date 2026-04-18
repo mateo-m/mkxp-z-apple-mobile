@@ -1544,6 +1544,37 @@ const char *Input::getButtonName(SDL_GameControllerButton button) {
     return buttonNames[button];
 }
 
+/* Reads key state DIRECTLY from EventThread::keyStates[], bypassing
+ * Input::update(). This is critical for games like Pokemon Essentials
+ * that override Input.update at the Ruby level -- the native
+ * rawStates buffer is never populated in that case.
+ * Approach taken from JoiPlay (joiplay/mkxp). */
+int Input::asyncKeyState(int key)
+{
+    const uint8_t *ks = shState->eThread().keyStates;
+
+    switch (key) {
+        case 0x10: // VK_SHIFT (either)
+            return (ks[SDL_SCANCODE_LSHIFT] || ks[SDL_SCANCODE_RSHIFT]) ? 0x8000 : 0;
+        case 0x11: // VK_CONTROL (either)
+            return (ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL]) ? 0x8000 : 0;
+        case 0x12: // VK_MENU / Alt (either)
+            return (ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_RALT]) ? 0x8000 : 0;
+        case 0x01: // VK_LBUTTON
+            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(1)) ? 0x8000 : 0;
+        case 0x02: // VK_RBUTTON
+            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(3)) ? 0x8000 : 0;
+        case 0x04: // VK_MBUTTON
+            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(2)) ? 0x8000 : 0;
+        default: {
+            auto it = vKeyToScancode.find(key);
+            if (it == vKeyToScancode.end())
+                return 0;
+            return ks[it->second] ? 0x8000 : 0;
+        }
+    }
+}
+
 Input::~Input()
 {
     delete p;
