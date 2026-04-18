@@ -30,7 +30,6 @@ class Disposable;
 struct RGSSThreadData;
 struct GraphicsPrivate;
 struct AtomicFlag;
-struct THEORAPLAY_VideoFrame;
 struct Movie;
 
 class Graphics
@@ -66,8 +65,7 @@ public:
     int displayWidth() const;
     int displayHeight() const;
 	void resizeScreen(int width, int height);
-    void resizeWindow(int width, int height, bool center=false);
-	void drawMovieFrame(const THEORAPLAY_VideoFrame* video, Bitmap *videoBitmap);
+	void resizeWindow(int width, int height, bool center=false);
 	bool updateMovieInput(Movie *movie);
 	void playMovie(const char *filename, int volume, bool skippable);
 	void screenshot(const char *filename);
@@ -97,6 +95,11 @@ public:
     
     void lock(bool force = false);
     void unlock(bool force = false);
+
+	/* Null out all Disposable link pointers so GC-triggered destructors
+	 * don't corrupt a future session's intrusive list. Must be called
+	 * before SharedState::finiInstance() on iOS. */
+	void detachAllDisposables();
 
 private:
 	Graphics(RGSSThreadData *data);

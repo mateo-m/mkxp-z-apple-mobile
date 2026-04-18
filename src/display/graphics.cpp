@@ -21,8 +21,6 @@
 
 #include "graphics.h"
 
-#include "alstream.h"
-#include "audio.h"
 #include "binding.h"
 #include "bitmap.h"
 #include "config.h"
@@ -36,12 +34,12 @@
 #include "gl-util.h"
 #include "glstate.h"
 #include "intrulist.h"
+#include "movie.h"
 #include "quad.h"
 #include "scene.h"
 #include "shader.h"
 #include "sharedstate.h"
 #include "texpool.h"
-#include "theoraplay/theoraplay.h"
 #include "util.h"
 #include "input.h"
 #include "sprite.h"
@@ -58,385 +56,58 @@
 #endif
 
 #include <algorithm>
+#include <vector>
+
+#if TARGET_OS_IPHONE
+#ifdef MKXPZ_HAS_ANGLE
+#include <atomic>
+#include <EGL/egl.h>
+#include "ios_bridge.h"
+extern std::atomic<MKXPRenderer> s_currentRenderer;
+extern EGLDisplay s_eglDisplay;
+extern EGLSurface s_eglSurface;
+extern EGLContext s_eglContext;
+#else
+#include "ios_bridge.h"
+static const MKXPRenderer s_currentRenderer = MKXP_RENDERER_OPENGL_ES;
+#endif
+#endif
+static inline void graphicsGL_SwapWindow(SDL_Window *win) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) { eglSwapBuffers(s_eglDisplay, s_eglSurface); return; }
+#endif
+    SDL_GL_SwapWindow(win);
+}
+static inline void graphicsGL_MakeCurrent(SDL_Window *win, SDL_GLContext ctx) {
+#ifdef MKXPZ_HAS_ANGLE
+    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+        if (ctx) eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
+        else eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        return;
+    }
+#endif
+    SDL_GL_MakeCurrent(win, ctx);
+}
 #include <errno.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
 #include <cmath>
-#include <climits>
 
+#if TARGET_OS_IPHONE
+#include "ios_bridge.h"
+#endif
 
 #define DEF_SCREEN_W (rgssVer == 1 ? 640 : 544)
 #define DEF_SCREEN_H (rgssVer == 1 ? 480 : 416)
 
 #define DEF_FRAMERATE (rgssVer == 1 ? 40 : 60)
 
-#define DEF_MAX_VIDEO_FRAMES 30
-#define VIDEO_DELAY 10
-#define MOVIE_AUDIO_BUFFER_SIZE 2048
-#define AUDIO_BUFFER_LEN_MS 2000
-
-typedef struct AudioQueue
-{
-    const THEORAPLAY_AudioPacket *audio;
-    int offset;
-    struct AudioQueue *next;
-} AudioQueue;
-
-
-static long readMovie(THEORAPLAY_Io *io, void *buf, long buflen)
-{
-    SDL_RWops *f = (SDL_RWops *) io->userdata;
-    return (long) SDL_RWread(f, buf, 1, buflen);
-} // IoFopenRead
-
-
-static void closeMovie(THEORAPLAY_Io *io)
-{
-    SDL_RWops *f = (SDL_RWops *) io->userdata;
-    SDL_RWclose(f);
-    free(io);
-} // IoFopenClose
-
-
-struct Movie
-{
-    THEORAPLAY_Decoder *decoder;
-    const THEORAPLAY_AudioPacket *audio;
-    const THEORAPLAY_VideoFrame *video;
-    bool hasVideo;
-    bool hasAudio;
-    bool skippable;
-    Bitmap *videoBitmap;
-    SDL_RWops srcOps;
-    SDL_Thread *audioThread;
-    AtomicFlag audioThreadTermReq;
-    volatile AudioQueue *audioQueueHead;
-    volatile AudioQueue *audioQueueTail;
-    ALuint audioSource;
-    ALuint alBuffers[STREAM_BUFS];
-    ALshort audioBuffer[MOVIE_AUDIO_BUFFER_SIZE];
-    SDL_mutex *audioMutex;
-    
-    Movie(bool skippable_)
-    : decoder(0), audio(0), video(0), skippable(skippable_), videoBitmap(0), audioThread(0)
-    {
-    }
-    bool preparePlayback()
-    {
-        
-        // https://theora.org/doc/libtheora-1.0/codec_8h.html
-        // https://ffmpeg.org/doxygen/0.11/group__lavc__misc__pixfmt.html
-        THEORAPLAY_Io *io = (THEORAPLAY_Io *) malloc(sizeof (THEORAPLAY_Io));
-        if(!io) {
-            SDL_RWclose(&srcOps);
-            return false;
-        }
-        
-        io->read = readMovie;
-        io->close = closeMovie;
-        io->userdata = &srcOps;
-        decoder = THEORAPLAY_startDecode(io, DEF_MAX_VIDEO_FRAMES, THEORAPLAY_VIDFMT_RGBA);
-        if (!decoder) {
-            SDL_RWclose(&srcOps);
-            return false;
-        }
-        
-        // Wait until the decoder has parsed out some basic truths from the file.
-        while (!THEORAPLAY_isInitialized(decoder)) {
-            SDL_Delay(VIDEO_DELAY);
-        }
-        
-        // Once we're initialized, we can tell if this file has audio and/or video.
-        hasAudio = THEORAPLAY_hasAudioStream(decoder);
-        hasVideo = THEORAPLAY_hasVideoStream(decoder);
-        
-        // Queue up the audio
-        if (hasAudio) {
-            while ((audio = THEORAPLAY_getAudio(decoder)) == NULL) {
-                if ((THEORAPLAY_availableVideo(decoder) >= DEF_MAX_VIDEO_FRAMES)) {
-                    break;  // we'll never progress, there's no audio yet but we've prebuffered as much as we plan to.
-                }
-                SDL_Delay(VIDEO_DELAY);
-            }
-        }
-        
-        // No video, so no point in doing anything else
-        if (!hasVideo) {
-            THEORAPLAY_stopDecode(decoder);
-            return false;
-        }
-        
-        // Wait until we have video
-        while ((video = THEORAPLAY_getVideo(decoder)) == NULL) {
-            SDL_Delay(VIDEO_DELAY);
-        }
-        
-        // Wait until we have audio, if applicable
-        audio = NULL;
-        if (hasAudio) {
-            while ((audio = THEORAPLAY_getAudio(decoder)) == NULL && THEORAPLAY_availableVideo(decoder) < DEF_MAX_VIDEO_FRAMES) {
-                SDL_Delay(VIDEO_DELAY);
-            }
-        }
-        // Create this Bitmap without a hires replacement, because we don't
-        // support hires replacement for Movies yet.
-        videoBitmap = new Bitmap(video->width, video->height, true);
-        audioQueueHead = NULL;
-        audioQueueTail = NULL;
-        
-        return true;
-    }
-    
-    void queueAudioPacket(const THEORAPLAY_AudioPacket *audio) {
-        AudioQueue *item = NULL;
-        
-        if (!audio) {
-            return;
-        }
-        
-        item = (AudioQueue *) malloc(sizeof (AudioQueue));
-        if (!item) {
-            THEORAPLAY_freeAudio(audio);
-            return;  // oh well.
-        }
-        
-        item->audio = audio;
-        item->offset = 0;
-        item->next = NULL;
-        
-        SDL_LockMutex(audioMutex);
-        if (audioQueueTail) {
-            audioQueueTail->next = item;
-        } else {
-            audioQueueHead = item;
-        }
-        audioQueueTail = item;
-        SDL_UnlockMutex(audioMutex);
-    }
-    
-    void bufferMovieAudio(THEORAPLAY_Decoder *decoder, const Uint32 now) {
-        const THEORAPLAY_AudioPacket *audio;
-        while ((audio = THEORAPLAY_getAudio(decoder)) != NULL) {
-            queueAudioPacket(audio);
-            if (audio->playms >= now + AUDIO_BUFFER_LEN_MS) {  // don't let this get too far ahead.
-                break;
-            }
-        }
-    }
-
-    void streamMovieAudio(){
-        ALint state = 0;
-        ALint procBufs = STREAM_BUFS;	    
-        volatile AudioQueue *audioPacketAndOffset;
-        int channels;
-        int sampleRate;
-        float *sourceSamples;
-        ALuint samplesToProcess;
-        ALshort *sampleBuffer;
-        ALuint remainingSamples;
-
-        while(true) {
-            while(procBufs--) {
-                // Quit if audio thread terminate request has been made
-                if (audioThreadTermReq) return;
-
-                remainingSamples = MOVIE_AUDIO_BUFFER_SIZE;
-                sampleBuffer = audioBuffer;
-                SDL_LockMutex(audioMutex);
-
-                while(audioQueueHead && (remainingSamples > 0)) {
-                    audioPacketAndOffset = audioQueueHead;
-                    channels = audioPacketAndOffset->audio->channels;
-                    sampleRate = audioPacketAndOffset->audio->freq;
-                    sourceSamples = audioPacketAndOffset->audio->samples + (audioPacketAndOffset->offset * channels);
-                    samplesToProcess = (audioPacketAndOffset->audio->frames - audioPacketAndOffset->offset) * channels;
-
-                    if (samplesToProcess > remainingSamples) samplesToProcess = remainingSamples;
-
-                    for (ALuint i = 0; i < samplesToProcess; i++) {
-                        const float val = (*(sourceSamples++));
-                        if (val < -1.0f) {
-                            *(sampleBuffer++) = SHRT_MIN;
-                        } else if (val > 1.0f) {
-                            *(sampleBuffer++) = SHRT_MAX;
-                        } else {
-                            *(sampleBuffer++) = (ALshort) (val * SHRT_MAX);
-                        }
-                    }
-
-                    // Necessary to remember position between repeated iterations
-                    audioPacketAndOffset->offset += (samplesToProcess / channels);
-                    remainingSamples -= samplesToProcess;
-
-                    // The current audio packet has been completed
-                    if ((audioPacketAndOffset->offset) >= audioPacketAndOffset->audio->frames) {
-                        audioQueueHead = audioPacketAndOffset->next;
-                        THEORAPLAY_freeAudio(audioPacketAndOffset->audio);
-                        free((void *) audioPacketAndOffset);
-                    }
-                }
-
-                if(!audioQueueHead) audioQueueTail = NULL;
-
-                SDL_UnlockMutex(audioMutex);
-
-                alBufferData(alBuffers[procBufs], channels == 1 ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16, audioBuffer,
-                    (MOVIE_AUDIO_BUFFER_SIZE - remainingSamples) * sizeof(ALshort), sampleRate);
-                alSourceQueueBuffers(audioSource, 1, &alBuffers[procBufs]);     
-                alGetSourcei(audioSource, AL_SOURCE_STATE, &state);
-                if(state != AL_PLAYING) alSourcePlay(audioSource);
-            }
-
-            // Periodically check the buffers until one is available
-            while(true) {
-                // Quit if audio thread terminate request has been made
-                if (audioThreadTermReq) return;
-
-                alGetSourcei(audioSource, AL_BUFFERS_PROCESSED, &procBufs);
-                if(procBufs > 0) break;
-                SDL_Delay(AUDIO_SLEEP);
-            }
-            alSourceUnqueueBuffers(audioSource, procBufs, alBuffers);
-        }
-    }
-    
-    bool startAudio(float volume)
-    {
-        alGenSources(1, &audioSource);
-        alGenBuffers(STREAM_BUFS, alBuffers);
-        alSourcef(audioSource, AL_GAIN, volume);
-
-        audioThreadTermReq.clear();
-        audioMutex = SDL_CreateMutex();
-        queueAudioPacket(audio);
-        audio = NULL;
-        bufferMovieAudio(decoder, 0);
-        audioThread = createSDLThread <Movie, &Movie::streamMovieAudio>(this, "movieaudio");
-
-        return true;
-    }
-    
-    void play(float volume)
-    {
-        Uint32 frameMs = 0;
-        Uint32 baseTicks = SDL_GetTicks();
-        bool openedAudio = false;
-        while (THEORAPLAY_isDecoding(decoder)) {
-            // Check for reset/shutdown input
-            if(shState->graphics().updateMovieInput(this)) break;
-            
-            // Check for attempted skip
-            if (skippable) {
-                shState->input().update();
-                if  (shState->input().isTriggered(Input::C) || shState->input().isTriggered(Input::B)) break;
-            }
-            
-            const Uint32 now = SDL_GetTicks() - baseTicks;
-            
-            if (!video) {
-                video = THEORAPLAY_getVideo(decoder);
-            }
-            
-            if (hasAudio) {
-                if (!audio) {
-                    audio = THEORAPLAY_getAudio(decoder);
-                }
-                
-                if (audio && !openedAudio) {
-                    if(!startAudio(volume)){
-                        Debug() << "Error opening movie audio!";
-                        break;
-                    }
-                    openedAudio = true;
-                }
-                
-            }
-            
-            if (video && (video->playms <= now)) {
-                frameMs = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
-                if ( frameMs && ((now - video->playms) >= frameMs) )
-                {
-                    // Skip frames to catch up
-                    const THEORAPLAY_VideoFrame *last = video;
-                    while ((video = THEORAPLAY_getVideo(decoder)) != NULL)
-                    {
-                        THEORAPLAY_freeVideo(last);
-                        last = video;
-                        if ((now - video->playms) < frameMs)
-                            break;
-                    } 
-
-                    if (!video)
-                        video = last;
-                }
-
-                // Application is too far behind
-                if (!video) {
-                    Debug() << "WARNING: Video playback cannot keep up!";
-                    break;
-                }
-
-                // Got a video frame, now draw it
-                videoBitmap->replaceRaw(video->pixels, video->width * video->height * 4);
-                shState->graphics().update(false);
-                THEORAPLAY_freeVideo(video);
-                video = NULL;
-
-            } else {
-                // Next video frame not yet ready, let the CPU breathe
-                SDL_Delay(VIDEO_DELAY);
-            }
-            
-            if (openedAudio) {
-                bufferMovieAudio(decoder, now);
-            }
-        }
-    }
-    
-    ~Movie()
-    {
-        if (hasAudio) {
-            if (audioQueueTail) {
-                THEORAPLAY_freeAudio(audioQueueTail->audio);
-            }
-            audioQueueTail = NULL;
-            
-            if (audioQueueHead) {
-                THEORAPLAY_freeAudio(audioQueueHead->audio);
-            }
-            audioQueueHead = NULL;
-            SDL_DestroyMutex(audioMutex);
-            audioThreadTermReq.set();
-            if(audioThread) {
-                SDL_WaitThread(audioThread, 0);
-                audioThread = 0;
-            }
-            alSourceStop(audioSource);
-            alDeleteSources(1, &audioSource);
-            alDeleteBuffers(STREAM_BUFS, alBuffers);
-        }
-        if (video) THEORAPLAY_freeVideo(video);
-        if (audio) THEORAPLAY_freeAudio(audio);
-        if (decoder) THEORAPLAY_stopDecode(decoder);
-        delete videoBitmap;
-    }
-};
-
-struct MovieOpenHandler : FileSystem::OpenHandler
-{
-    SDL_RWops *srcOps;
-    
-    MovieOpenHandler(SDL_RWops &srcOps)
-    :   srcOps(&srcOps)
-    {}
-    
-    bool tryRead(SDL_RWops &ops, const char *ext)
-    {
-        *srcOps = ops;
-        return true;
-    }
-};
+#if TARGET_OS_IPHONE
+  #define IOS_CHECK_PAUSE() p->checkPause()
+#else
+  #define IOS_CHECK_PAUSE() ((void)0)
+#endif
 
 struct PingPong {
     TEXFBO rt[2];
@@ -515,7 +186,7 @@ public:
         glState.viewport.set(IntRect(0, 0, w, h));
         
         FBO::clear();
-        
+
         Scene::composite();
         
         if (brightEffect) {
@@ -843,7 +514,12 @@ struct GraphicsPrivate {
     scSize(scRes),
     winSize(rtData->config.defScreenW, rtData->config.defScreenH),
     screen(scRes.x, scRes.y), threadData(rtData),
-    glCtx(SDL_GL_GetCurrentContext()), multithreadedMode(true),
+#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+    glCtx(s_currentRenderer == MKXP_RENDERER_ANGLE ? (SDL_GLContext)s_eglContext : SDL_GL_GetCurrentContext()),
+#else
+    glCtx(SDL_GL_GetCurrentContext()),
+#endif
+    multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
     last_update(0), last_avg_update(0), backingScaleFactor(1), integerScaleFactor(0, 0),
@@ -853,6 +529,36 @@ struct GraphicsPrivate {
         avgFPSLock = SDL_CreateMutex();
         glResourceLock = SDL_CreateMutex();
         
+        /* Query the actual window and drawable sizes directly from SDL.
+         * main.cpp also posts these to windowSizeMsg/drawableSizeMsg, but
+         * the constructor shouldn't poll message queues for initialization.
+         * The window is fully created before the RGSS thread starts, so
+         * these reads are safe. */
+        {
+            int winW, winH;
+            SDL_GetWindowSize(rtData->window, &winW, &winH);
+            winSize = Vec2i(winW, winH);
+
+            int drwW, drwH;
+#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+            if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
+                // SDL_GL_GetDrawableSize returns logical points under ANGLE
+                // (no SDL GL context). Query EGL surface size instead.
+                EGLint eglW = 0, eglH = 0;
+                eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_WIDTH, &eglW);
+                eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_HEIGHT, &eglH);
+                drwW = eglW;
+                drwH = eglH;
+            } else {
+                SDL_GL_GetDrawableSize(rtData->window, &drwW, &drwH);
+            }
+#else
+            SDL_GL_GetDrawableSize(rtData->window, &drwW, &drwH);
+#endif
+            backingScaleFactor = (float)drwW / winW;
+            winSize = Vec2i(drwW, drwH);
+        }
+
         if (integerScaleActive) {
             integerScaleFactor = Vec2i(0, 0);
             rebuildIntegerScaleBuffer();
@@ -879,17 +585,121 @@ struct GraphicsPrivate {
     }
     
     void updateScreenResoRatio(RGSSThreadData *rtData) {
+        /* Guard against zero scSize — can happen transiently during
+         * rapid rotation when window size and safe area insets are
+         * from different orientations. */
+        if (scSize.x <= 0 || scSize.y <= 0) {
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                     "REJECTED zero scSize=%dx%d in updateScreenResoRatio",
+                     scSize.x, scSize.y);
+            mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            return;
+        }
+
         Vec2 &ratio = rtData->sizeResoRatio;
         ratio.x = (float)scRes.x / scSize.x * backingScaleFactor;
         ratio.y = (float)scRes.y / scSize.y * backingScaleFactor;
         
         rtData->screenOffset = scOffset / backingScaleFactor;
+
+#if TARGET_OS_IPHONE
+        // Publish the game viewport rect in logical points for the touch overlay.
+        // scOffset.y is in GL coordinates (origin bottom-left), convert to
+        // screen coordinates (origin top-left) for UIKit.
+        // Use UIKit screen scale (not SDL backingScaleFactor) for GL-to-point conversion.
+        float uiSc = mkxp_getScreenScale();
+        float screenY = (winSize.y - scOffset.y - scSize.y) / uiSc;
+        mkxp_setGameRect(scOffset.x / uiSc, screenY,
+                         scSize.x / uiSc, scSize.y / uiSc);
+#endif
     }
     
     /* Enforces fixed aspect ratio, if desired */
     void recalculateScreenSize(bool fixedAspectRatio) {
         scSize = winSize;
         
+#if TARGET_OS_IPHONE
+        {
+            float saTop = 0, saBottom = 0, saLeft = 0, saRight = 0;
+            mkxp_getSafeAreaInsets(&saTop, &saBottom, &saLeft, &saRight);
+
+            float uiScale = mkxp_getScreenScale();
+            int saTopPx   = (int)(saTop    * uiScale);
+            int saBotPx   = (int)(saBottom * uiScale);
+            int saLeftPx  = (int)(saLeft   * uiScale);
+            int saRightPx = (int)(saRight  * uiScale);
+
+            // Available area inside safe insets.
+            // During rapid rotation the window size and safe area insets
+            // may come from different orientations, producing negative
+            // or zero available dimensions.  Clamp to 1 to prevent
+            // invalid viewport calculations and GL state corruption.
+            bool isPortrait = winSize.x < winSize.y;
+
+            // In landscape, ignore top/bottom safe areas — only left/right
+            // matter (notch). The home indicator overlaps the game but
+            // auto-hides during gameplay.
+            int effectiveSaTop = isPortrait ? saTopPx : 0;
+            int effectiveSaBot = isPortrait ? saBotPx : 0;
+
+            int rawAvailW = winSize.x - saLeftPx - saRightPx;
+            int rawAvailH = winSize.y - effectiveSaTop - effectiveSaBot;
+            int availW = std::max(1, rawAvailW);
+            int availH = std::max(1, rawAvailH);
+
+            if (rawAvailW <= 0 || rawAvailH <= 0) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         "CLAMPED avail: raw=%dx%d clamped=%dx%d "
+                         "winSize=%dx%d sa=T%.0f B%.0f L%.0f R%.0f (px: T%d B%d L%d R%d) uiScale=%.1f",
+                         rawAvailW, rawAvailH, availW, availH,
+                         winSize.x, winSize.y,
+                         saTop, saBottom, saLeft, saRight,
+                         saTopPx, saBotPx, saLeftPx, saRightPx, uiScale);
+                mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            }
+
+            if (fixedAspectRatio) {
+                // Fit game within the safe area while preserving aspect ratio
+                float resRatio = (float)scRes.x / scRes.y;
+                scSize.x = availW;
+                scSize.y = (int)(scSize.x / resRatio);
+                if (scSize.y > availH) {
+                    scSize.y = availH;
+                    scSize.x = (int)(scSize.y * resRatio);
+                }
+            } else {
+                // Stretch to fill the entire safe area
+                scSize.x = availW;
+                scSize.y = availH;
+            }
+
+            if (winSize.x < winSize.y) {
+                // Portrait: position game within safe area based on vertical alignment.
+                // Controls go below the game viewport.
+                scOffset.x = saLeftPx + (availW - scSize.x) / 2;
+
+                MKXPVerticalAlignment vAlign = mkxp_getVerticalAlignment();
+                if (vAlign == MKXP_VALIGN_TOP) {
+                    // Top: game pressed against top safe edge
+                    scOffset.y = winSize.y - saTopPx - scSize.y;
+                } else if (vAlign == MKXP_VALIGN_CENTER) {
+                    // Center: game centered within safe area
+                    scOffset.y = saBotPx + (availH - scSize.y) / 2;
+                } else {
+                    // Top-center (default): midpoint between top and center
+                    int topY = winSize.y - saTopPx - scSize.y;
+                    int centerY = saBotPx + (availH - scSize.y) / 2;
+                    scOffset.y = (topY + centerY) / 2;
+                }
+            } else {
+                // Landscape: center within available area (no top/bottom safe area)
+                scOffset.x = saLeftPx + (availW - scSize.x) / 2;
+                scOffset.y = (availH - scSize.y) / 2;
+            }
+        }
+#else
         if (!fixedAspectRatio) {
             if (!integerScaleActive || (integerScaleActive && integerLastMileScaling)) {
                 scOffset = Vec2i(0, 0);
@@ -915,6 +725,7 @@ struct GraphicsPrivate {
         
         scOffset.x = (winSize.x - scSize.x) / 2.f;
         scOffset.y = (winSize.y - scSize.y) / 2.f;
+#endif
     }
     
     static int findHighestFittingScale(int base, int target) {
@@ -966,12 +777,80 @@ struct GraphicsPrivate {
     }
     
     void checkResize(bool skipIntScaleBuffer = false) {
-        if (threadData->windowSizeMsg.poll(winSize)) {
+        Vec2i oldWinSize = winSize;
+        bool sizeChanged = threadData->windowSizeMsg.poll(winSize);
+
+#if TARGET_OS_IPHONE
+        bool insetsChanged = mkxp_consumeSafeAreaInsetsChanged();
+        if (insetsChanged && !sizeChanged) {
+            // During rotation iOS can fire several size/inset events per
+            // frame. Skip the snprintf formatting entirely when debug
+            // logging is disabled - this was a measurable hitch before.
+            if (mkxp_debugLogEnabled()) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         "insetsChanged (no size change) winSize=%dx%d",
+                         winSize.x, winSize.y);
+                mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            }
+
+            recalculateScreenSize(threadData->config.fixedAspectRatio);
+            updateScreenResoRatio(threadData);
+
+            if (mkxp_debugLogEnabled()) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         "after insets recalc: scSize=%dx%d scOffset=%d,%d bsf=%.3f",
+                         scSize.x, scSize.y, scOffset.x, scOffset.y, backingScaleFactor);
+                mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            }
+
+            SDL_Rect screen = {scOffset.x, scOffset.y, scSize.x, scSize.y};
+            threadData->ethread->notifyGameScreenChange(screen);
+        }
+#endif
+
+        if (sizeChanged) {
+            /* Drain all pending async GL work (e.g. pixel processing
+             * dispatched by the previous SwapWindow) before touching
+             * any GL state.  Without this, rotating the device can
+             * cause a SIGSEGV in libGLImage on iOS. */
+            glFinish();
+
             /* Query the actual size in pixels, not units */
             Vec2i drawableSize(winSize);
             threadData->drawableSizeMsg.poll(drawableSize);
+
+            if (mkxp_debugLogEnabled()) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         "sizeChanged: winSize=%dx%d drawable=%dx%d (was %dx%d)",
+                         winSize.x, winSize.y, drawableSize.x, drawableSize.y,
+                         oldWinSize.x, oldWinSize.y);
+                mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            }
+
+            /* Guard against zero dimensions during rotation transitions.
+             * iOS can momentarily report 0-width or 0-height while the
+             * window is being resized.  A zero winSize.x would cause
+             * division-by-zero in backingScaleFactor, producing inf/NaN
+             * that permanently corrupts all viewport calculations.
+             * Restore winSize so future frames keep using the last good value. */
+            if (winSize.x <= 0 || winSize.y <= 0 ||
+                drawableSize.x <= 0 || drawableSize.y <= 0) {
+                if (mkxp_debugLogEnabled()) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                             "REJECTED zero dims: winSize=%dx%d drawable=%dx%d, restoring %dx%d",
+                             winSize.x, winSize.y, drawableSize.x, drawableSize.y,
+                             oldWinSize.x, oldWinSize.y);
+                    mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+                }
+                winSize = oldWinSize;
+                return;
+            }
             
-            backingScaleFactor = drawableSize.x / winSize.x;
+            backingScaleFactor = (float)drawableSize.x / winSize.x;
             winSize = drawableSize;
             
             /* Make sure integer buffers are rebuilt before screen offsets are
@@ -983,6 +862,14 @@ struct GraphicsPrivate {
             glState.viewport.refresh();
             recalculateScreenSize(threadData->config.fixedAspectRatio);
             updateScreenResoRatio(threadData);
+
+            if (mkxp_debugLogEnabled()) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                         "after resize: scSize=%dx%d scOffset=%d,%d bsf=%.3f",
+                         scSize.x, scSize.y, scOffset.x, scOffset.y, backingScaleFactor);
+                mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            }
             
             SDL_Rect screen = {scOffset.x, scOffset.y, scSize.x, scSize.y};
             threadData->ethread->notifyGameScreenChange(screen);
@@ -1003,11 +890,24 @@ struct GraphicsPrivate {
     
     void swapGLBuffer() {
         fpsLimiter.delay();
+#if TARGET_OS_IPHONE
+        graphicsGL_SwapWindow(threadData->window);
+#else
         SDL_GL_SwapWindow(threadData->window);
+#endif
         
         ++frameCount;
         
         threadData->ethread->notifyFrame();
+
+#if TARGET_OS_IPHONE
+        if (mkxp_isGLContextBroken()) {
+            shutdown();
+            return;
+        }
+
+        mkxp_signalFrameRendered();
+#endif
     }
     
     void compositeToBuffer(TEXFBO &buffer) {
@@ -1102,14 +1002,26 @@ struct GraphicsPrivate {
         {
             GLMeta::blitSource(screen.getPP().frontBuffer(), scaleIsSpecial);
         }
-        
+
+#if TARGET_OS_IPHONE
+        if (mkxp_getShowViewportBounds()) {
+            float r, g, b, a;
+            mkxp_getViewportBoundsColor(&r, &g, &b, &a);
+            glState.clearColor.pushSet(Vec4(r, g, b, a));
+            FBO::clear();
+            glState.clearColor.pop();
+        } else {
+            FBO::clear();
+        }
+#else
         FBO::clear();
+#endif
         metaBlitBufferFlippedScaled(sourceSize, scaleIsSpecial);
         
         GLMeta::blitEnd();
         
         swapGLBuffer();
-        
+
         updateAvgFPS();
     }
     
@@ -1117,12 +1029,15 @@ struct GraphicsPrivate {
         if (!threadData->syncPoint.mainSyncLocked())
             return;
         
-        /* Releasing the GL context before sleeping and making it
-         * current again on wakeup seems to avoid the context loss
-         * when the app moves into the background on Android */
+#if TARGET_OS_IPHONE
+        graphicsGL_MakeCurrent(threadData->window, 0);
+        threadData->syncPoint.waitMainSync();
+        graphicsGL_MakeCurrent(threadData->window, glCtx);
+#else
         SDL_GL_MakeCurrent(threadData->window, 0);
         threadData->syncPoint.waitMainSync();
         SDL_GL_MakeCurrent(threadData->window, glCtx);
+#endif
         
         fpsLimiter.resetFrameAdjust();
     }
@@ -1142,7 +1057,7 @@ struct GraphicsPrivate {
         if (!(force || multithreadedMode)) return;
         
         SDL_LockMutex(glResourceLock);
-        SDL_GL_MakeCurrent(threadData->window, threadData->glContext);
+        graphicsGL_MakeCurrent(threadData->window, threadData->glContext);
     }
     
     void releaseLock(bool force = false) {
@@ -1161,6 +1076,76 @@ struct GraphicsPrivate {
         last_avg_update = time;
         SDL_UnlockMutex(avgFPSLock);
     }
+
+    /* Blit the frozen scene buffer to the screen and swap.
+     * Used by fadeout/fadein when the scene is frozen. */
+    void blitFrozenSceneToScreen() {
+        int scaleIsSpecial = GLMeta::blitScaleIsSpecial(
+            integerScaleBuffer, false,
+            IntRect(0, 0, scSize.x, scSize.y),
+            frozenScene, IntRect(0, 0, scRes.x, scRes.y));
+
+        GLMeta::blitBeginScreen(scSize, scaleIsSpecial);
+        GLMeta::blitSource(frozenScene, scaleIsSpecial);
+
+        FBO::clear();
+        metaBlitBufferFlippedScaled(scaleIsSpecial);
+
+        GLMeta::blitEnd();
+
+        swapGLBuffer();
+#if TARGET_OS_IPHONE
+        checkPause();
+#endif
+    }
+
+#if TARGET_OS_IPHONE
+    /* Check for a pending pause request.  mkxp_checkPause() handles
+     * audio source pausing and blocks until resumed; we just need
+     * to reset frame timing afterward so the limiter doesn't try
+     * to catch up for the time spent paused.
+     *
+     * Before blocking, we capture the engine's front buffer as an
+     * RGBA snapshot.  The SDL window is always fullscreen behind
+     * the SwiftUI layer and can't participate in SwiftUI view
+     * transitions.  The snapshot acts as a static double — a frozen
+     * frame that SwiftUI places at the game viewport's position
+     * (gameRect) during the hero zoom animation, so the transition
+     * appears to zoom into the live game.  Once the animation
+     * finishes, the snapshot is discarded and the real SDL rendering
+     * takes over.  See docs/pause-resume.md for the full picture. */
+    void checkPause() {
+        if (!mkxp_isPaused() && !mkxp_isPauseRequested())
+            return;
+
+        /* Capture the front buffer (the engine's internal render
+         * target, not FBO 0 / the screen — iOS gives undefined
+         * content for the on-screen framebuffer after swapBuffers).
+         * The engine's 2D projection maps Y top-to-bottom, so
+         * glReadPixels on this FBO produces top-down pixel data —
+         * no vertical flip needed. */
+        {
+            TEXFBO &fb = screen.getPP().frontBuffer();
+            int w = fb.width;
+            int h = fb.height;
+            if (w > 0 && h > 0) {
+                FBO::ID prevFBO = FBO::boundFramebufferID;
+                FBO::bind(fb.fbo);
+
+                std::vector<uint8_t> pixels(w * h * 4);
+                gl.ReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+                FBO::bind(prevFBO);
+                mkxp_setSnapshot(pixels.data(), w, h);
+            }
+        }
+
+        mkxp_checkPause();
+
+        /* Reset frame timing so the limiter doesn't try to catch up. */
+        fpsLimiter.resetFrameAdjust();
+    }
+#endif
 };
 
 Graphics::Graphics(RGSSThreadData *data) {
@@ -1186,6 +1171,12 @@ double Graphics::lastUpdate() {
 }
 
 void Graphics::update(bool checkForShutdown) {
+#if TARGET_OS_IPHONE
+    if (mkxp_isGLContextBroken()) {
+        shState->checkShutdown();
+        return;
+    }
+#endif
     p->threadData->rqWindowAdjust.wait();
     p->last_update = shState->runTime();
     
@@ -1228,6 +1219,8 @@ void Graphics::update(bool checkForShutdown) {
     
     p->checkResize();
     p->redrawScreen();
+
+    IOS_CHECK_PAUSE();
 }
 
 void Graphics::freeze() {
@@ -1344,6 +1337,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
         p->swapGLBuffer();
         /* Call this manually, as redrawScreen() is not called during this loop. */
         p->updateAvgFPS();
+        IOS_CHECK_PAUSE();
     }
     
     glState.blend.pop();
@@ -1382,6 +1376,7 @@ void Graphics::wait(int duration) {
     for (int i = 0; i < duration; ++i) {
         p->checkShutDownReset();
         p->redrawScreen();
+        IOS_CHECK_PAUSE();
     }
 }
 
@@ -1395,17 +1390,7 @@ void Graphics::fadeout(int duration) {
         setBrightness(diff + (curr / duration) * i);
         
         if (p->frozen) {
-            int scaleIsSpecial = GLMeta::blitScaleIsSpecial(p->integerScaleBuffer, false, IntRect(0, 0, p->scSize.x, p->scSize.y), p->frozenScene, IntRect(0, 0, p->scRes.x, p->scRes.y));
-
-            GLMeta::blitBeginScreen(p->scSize, scaleIsSpecial);
-            GLMeta::blitSource(p->frozenScene, scaleIsSpecial);
-            
-            FBO::clear();
-            p->metaBlitBufferFlippedScaled(scaleIsSpecial);
-            
-            GLMeta::blitEnd();
-            
-            p->swapGLBuffer();
+            p->blitFrozenSceneToScreen();
         } else {
             update();
         }
@@ -1422,17 +1407,7 @@ void Graphics::fadein(int duration) {
         setBrightness(curr + (diff / duration) * i);
         
         if (p->frozen) {
-            int scaleIsSpecial = GLMeta::blitScaleIsSpecial(p->integerScaleBuffer, false, IntRect(0, 0, p->scSize.x, p->scSize.y), p->frozenScene, IntRect(0, 0, p->scRes.x, p->scRes.y));
-
-            GLMeta::blitBeginScreen(p->scSize, scaleIsSpecial);
-            GLMeta::blitSource(p->frozenScene, scaleIsSpecial);
-            
-            FBO::clear();
-            p->metaBlitBufferFlippedScaled(scaleIsSpecial);
-            
-            GLMeta::blitEnd();
-            
-            p->swapGLBuffer();
+            p->blitFrozenSceneToScreen();
         } else {
             update();
         }
@@ -1519,10 +1494,25 @@ void Graphics::resizeScreen(int width, int height) {
     
     glState.scissorBox.set(IntRect(0, 0, p->scRes.x, p->scRes.y));
     
+#if !TARGET_OS_IPHONE
+    /* On iOS the window is always fullscreen — requestWindowResize is a
+     * no-op that can corrupt the internal size state. Skip it. */
     shState->eThread().requestWindowResize(width, height);
+#else
+    /* Trigger a size recalculation so the viewport is updated. */
+    p->recalculateScreenSize(shState->config().fixedAspectRatio);
+    p->updateScreenResoRatio(p->threadData);
+    SDL_Rect screen = {p->scOffset.x, p->scOffset.y, p->scSize.x, p->scSize.y};
+    p->threadData->ethread->notifyGameScreenChange(screen);
+#endif
 }
 
 void Graphics::resizeWindow(int width, int height, bool center) {
+#if TARGET_OS_IPHONE
+    /* On iOS the window is always fullscreen — resizing is meaningless. */
+    (void)width; (void)height; (void)center;
+    return;
+#else
     p->threadData->rqWindowAdjust.wait();
     p->checkResize();
     
@@ -1534,6 +1524,7 @@ void Graphics::resizeWindow(int width, int height, bool center) {
     
     if (center)
         this->center();
+#endif
 }
 
 bool Graphics::updateMovieInput(Movie *movie) {
@@ -1543,6 +1534,31 @@ bool Graphics::updateMovieInput(Movie *movie) {
 void Graphics::playMovie(const char *filename, int volume_, bool skippable) {
     if (shState->config().enableHires) {
         Debug() << "BUG: High-res Graphics playMovie not implemented";
+    }
+
+    // Fast-reject formats TheoraPlay cannot decode (AVI, MP4, etc.).
+    // RMXP games commonly ship .avi intros that rely on a Windows-only
+    // plugin DLL (rubyscreen.dll). Without an extension gate the
+    // decoder thread spins forever on an unparseable file, which then
+    // causes the Ruby thread to hang in preparePlayback()'s init loop
+    // and the user gets a black screen they cannot escape.
+    {
+        const char *dot = filename ? strrchr(filename, '.') : nullptr;
+        bool supported = false;
+        if (dot) {
+            // Accept anything Ogg-based. Matches TheoraPlay's capabilities.
+            static const char *ok[] = {".ogv", ".ogg", ".ogm", nullptr};
+            for (int i = 0; ok[i]; ++i) {
+                if (strcasecmp(dot, ok[i]) == 0) { supported = true; break; }
+            }
+        }
+        if (!supported) {
+            char buf[600];
+            snprintf(buf, sizeof(buf), "skipping unsupported format: %s",
+                     filename ? filename : "(null)");
+            mkxp_debugLog("MOVIE", "graphics.cpp [C++]", buf);
+            return;
+        }
     }
 
     Movie *movie = new Movie(skippable);
@@ -1596,12 +1612,18 @@ void Graphics::setBrightness(int value) {
 }
 
 void Graphics::reset() {
-    /* Dispose all live Disposables */
+    /* Dispose all live Disposables and mark them detached.
+     * On iOS, Ruby GC may free these objects in a later session —
+     * ~Disposable must skip remDisposable for detached objects. */
     IntruListLink<Disposable> *iter;
     
-    for (iter = p->dispList.begin(); iter != p->dispList.end();
-         iter = iter->next) {
+    for (iter = p->dispList.begin(); iter != p->dispList.end(); ) {
+        IntruListLink<Disposable> *next = iter->next;
         iter->data->dispose();
+        iter->data->detached = true;
+        iter->prev = 0;
+        iter->next = 0;
+        iter = next;
     }
     
     p->dispList.clear();
@@ -1755,10 +1777,16 @@ void Graphics::repaintWait(const AtomicFlag &exitCond, bool checkReset) {
         
         FBO::clear();
         p->metaBlitBufferFlippedScaled(scaleIsSpecial);
+#if TARGET_OS_IPHONE
+        graphicsGL_SwapWindow(p->threadData->window);
+#else
         SDL_GL_SwapWindow(p->threadData->window);
+#endif
         p->fpsLimiter.delay();
         
         p->threadData->ethread->notifyFrame();
+
+        IOS_CHECK_PAUSE();
     }
     
     GLMeta::blitEnd();
@@ -1775,5 +1803,23 @@ void Graphics::unlock(bool force) {
 void Graphics::addDisposable(Disposable *d) { p->dispList.append(d->link); }
 
 void Graphics::remDisposable(Disposable *d) { p->dispList.remove(d->link); }
+
+void Graphics::detachAllDisposables() {
+    // Dispose GL resources while the current TexPool/GL context is still
+    // valid. Without this, Ruby GC may later destruct a session-1 Bitmap
+    // under session 2's GL context, releasing stale GL IDs into the new
+    // TexPool and corrupting subsequent texture allocations.
+    IntruListLink<Disposable> *iter = p->dispList.begin();
+    IntruListLink<Disposable> *end = p->dispList.end();
+    while (iter != end) {
+        IntruListLink<Disposable> *next = iter->next;
+        iter->data->dispose();
+        iter->data->detached = true;
+        iter->prev = 0;
+        iter->next = 0;
+        iter = next;
+    }
+    p->dispList.clear();
+}
 
 #undef GRAPHICS_THREAD_LOCK
