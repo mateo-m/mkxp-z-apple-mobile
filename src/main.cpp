@@ -740,9 +740,9 @@ int main(int argc, char *argv[]) {
 
     if (!rgssThread) {
         /* First session: create the persistent RGSS thread.
-         * Use 16 MB stack for Ruby 1.8's GC stack scanning. */
+         * Ruby 3.1's GC is precise, so 1 MB is plenty. */
         rgssThread = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                   16 * 1024 * 1024, &rtData);
+                                                   1 * 1024 * 1024, &rtData);
     } else {
         /* Subsequent sessions: signal the persistent RGSS thread
          * with the new session data. */

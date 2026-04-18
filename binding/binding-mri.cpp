@@ -1252,126 +1252,6 @@ static void runRMXPScripts(BacktraceData &btData) {
         rb_ary_store(script, 3, mkxp_str_new(decodeBuffer.c_str(), bufferLen));
     }
     
-#if RAPI_FULL > 187
-    /* Preprocess scripts for Ruby 1.8 -> 3.x compatibility */
-    {
-        /* Pattern: "when <value>:" -> "when <value>;" (deprecated Ruby 1.8 syntax) */
-        static std::regex whenColonRe("(when\\s+[^\\n:]+):\\s*(#[^\\n]*)?$",
-                                       std::regex::multiline);
-        
-        for (long i = 0; i < scriptCount; ++i) {
-            VALUE script = rb_ary_entry(scriptArray, i);
-            VALUE scriptDecoded = rb_ary_entry(script, 3);
-            if (NIL_P(scriptDecoded)) continue;
-            
-            std::string src(RSTRING_PTR(scriptDecoded), RSTRING_LEN(scriptDecoded));
-            
-            /* Normalize line endings: \r\n -> \n, standalone \r -> \n */
-            {
-                std::string normalized;
-                normalized.reserve(src.size());
-                for (size_t j = 0; j < src.size(); ++j) {
-                    if (src[j] == '\r') {
-                        normalized += '\n';
-                        if (j + 1 < src.size() && src[j + 1] == '\n')
-                            ++j; /* skip \n after \r */
-                    } else {
-                        normalized += src[j];
-                    }
-                }
-                src = std::move(normalized);
-            }
-            
-            /* Fix when X: -> when X; */
-            src = std::regex_replace(src, whenColonRe, "$1;$2");
-            
-            /* Fix retry -> redo outside of rescue blocks (Ruby 1.8 compat).
-               In Ruby 1.8, retry in a loop/iterator block restarted the block.
-               In Ruby 3.x, retry is only valid in rescue blocks.
-               We replace retry with redo only when it's NOT inside a rescue block. */
-            {
-                std::string result;
-                result.reserve(src.size());
-                /* Stack of block contexts: true = this block (or an ancestor)
-                   has entered a rescue section. We check any_of() so nested
-                   blocks inside rescue correctly inherit the rescue context. */
-                std::vector<bool> blockStack;
-                size_t pos = 0;
-                size_t len = src.size();
-                
-                while (pos < len) {
-                    auto matchKeyword = [&](const char *kw) -> bool {
-                        size_t kwlen = strlen(kw);
-                        if (pos + kwlen > len) return false;
-                        if (strncmp(&src[pos], kw, kwlen) != 0) return false;
-                        /* Check left boundary */
-                        if (pos > 0) {
-                            char prev = src[pos-1];
-                            if ((prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || prev == '_' || (prev >= '0' && prev <= '9'))
-                                return false;
-                        }
-                        /* Check right boundary */
-                        if (pos + kwlen < len) {
-                            char next = src[pos + kwlen];
-                            if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || next == '_' || (next >= '0' && next <= '9'))
-                                return false;
-                        }
-                        return true;
-                    };
-                    
-                    /* Block-opening keywords that close with `end` */
-                    bool pushed = false;
-                    for (const char *opener : {"begin", "def", "class", "module",
-                                               "if", "unless", "while", "until",
-                                               "for", "case", "do"}) {
-                        if (matchKeyword(opener)) {
-                            blockStack.push_back(false);
-                            size_t kwlen = strlen(opener);
-                            result.append(opener, kwlen);
-                            pos += kwlen;
-                            pushed = true;
-                            break;
-                        }
-                    }
-                    if (pushed) continue;
-                    
-                    if (matchKeyword("rescue")) {
-                        if (!blockStack.empty()) blockStack.back() = true;
-                        result += "rescue";
-                        pos += 6;
-                    } else if (matchKeyword("end")) {
-                        if (!blockStack.empty()) blockStack.pop_back();
-                        result += "end";
-                        pos += 3;
-                    } else if (matchKeyword("retry")) {
-                        bool inRescue = false;
-                        for (bool b : blockStack) { if (b) { inRescue = true; break; } }
-                        result += inRescue ? "retry" : "redo";
-                        pos += 5;
-                    } else {
-                        result += src[pos++];
-                    }
-                }
-                src = std::move(result);
-            }
-            
-            /* Prepend encoding declaration so Ruby 3.x treats byte escapes
-             * (\xNN) as raw bytes, matching Ruby 1.8 behavior.  Without
-             * this, scripts containing invalid-UTF-8 byte escapes cause
-             * "invalid multibyte escape" SyntaxErrors. */
-            if (src.find("# encoding:") == std::string::npos &&
-                src.find("# coding:") == std::string::npos &&
-                src.find("# -*- coding:") == std::string::npos) {
-                src.insert(0, "# encoding: ASCII-8BIT\n");
-            }
-
-            /* Store the cleaned version as ASCII-8BIT */
-            VALUE cleaned = rb_str_new(src.c_str(), src.size());
-            rb_enc_associate(cleaned, rb_ascii8bit_encoding());
-            rb_ary_store(script, 3, cleaned);
-        }
-    }
-#endif /* RAPI_FULL > 187 - preprocessing */
     
     /* Execute engine-bundled preload scripts (platform compatibility layer) */
 #if TARGET_OS_IPHONE
@@ -1379,7 +1259,6 @@ static void runRMXPScripts(BacktraceData &btData) {
         const char *enginePreloads[] = {
             "platform_compat",
             "pokemon_compat",
-            "ruby_classic_wrap",
             "win32_wrap",
             "mkxp_wrap",
             nullptr
@@ -1949,7 +1828,7 @@ static void mriBindingExecute() {
     
     mriBindingInit();
     
-#if TARGET_OS_IPHONE && RAPI_FULL <= 187
+#if TARGET_OS_IPHONE
     /* Snapshot Object.constants AFTER mriBindingInit registers RGSS classes
      * but BEFORE game scripts run. On subsequent sessions, any constants not
      * in this baseline were defined by game scripts and must be removed to

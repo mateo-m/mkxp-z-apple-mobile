@@ -25,11 +25,7 @@
 #include <ruby.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifndef MKXPZ_LEGACY_RUBY
 #include <ruby/version.h>
-#else
-#include <version.h>
-#endif
 
 #include "exception.h"
 
