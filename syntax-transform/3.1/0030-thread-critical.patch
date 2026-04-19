@@ -1,0 +1,58 @@
+# syntax-transform/3.1/0030-thread-critical.patch
+#
+# This file is part of mkxp.
+#
+# Copyright (C) 2026 The mkxp-z authors
+#
+# mkxp is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# mkxp is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with mkxp.  If not, see <http://www.gnu.org/licenses/>.
+
+# In Ruby 1.8, `Thread.critical` and `Thread.critical=` were used to prevent
+# thread switching during a critical section. Both were removed in Ruby 1.9
+# when the GIL was replaced by per-thread locks. Games that used
+# `Thread.critical = true` / `Thread.critical = false` around Marshal.load or
+# file I/O now fail with `NoMethodError: undefined method 'critical' for
+# Thread:Class`. This patch restores both as no-ops, unconditionally - the
+# cost is two extra no-op methods on Thread, and the underlying semantics
+# (cooperative scheduling in 1.8) don't apply under modern Ruby anyway.
+
+--- a/thread.c
++++ b/thread.c
+@@ -346,6 +346,18 @@ thread_id_str(const rb_thread_t *th)
+ # define thread_id_str(th) ((void *)(uintptr_t)(th)->thread_id)
+ # define PRI_THREAD_ID "p"
+ #endif
++
++static VALUE
++mkxp_thread_s_critical(VALUE _)
++{
++    return Qfalse;
++}
++
++static VALUE
++mkxp_thread_s_critical_set(VALUE self, VALUE val)
++{
++    return val;
++}
+ 
+ NOINLINE(static int thread_start_func_2(rb_thread_t *th, VALUE *stack_start));
+ 
+@@ -5446,6 +5458,8 @@ Init_Thread(void)
+     rb_define_singleton_method(rb_cThread, "DEBUG", rb_thread_s_debug, 0);
+     rb_define_singleton_method(rb_cThread, "DEBUG=", rb_thread_s_debug_set, 1);
+ #endif
++    rb_define_singleton_method(rb_cThread, "critical", mkxp_thread_s_critical, 0);
++    rb_define_singleton_method(rb_cThread, "critical=", mkxp_thread_s_critical_set, 1);
+     rb_define_singleton_method(rb_cThread, "handle_interrupt", rb_thread_s_handle_interrupt, 1);
+     rb_define_singleton_method(rb_cThread, "pending_interrupt?", rb_thread_s_pending_interrupt_p, -1);
+     rb_define_method(rb_cThread, "pending_interrupt?", rb_thread_pending_interrupt_p, -1);
