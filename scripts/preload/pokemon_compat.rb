@@ -9,6 +9,20 @@
 # hard-reset code path is never reached.
 $game_exists = nil
 
+# --- Uranium FmodEx override suppression ---
+# Pokemon Uranium's "F-mod main script" redefines Audio.bgm_play /
+# Audio.bgs_play / Audio.me_play to route through ::FmodEx, which on iOS
+# resolves to IOS::NullStub and drops audio on the floor. The override
+# block is guarded by `unless @bgm_play` on the Audio module - it only
+# runs the first time the script is evaluated. Module ivars persist
+# across mkxp sessions, so on the second and later sessions the override
+# is skipped and the engine's native Audio.bgm_play keeps music playing.
+# Pre-set @bgm_play here so the override is skipped from the very first
+# session. Applies to any game that uses this idiom.
+if defined?(Audio) && Audio.is_a?(Module)
+  Audio.instance_variable_set(:@bgm_play, true) unless Audio.instance_variable_defined?(:@bgm_play)
+end
+
 # --- Disposed RGSS object safety patches ---
 # Pokemon Essentials scripts (e.g. Mouse Input, pokemonLoadPanel)
 # access properties on disposed Sprites/Windows/Viewports between
