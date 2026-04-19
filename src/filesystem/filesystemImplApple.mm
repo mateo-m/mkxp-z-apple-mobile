@@ -61,8 +61,26 @@ std::string filesystemImpl::normalizePath(const char *path, bool preferred, bool
         // couldn't look up. Keep relative paths relative.
         NSString *input = PATHTONS(path);
         if (!absolute && ![input hasPrefix:@"/"]) {
+            // Collapse `../` and `./` segments manually. `stringByStandardizingPath`
+            // on a relative string either resolves against $HOME or returns it
+            // unchanged, so it's not usable here. Walk components and drop any
+            // `..` that can pop the previous one; leading `..` components are
+            // preserved since they refer to directories above the game root.
             NSString *normalized = [input stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
-            return std::string(NSTOPATH(normalized));
+            NSArray<NSString *> *parts = [normalized componentsSeparatedByString:@"/"];
+            NSMutableArray<NSString *> *stack = [NSMutableArray array];
+            for (NSString *part in parts) {
+                if ([part isEqualToString:@"."] || [part length] == 0) continue;
+                if ([part isEqualToString:@".."]) {
+                    if (stack.count > 0 && ![stack.lastObject isEqualToString:@".."]) {
+                        [stack removeLastObject];
+                        continue;
+                    }
+                }
+                [stack addObject:part];
+            }
+            NSString *joined = [stack componentsJoinedByString:@"/"];
+            return std::string(NSTOPATH(joined));
         }
 
         NSString *nspath = [NSURL fileURLWithPath:input].URLByStandardizingPath.path;
