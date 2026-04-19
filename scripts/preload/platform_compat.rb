@@ -57,26 +57,47 @@ module MKXP
   end
 end
 
-# --- Auto-stub Error-suffix constants on missing lookup ---
+# --- Win32 library null-stub via const_missing ---
 # Win32-only library scripts (RGSS Linker, FMODEX, network loaders, etc.)
-# reference exception types defined by native DLLs that never load on iOS.
-# When a script does `raise Berka::NetErrorErr, "msg"` or
-# `rescue Fmod::InitError`, Ruby needs those constants to resolve to real
-# Exception subclasses - a generic NullStub would fail `raise`/`rescue`.
+# reference constants that never get defined on iOS because DLL loading is a
+# no-op (see win32_wrap.rb). Instead of adding per-library stubs, hook
+# Module#const_missing so any undefined constant - top-level OR nested
+# inside a partially-defined module like Berka::NetErrorErr - resolves to
+# a safe stub rather than raising NameError.
 #
-# Only Error/Err/Exception/Failure-suffixed constants are auto-stubbed.
-# Everything else raises NameError (standard Ruby semantics) so the engine
-# error-skip path in binding-mri.cpp picks it up and the script is skipped.
+# Two kinds of stubs are returned:
+#
+# 1. Constants whose name ends in Error, Err, Exception, or Failure become
+#    real StandardError subclasses. This matters because games commonly
+#    write `raise Berka::NetErrorErr, "msg"`; the raised exception must
+#    inherit from Exception or Ruby rejects it, and if it is NullStub the
+#    alert ends up showing "IOS::NullStub" as the error message.
+#
+# 2. Everything else becomes IOS::NullStub, which silently absorbs any
+#    method call and any nested constant lookup. This covers library
+#    namespaces like FmodEx, FmodEx::System, etc.
 module IOS
+  class NullStub
+    def self.method_missing(name, *args, &block); self; end
+    def self.respond_to_missing?(name, include_private = false); true; end
+    def self.const_missing(name); self; end
+    def self.new(*args, &block); self; end
+    # to_s/to_str return empty string so `"prefix: #{stub}"` and any implicit
+    # string coercion produce clean output instead of leaking the internal
+    # class name or raising TypeError on Ruby 3.x strict coercion.
+    def self.to_s;    ""; end
+    def self.to_str;  ""; end
+    def self.inspect; "#<IOS::NullStub>"; end
+
+    def method_missing(name, *args, &block); nil; end
+    def respond_to_missing?(name, include_private = false); true; end
+  end
+
   ErrorStubs = {}
   ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/
 end
 
 class Module
-  unless method_defined?(:_mkxp_orig_const_missing)
-    alias_method :_mkxp_orig_const_missing, :const_missing
-  end
-
   def const_missing(name)
     if name.to_s =~ ::IOS::ERROR_SUFFIX_RE
       key = [self, name]
@@ -86,7 +107,7 @@ class Module
         klass
       end
     else
-      _mkxp_orig_const_missing(name)
+      ::IOS::NullStub
     end
   end
 end
