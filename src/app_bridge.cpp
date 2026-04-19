@@ -268,6 +268,17 @@ int mkxp_getRGSSVersion(void) {
     return SharedState::instance->rtData().config.rgssVersion;
 }
 
+int mkxp_getSupportedRGSSVersionMask(void) {
+    // Ruby 1.8 reliably runs RGSS1 and RGSS2 (both use 1.8-era syntax).
+    // RGSS3 requires Ruby 1.9+ which in this build means Ruby 3.1 with
+    // syntax-transform patches.
+#if defined(MKXPZ_LEGACY_RUBY)
+    return (1 << 0) | (1 << 1);
+#else
+    return (1 << 0) | (1 << 1) | (1 << 2);
+#endif
+}
+
 const char *mkxp_getGameTitle(void) {
     if (s_engineTerminated.load(std::memory_order_acquire)) return "";
     if (!SharedState::instance) return "";
