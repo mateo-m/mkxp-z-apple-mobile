@@ -1249,7 +1249,30 @@ static void runRMXPScripts(BacktraceData &btData) {
             break;
         }
         
-        rb_ary_store(script, 3, mkxp_str_new(decodeBuffer.c_str(), bufferLen));
+        /* Prepend a magic encoding comment so the Ruby 3.1 parser
+         * treats source as raw bytes rather than UTF-8. Without this,
+         * regex literals with \x7f-\x9f byte ranges (common in older
+         * Pokemon Essentials utility scripts) fail to parse with
+         * "invalid multibyte escape". Only add it if not already
+         * present at the top of the script. */
+        {
+            const char *src = decodeBuffer.c_str();
+            size_t srcLen = bufferLen;
+            bool hasEncoding = false;
+            if (srcLen >= 11 && (strncmp(src, "# encoding:", 11) == 0 ||
+                                  strncmp(src, "#encoding:", 10) == 0 ||
+                                  strncmp(src, "# coding:", 9) == 0 ||
+                                  strncmp(src, "#coding:", 8) == 0)) {
+                hasEncoding = true;
+            }
+            if (!hasEncoding) {
+                std::string prefixed = "# encoding: ASCII-8BIT\n";
+                prefixed.append(src, srcLen);
+                rb_ary_store(script, 3, mkxp_str_new(prefixed.c_str(), prefixed.size()));
+            } else {
+                rb_ary_store(script, 3, mkxp_str_new(src, srcLen));
+            }
+        }
     }
     
     
