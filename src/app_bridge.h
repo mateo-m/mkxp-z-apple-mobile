@@ -126,6 +126,11 @@ double      mkxp_getAverageFPS(void);
 int         mkxp_getRGSSVersion(void);
 const char *mkxp_getGameTitle(void);
 
+// Bitmask of supported RGSS versions for this build.
+// Bit 0 = RGSS1 (XP), bit 1 = RGSS2 (VX), bit 2 = RGSS3 (VX Ace).
+// Determined at compile time by which Ruby runtime is linked.
+int         mkxp_getSupportedRGSSVersionMask(void);
+
 // Game viewport rect (logical points)
 
 void        mkxp_setGameRect(float x, float y, float w, float h);
