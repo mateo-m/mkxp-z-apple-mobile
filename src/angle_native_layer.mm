@@ -56,18 +56,25 @@ extern "C" void mkxp_refreshANGLENativeLayerSize(void *sdlWindow,
         pixelW = bounds.size.width * scale;
         pixelH = bounds.size.height * scale;
 
-        // Find ANGLE's CAMetalLayer sublayer and push the new
-        // drawableSize + bounds. ANGLE inserted it as a sublayer
-        // inside initialize() since the parent is a plain CALayer.
+        // Find ANGLE's CAMetalLayer sublayer and sync it to the parent.
+        // ANGLE inserts its CAMetalLayer as a sublayer since our parent
+        // is a plain CALayer rather than CAMetalLayer. On rotation, we
+        // must update:
+        //   - frame:        parent-relative rect (handles bounds +
+        //                   position together; the layer's anchorPoint
+        //                   and stale position would otherwise leave it
+        //                   visually off-center after rotation)
+        //   - contentsScale
+        //   - drawableSize: the Metal texture size ANGLE renders into
         for (CALayer *sub in parentLayer.sublayers) {
             if ([sub isKindOfClass:[CAMetalLayer class]]) {
                 CAMetalLayer *metal = (CAMetalLayer *)sub;
-                metal.bounds = bounds;
+                metal.frame = bounds;
                 metal.contentsScale = scale;
                 metal.drawableSize = CGSizeMake(pixelW, pixelH);
-                break;
             }
         }
+
     };
 
     if ([NSThread isMainThread]) {
