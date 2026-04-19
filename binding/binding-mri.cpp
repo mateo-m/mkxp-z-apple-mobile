@@ -1283,7 +1283,7 @@ static void runRMXPScripts(BacktraceData &btData) {
 #if RAPI_FULL > 187
                         rb_set_errinfo(Qnil);
 #else
-                        rb_gv_set("$!", Qnil);
+                        rb_set_errinfo(Qnil);
 #endif
                     }
                 }
@@ -1343,7 +1343,7 @@ static void runRMXPScripts(BacktraceData &btData) {
 #if RAPI_FULL > 187
                                 rb_set_errinfo(Qnil);
 #else
-                                rb_gv_set("$!", Qnil);
+                                rb_set_errinfo(Qnil);
 #endif
                             }
                         }
@@ -1462,7 +1462,7 @@ static void runRMXPScripts(BacktraceData &btData) {
                                  StringValueCStr(msg));
                         logRubyError("SKIPPED", buf);
                     }
-                    rb_gv_set("$!", Qnil);
+                    rb_set_errinfo(Qnil);
                     state = 0;
                 }
                 }
@@ -1725,7 +1725,7 @@ static void mriBindingExecute() {
         /* 4. Clear game globals that persist across sessions. */
 
         /* Engine state */
-        rb_gv_set("$!", Qnil);
+        rb_set_errinfo(Qnil);
 
         /* Pokemon Essentials / Pokemon fangames */
         rb_gv_set("$mouse", nullMouseInstance);
