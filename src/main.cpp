@@ -37,6 +37,7 @@
 #include <string>
 #include <unistd.h>
 #include <regex>
+#include <climits>
 
 #if TARGET_OS_IPHONE
 #include "app_bridge.h"
@@ -397,6 +398,51 @@ static void printRgssVersion(int ver) {
   Debug() << buf;
 }
 
+static void initSyntaxTransform(Config &conf) {
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+  extern unsigned int mkxp_syntax_transform_target_ruby_version_major, mkxp_syntax_transform_target_ruby_version_minor, mkxp_syntax_transform_target_ruby_version_teeny;
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+
+  char buf[128];
+
+  switch (conf.syntaxTransform) {
+    default:
+      conf.syntaxTransformCustomVersionMajor = INT_MAX;
+      conf.syntaxTransformCustomVersionMinor = INT_MAX;
+      conf.syntaxTransformCustomVersionTeeny = INT_MAX;
+      snprintf(buf, sizeof(buf), "Disabled");
+      break;
+    case 1:
+      conf.syntaxTransformCustomVersionMajor = std::max(0, conf.syntaxTransformCustomVersionMajor);
+      conf.syntaxTransformCustomVersionMinor = std::max(0, conf.syntaxTransformCustomVersionMinor);
+      conf.syntaxTransformCustomVersionTeeny = std::max(0, conf.syntaxTransformCustomVersionTeeny);
+      snprintf(buf, sizeof(buf), "Ruby %u.%u.%u", conf.syntaxTransformCustomVersionMajor, conf.syntaxTransformCustomVersionMinor, conf.syntaxTransformCustomVersionTeeny);
+      break;
+    case 2:
+      conf.syntaxTransformCustomVersionMajor = 1;
+      conf.syntaxTransformCustomVersionMinor = conf.rgssVersion >= 3 ? 9 : 8;
+      conf.syntaxTransformCustomVersionTeeny = conf.rgssVersion >= 3 ? 2 : 1;
+      snprintf(buf, sizeof(buf), "Compatibility mode (Ruby %u.%u.%u)", conf.syntaxTransformCustomVersionMajor, conf.syntaxTransformCustomVersionMinor, conf.syntaxTransformCustomVersionTeeny);
+      break;
+  }
+
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+  mkxp_syntax_transform_target_ruby_version_major = conf.syntaxTransformCustomVersionMajor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMajor;
+  mkxp_syntax_transform_target_ruby_version_minor = conf.syntaxTransformCustomVersionMinor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMinor;
+  mkxp_syntax_transform_target_ruby_version_teeny = conf.syntaxTransformCustomVersionTeeny == INT_MAX ? -1 : conf.syntaxTransformCustomVersionTeeny;
+  Debug() << "Syntax transform:" << buf;
+#else
+  // The user configured a syntax-transform mode but this build was
+  // compiled against an unpatched Ruby runtime. The setting has no
+  // effect; make it loud in the logs so the mismatch doesn't look
+  // like a silent misconfiguration.
+  if (conf.syntaxTransform != 0)
+    Debug() << "Syntax transform: requested" << buf << "but patches"
+               " are not compiled in (MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES"
+               " undefined); setting will be ignored.";
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+}
+
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
   rtData->rgssErrorMsg = msg;
   rtData->ethread->requestTerminate();
@@ -672,6 +718,8 @@ int main(int argc, char *argv[]) {
     assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
     printRgssVersion(conf.rgssVersion);
 
+    initSyntaxTransform(conf);
+
     /* Update the persistent window for this game session */
     SDL_SetWindowTitle(persistWin, conf.windowTitle.c_str());
 
@@ -700,9 +748,9 @@ int main(int argc, char *argv[]) {
 
     if (!rgssThread) {
         /* First session: create the persistent RGSS thread.
-         * Use 16 MB stack for Ruby 1.8's GC stack scanning. */
+         * Ruby 3.1's GC is precise, so 1 MB is plenty. */
         rgssThread = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                   16 * 1024 * 1024, &rtData);
+                                                   1 * 1024 * 1024, &rtData);
     } else {
         /* Subsequent sessions: signal the persistent RGSS thread
          * with the new session data. */
@@ -952,6 +1000,58 @@ int main(int argc, char *argv[]) {
 
     assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
     printRgssVersion(conf.rgssVersion);
+
+    initSyntaxTransform(conf);
+
+    int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+    if (IMG_Init(imgFlags) != imgFlags) {
+      showInitError(std::string("Error initializing SDL_image: ") +
+                    SDL_GetError());
+      SDL_Quit();
+
+#ifdef MKXPZ_STEAM
+      STEAMSHIM_deinit();
+#endif
+
+      return 0;
+    }
+
+    if (TTF_Init() < 0) {
+      showInitError(std::string("Error initializing SDL_ttf: ") +
+                    SDL_GetError());
+      IMG_Quit();
+      SDL_Quit();
+
+#ifdef MKXPZ_STEAM
+      STEAMSHIM_deinit();
+#endif
+
+      return 0;
+    }
+
+    if (Sound_Init() == 0) {
+      showInitError(std::string("Error initializing SDL_sound: ") +
+                    Sound_GetError());
+      TTF_Quit();
+      IMG_Quit();
+      SDL_Quit();
+
+#ifdef MKXPZ_STEAM
+      STEAMSHIM_deinit();
+#endif
+
+      return 0;
+    }
+#if defined(__WIN32__)
+    WSAData wsadata = {0};
+    if (WSAStartup(0x101, &wsadata) || wsadata.wVersion != 0x101) {
+      char buf[200];
+      snprintf(buf, sizeof(buf), "Error initializing winsock: %08X",
+               WSAGetLastError());
+      showInitError(
+          std::string(buf)); // Not an error worth ending the program over
+    }
+#endif
 
     SDL_Window *win;
     Uint32 winFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;

@@ -1,0 +1,56 @@
+# syntax-transform/3.1/0032-toplevel-def-visibility.patch
+#
+# This file is part of mkxp.
+#
+# Copyright (C) 2026 The mkxp-z authors
+#
+# mkxp is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# mkxp is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with mkxp.  If not, see <http://www.gnu.org/licenses/>.
+
+# In Ruby 1.8, methods defined at the top level were public by default, so they
+# were visible to `Kernel.respond_to?(:foo)` (which by default searches only
+# public methods). Starting from Ruby 2.1, top-level methods are private by
+# default, so the same check now returns `false`.
+#
+# Pokemon Essentials (and other Ruby 1.8 RGSS game engines) rely on the old
+# semantics. PSystem_System.rb contains:
+#
+#   if !Kernel.respond_to?("pbSetResizeFactor")
+#     def pbSetResizeFactor(dummy); end
+#     ...
+#   end
+#
+# On Ruby 2.1+ this branch is always taken and overwrites the real
+# pbSetResizeFactor (defined elsewhere as a top-level private method), silently
+# breaking the game's screen-resize pipeline.
+#
+# This patch makes `obj.respond_to?(sym)` behave like `obj.respond_to?(sym,
+# true)` (i.e. include private methods) when syntax transform is active and
+# targeting Ruby <= 2.0.
+
+--- a/vm_method.c
++++ b/vm_method.c
+@@ -2796,6 +2796,13 @@ obj_respond_to(int argc, VALUE *argv, VALUE obj)
+     rb_execution_context_t *ec = GET_EC();
+ 
+     rb_scan_args(argc, argv, "11", &mid, &priv);
++    /* In Ruby 1.8, top-level defs are public by default, so
++     * Kernel.respond_to?(:foo) (without include_private) returns true for
++     * them. In Ruby 2.1+ top-level defs are private, breaking that idiom.
++     * When syntax transform targets Ruby <= 2.0, treat respond_to? as if
++     * include_private=true was always passed. */
++    if (NIL_P(priv) && mkxp_ec_is_syntax_transform_active(2, 0, -1))
++	priv = Qtrue;
+     if (!(id = rb_check_id(&mid))) {
+ 	VALUE ret = basic_obj_respond_to_missing(ec, CLASS_OF(obj), obj,
+ 						 rb_to_symbol(mid), priv);
