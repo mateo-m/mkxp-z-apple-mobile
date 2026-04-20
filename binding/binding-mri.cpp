@@ -1549,7 +1549,10 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
     RSTRING_PTR(rb_ary_entry(bt, i)));
 #endif
     Debug() << StringValueCStr(ds);
-    
+    // Also send the full backtrace to the per-game debug log so we can
+    // inspect it post-crash without attaching a debugger.
+    mkxp_debugLog("BACKTRACE", "binding-mri.cpp [C++]", StringValueCStr(ds));
+
     char *s = RSTRING_PTR(bt0);
     
     char line[16];
@@ -1643,13 +1646,16 @@ static void resetBetweenSessions() {
      *  C methods, overwriting any game-script redefinitions from the
      *  previous session.) */
 
-    /* 2. Clear class/module instance variables on engine-owned classes.
-     *    Games use ivars on class objects (e.g. `@SpriteResizerMethodsAliased`
-     *    on Sprite) as one-shot guards for their alias blocks. These
-     *    guards persist across sessions with the Ruby VM, so on session
-     *    2 the guarded alias blocks silently skip, leaving game-added
-     *    helper methods undefined after we've cleaned up. Clearing the
-     *    ivars forces the alias blocks to run again on session 2+. */
+    /* 2. Clear class/module instance variables AND class variables on
+     *    engine-owned classes. Games use both as one-shot guards for
+     *    their alias blocks:
+     *      - `@SpriteResizerMethodsAliased` (instance var on Sprite)
+     *      - `@@haveresizescreen` (class var on Graphics)
+     *    These survive across sessions in the persistent VM. If we
+     *    leave them alone, the alias blocks silently skip on session
+     *    2+ while step 2b below has already removed the actual aliased
+     *    methods - leaving NO working alias, breaking game features
+     *    that depend on it (e.g. Pokemon Essentials' resize pipeline). */
     {
         int err = 0;
         rb_protect([](VALUE) -> VALUE {
@@ -1662,11 +1668,72 @@ static void resetBetweenSessions() {
                 ID id = rb_intern(classesToClear[i]);
                 if (!rb_const_defined(rb_cObject, id)) continue;
                 VALUE klass = rb_const_get(rb_cObject, id);
+
                 VALUE ivars = rb_funcall(klass, rb_intern("instance_variables"), 0);
                 long n = RARRAY_LEN(ivars);
                 for (long k = 0; k < n; ++k) {
                     VALUE name = rb_ary_entry(ivars, k);
                     rb_ivar_set(klass, SYM2ID(name), Qnil);
+                }
+
+                VALUE cvars = rb_funcall(klass, rb_intern("class_variables"), 0);
+                long m = RARRAY_LEN(cvars);
+                for (long k = 0; k < m; ++k) {
+                    VALUE name = rb_ary_entry(cvars, k);
+                    int inner = 0;
+                    rb_protect([](VALUE args) -> VALUE {
+                        VALUE klass = rb_ary_entry(args, 0);
+                        VALUE name = rb_ary_entry(args, 1);
+                        rb_funcall(klass, rb_intern("remove_class_variable"), 1, name);
+                        return Qnil;
+                    }, rb_ary_new3(2, klass, name), &inner);
+                }
+            }
+            return Qnil;
+        }, Qnil, &err);
+    }
+
+    /* 2b. Remove non-baseline singleton methods from engine-owned
+     *     modules. Games alias + redefine methods like `Input.update`;
+     *     the alias (e.g. `Input.update_KGC_ScreenCapture`) survives
+     *     across sessions in the persistent VM, and its body can
+     *     reference class ivars that step 2 just nilified, producing
+     *     "undefined method `call` for nil:NilClass" when the alias
+     *     fires in the next session.
+     *     `mriBindingInit` re-installs the engine's C methods, so the
+     *     primary names (`update`, `trigger?`, etc.) are safe. But any
+     *     extra aliases the previous game's scripts added stay around.
+     *     Clear them based on baseline snapshot. */
+    {
+        int err = 0;
+        rb_protect([](VALUE) -> VALUE {
+            /* (module_name, baseline_gvar) */
+            struct Target { const char *name; const char *gvar; };
+            Target targets[] = {
+                { "Input",    "$__mkxp_base_input_smethods" },
+                { "Graphics", "$__mkxp_base_graphics_smethods" },
+                { "Audio",    "$__mkxp_base_audio_smethods" },
+            };
+            for (const Target &t : targets) {
+                VALUE base = rb_gv_get(t.gvar);
+                if (NIL_P(base)) continue;
+                ID id = rb_intern(t.name);
+                if (!rb_const_defined(rb_cObject, id)) continue;
+                VALUE mod = rb_const_get(rb_cObject, id);
+                VALUE sclass = rb_singleton_class(mod);
+                VALUE current = rb_funcall(sclass, rb_intern("instance_methods"), 1, Qfalse);
+                long n = RARRAY_LEN(current);
+                for (long k = 0; k < n; ++k) {
+                    VALUE mname = rb_ary_entry(current, k);
+                    if (rb_funcall(base, rb_intern("include?"), 1, mname) == Qtrue)
+                        continue;
+                    int inner = 0;
+                    rb_protect([](VALUE args) -> VALUE {
+                        VALUE sc = rb_ary_entry(args, 0);
+                        VALUE mn = rb_ary_entry(args, 1);
+                        rb_funcall(sc, rb_intern("remove_method"), 1, mn);
+                        return Qnil;
+                    }, rb_ary_new3(2, sclass, mname), &inner);
                 }
             }
             return Qnil;
@@ -1921,6 +1988,35 @@ static void mriBindingExecutePerSession(Config &conf) {
             VALUE dup = rb_funcall(consts, rb_intern("dup"), 0);
             rb_gv_set("$__mkxp_base_consts", dup);
         }
+    }
+
+    /* Snapshot singleton method lists for engine-owned modules right
+     * after mriBindingInit. The per-session reset uses these baselines
+     * to remove game-added aliases (Input.update_KGC_ScreenCapture
+     * etc.) that would otherwise survive across games and misbehave
+     * when their closed-over ivars are cleaned. */
+    {
+        int err = 0;
+        rb_protect([](VALUE) -> VALUE {
+            struct Target { const char *name; const char *gvar; };
+            Target targets[] = {
+                { "Input",    "$__mkxp_base_input_smethods" },
+                { "Graphics", "$__mkxp_base_graphics_smethods" },
+                { "Audio",    "$__mkxp_base_audio_smethods" },
+            };
+            for (const Target &t : targets) {
+                VALUE existing = rb_gv_get(t.gvar);
+                if (!NIL_P(existing)) continue;
+                ID id = rb_intern(t.name);
+                if (!rb_const_defined(rb_cObject, id)) continue;
+                VALUE mod = rb_const_get(rb_cObject, id);
+                VALUE sclass = rb_singleton_class(mod);
+                VALUE methods = rb_funcall(sclass, rb_intern("instance_methods"), 1, Qfalse);
+                VALUE dup = rb_funcall(methods, rb_intern("dup"), 0);
+                rb_gv_set(t.gvar, dup);
+            }
+            return Qnil;
+        }, Qnil, &err);
     }
 #endif
 
