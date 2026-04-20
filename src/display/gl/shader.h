@@ -60,9 +60,7 @@ protected:
 	GLuint program;
     
 private:
-#ifdef MKXPZ_BUILD_XCODE
     static std::string shaderCommon;
-#endif
 };
 
 class ShaderBase : public Shader

@@ -49,9 +49,7 @@
 #include <TargetConditionals.h>
 #endif
 
-#if TARGET_OS_IPHONE
 #include "app_bridge.h"
-#endif
 #include "util/rapidcsv.h"
 
 extern "C" {
@@ -77,10 +75,6 @@ void Init_fcntl(void);
 extern VALUE *rb_gc_stack_start;
 #endif
 }
-
-#ifdef __WIN32__
-#include "binding-mri-win32.h"
-#endif
 
 #include <assert.h>
 #include <string>
@@ -126,14 +120,6 @@ void graphicsBindingInit();
 
 void fileIntBindingInit();
 
-#ifdef MKXPZ_MINIFFI
-void MiniFFIBindingInit();
-#endif
-
-#ifdef MKXPZ_STEAM
-void CUSLBindingInit();
-#endif
-
 void httpBindingInit();
 
 RB_METHOD(mkxpDelta);
@@ -149,6 +135,7 @@ RB_METHOD(mkxpPlatform);
 RB_METHOD(mkxpIsMacHost);
 RB_METHOD(mkxpIsWindowsHost);
 RB_METHOD(mkxpIsLinuxHost);
+RB_METHOD(mkxpIsIOSHost);
 RB_METHOD(mkxpIsUsingRosetta);
 RB_METHOD(mkxpIsUsingWine);
 RB_METHOD(mkxpIsReallyMacHost);
@@ -347,15 +334,7 @@ static void mriBindingInit() {
     graphicsBindingInit();
     
     fileIntBindingInit();
-    
-#ifdef MKXPZ_MINIFFI
-    MiniFFIBindingInit();
-#endif
-    
-#ifdef MKXPZ_STEAM
-    CUSLBindingInit();
-#endif
-    
+
     httpBindingInit();
     
     if (rgssVer >= 3) {
@@ -398,10 +377,11 @@ static void mriBindingInit() {
     
     _rb_define_module_function(mod, "is_mac?", mkxpIsMacHost);
     _rb_define_module_function(mod, "is_rosetta?", mkxpIsUsingRosetta);
-    
+
     _rb_define_module_function(mod, "is_linux?", mkxpIsLinuxHost);
-    
+
     _rb_define_module_function(mod, "is_windows?", mkxpIsWindowsHost);
+    _rb_define_module_function(mod, "is_ios?", mkxpIsIOSHost);
     _rb_define_module_function(mod, "is_wine?", mkxpIsUsingWine);
     _rb_define_module_function(mod, "is_really_mac?", mkxpIsReallyMacHost);
     _rb_define_module_function(mod, "is_really_linux?", mkxpIsReallyLinuxHost);
@@ -453,12 +433,8 @@ static void mriBindingInit() {
     
     rb_gv_set("BTEST", rb_bool_new(shState->config().editor.battleTest));
     
-#ifdef MKXPZ_BUILD_XCODE
     std::string version = std::string(MKXPZ_VERSION "/") + getPlistValue("GIT_COMMIT_HASH");
     VALUE vers = mkxp_str_new_cstr(version.c_str());
-#else
-    VALUE vers = mkxp_str_new_cstr(MKXPZ_VERSION "/" MKXPZ_GIT_HASH);
-#endif
     rb_str_freeze(vers);
     rb_define_const(mod, "VERSION", vers);
     
@@ -471,12 +447,6 @@ static void mriBindingInit() {
         << "is present and reachable by Ruby's loadpath.";
     }
     
-    // Set $stdout and its ilk accordingly on Windows
-    // I regret teaching you that word
-#ifdef __WIN32__
-    if (shState->config().winConsole)
-        configureWindowsStreams();
-#endif
 }
 
 static void showMsg(const std::string &msg) {
@@ -577,88 +547,69 @@ RB_METHOD(mkxpPuts) {
     rb_get_args(argc, argv, "z", &str RB_ARG_END);
     
     Debug() << str;
-#if TARGET_OS_IPHONE
     // Mirror to the debug log so game scripts can trace behavior that
     // lives inside big RGSS scripts (like Main). Useful when tracking
     // down hangs.
     mkxp_debugLog("SCRIPT", "System.puts [Ruby]", str);
-#endif
     
     return Qnil;
 }
 
+/* Platform methods exposed to Ruby scripts. This fork runs exclusively
+ * on iOS / iPadOS / tvOS, so all legacy desktop predicates return false
+ * and the host string is hardcoded. Methods are preserved (rather than
+ * removed) so existing game scripts that call `System::is_mac?` etc.
+ * continue to load without raising NoMethodError; they simply take
+ * their "unknown platform" fallback path. `System::is_ios?` is
+ * provided as the new positive check. */
 RB_METHOD(mkxpPlatform) {
     RB_UNUSED_PARAM;
-    
-#if MKXPZ_PLATFORM == MKXPZ_PLATFORM_MACOS
-    std::string platform("macOS");
-    
-    if (mkxp_sys::isRosetta())
-        platform += " (Rosetta)";
-    
-#elif MKXPZ_PLATFORM == MKXPZ_PLATFORM_WINDOWS
-    std::string platform("Windows");
-    
-    if (mkxp_sys::isWine()) {
-        platform += " (Wine - ";
-        switch (mkxp_sys::getRealHostType()) {
-            case mkxp_sys::WineHostType::Mac:
-                platform += "macOS)";
-                break;
-            default:
-                platform += "Linux)";
-                break;
-        }
-    }
-#else
-    std::string platform("Linux");
-#endif
-    
-    return mkxp_str_new_cstr(platform.c_str());
+    return mkxp_str_new_cstr("iOS");
 }
 
 RB_METHOD(mkxpIsMacHost) {
     RB_UNUSED_PARAM;
-    
-    return rb_bool_new(MKXPZ_PLATFORM == MKXPZ_PLATFORM_MACOS);
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsUsingRosetta) {
     RB_UNUSED_PARAM;
-    
-    return rb_bool_new(mkxp_sys::isRosetta());
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsLinuxHost) {
     RB_UNUSED_PARAM;
-    
-    return rb_bool_new(MKXPZ_PLATFORM == MKXPZ_PLATFORM_LINUX);
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsWindowsHost) {
     RB_UNUSED_PARAM;
-    
-    return rb_bool_new(MKXPZ_PLATFORM == MKXPZ_PLATFORM_WINDOWS);
+    return rb_bool_new(false);
+}
+
+RB_METHOD(mkxpIsIOSHost) {
+    RB_UNUSED_PARAM;
+    return rb_bool_new(true);
 }
 
 RB_METHOD(mkxpIsUsingWine) {
     RB_UNUSED_PARAM;
-    return rb_bool_new(mkxp_sys::isWine());
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsReallyMacHost) {
     RB_UNUSED_PARAM;
-    return rb_bool_new(mkxp_sys::getRealHostType() == mkxp_sys::WineHostType::Mac);
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsReallyLinuxHost) {
     RB_UNUSED_PARAM;
-    return rb_bool_new(mkxp_sys::getRealHostType() == mkxp_sys::WineHostType::Linux);
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpIsReallyWindowsHost) {
     RB_UNUSED_PARAM;
-    return rb_bool_new(mkxp_sys::getRealHostType() == mkxp_sys::WineHostType::Windows);
+    return rb_bool_new(false);
 }
 
 RB_METHOD(mkxpUserLanguage) {
@@ -670,14 +621,7 @@ RB_METHOD(mkxpUserLanguage) {
 RB_METHOD(mkxpUserName) {
     RB_UNUSED_PARAM;
     
-    // Using the Windows API isn't working with usernames that involve Unicode
-    // characters for some dumb reason
-#ifdef __WIN32__
-    VALUE env = rb_const_get(rb_mKernel, rb_intern("ENV"));
-    return rb_funcall(env, rb_intern("[]"), 1, rb_str_new_cstr("USERNAME"));
-#else
     return mkxp_str_new_cstr(mkxp_sys::getUserName().c_str());
-#endif
 }
 
 RB_METHOD(mkxpGameTitle) {
@@ -921,14 +865,8 @@ RB_METHOD_GUARD(mkxpLaunch) {
 #endif
     }
     
-#if TARGET_OS_IPHONE
     // system() is unavailable on iOS
     throw Exception(Exception::MKXPError, "system() not available on iOS for \"%s\"", RSTRING_PTR(cmdname));
-#else
-    if (std::system(command.c_str()) != 0) {
-        throw Exception(Exception::MKXPError, "Failed to launch \"%s\"", RSTRING_PTR(cmdname));
-    }
-#endif
     
     return RUBY_Qnil;
 }
@@ -1291,7 +1229,6 @@ static void runRMXPScripts(BacktraceData &btData) {
     
     
     /* Execute engine-bundled preload scripts (platform compatibility layer) */
-#if TARGET_OS_IPHONE
     {
         const char *enginePreloads[] = {
             "platform_compat",
@@ -1329,7 +1266,6 @@ static void runRMXPScripts(BacktraceData &btData) {
             }
         }
     }
-#endif
     
     /* Execute preloaded scripts */
     for (std::vector<std::string>::const_iterator i = conf.preloadScripts.begin();
@@ -1349,7 +1285,6 @@ static void runRMXPScripts(BacktraceData &btData) {
             if (shState->rtData().rqTerm)
                 break;
             
-#if TARGET_OS_IPHONE
             /* Run postload scripts right before the last game script (Main).
                At this point all game classes/modules are defined, so scripts
                like pokeinput.rb can check $PokemonSystem and override Input
@@ -1389,7 +1324,6 @@ static void runRMXPScripts(BacktraceData &btData) {
                     }
                 }
             }
-#endif
             
             VALUE script = rb_ary_entry(scriptArray, i);
             VALUE scriptDecoded = rb_ary_entry(script, 3);
@@ -1436,7 +1370,6 @@ static void runRMXPScripts(BacktraceData &btData) {
             
             int state;
 
-#if TARGET_OS_IPHONE
             // Per-script trace. Useful when a game hangs inside a script:
             // the last TRACE line points at the culprit.
             {
@@ -1445,7 +1378,6 @@ static void runRMXPScripts(BacktraceData &btData) {
                          scriptName[0] ? scriptName : "(unnamed)");
                 mkxp_debugLog("TRACE", "binding-mri.cpp [C++]", trace);
             }
-#endif
 
             {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
@@ -1463,7 +1395,6 @@ static void runRMXPScripts(BacktraceData &btData) {
                 evalString(string, fname, &state);
             }
 
-#if TARGET_OS_IPHONE
             /* On iOS, native DLL/library loading (LoadError) and missing
              * native methods (NoMethodError from DLL-provided extensions)
              * are expected to fail. Many game scripts have optional native
@@ -1504,18 +1435,15 @@ static void runRMXPScripts(BacktraceData &btData) {
                 }
                 }
             }
-#endif
             if (state)
                 break;
 
-#if TARGET_OS_IPHONE
             {
                 char trace[600];
                 snprintf(trace, sizeof(trace), "exit  %03ld %s", i,
                          scriptName[0] ? scriptName : "(unnamed)");
                 mkxp_debugLog("TRACE", "binding-mri.cpp [C++]", trace);
             }
-#endif
         }
         
         VALUE exc = rb_gv_get("$!");
@@ -1603,7 +1531,6 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
  * because Ruby 3.1 does not support ruby_init/ruby_cleanup cycles within a
  * single process. On non-iOS the VM is torn down at the end of execute()
  * and the process exits, so everything runs exactly once. */
-#if TARGET_OS_IPHONE
 static bool s_rubyVMInitialized = false;
 static int s_lastRgssVer = 0;
 
@@ -1830,12 +1757,10 @@ static void bindRgssVersionSpecifics(Config &conf) {
     else if (rgssVer == 3)
         rb_eval_string(module_rpg3);
 }
-#endif /* TARGET_OS_IPHONE */
 
 static void mriBindingExecute() {
     Config &conf = shState->rtData().config;
 
-#if TARGET_OS_IPHONE
     /* On iOS the Ruby VM is persistent across sessions. Do the one-time
      * initialization only on session 1; subsequent sessions reuse the
      * existing VM but reset per-session game state. */
@@ -1854,9 +1779,6 @@ static void mriBindingExecute() {
         s_lastRgssVer = rgssVer;
         mriBindingExecuteInitOnce(conf);
     }
-#else
-    mriBindingExecuteInitOnce(conf);
-#endif
 
     mriBindingExecutePerSession(conf);
 }
@@ -1935,14 +1857,6 @@ static void mriBindingExecuteInitOnce(Config &conf) {
     }
 #else
     ruby_init();
-#ifdef __WIN32__
-    if (!conf.winConsole) {
-        VALUE iostr = rb_str_new2("NUL");
-        // Sysinit isn't a thing yet, so send io to /dev/null instead
-        rb_funcall(rb_gv_get("$stderr"), rb_intern("reopen"), 1, iostr);
-        rb_funcall(rb_gv_get("$stdout"), rb_intern("reopen"), 1, iostr);
-    }
-#endif
 #endif
 
     // Set the default encoding for regular expressions to UTF-8 when using syntax transform targeting Ruby <= 1.8
@@ -1973,7 +1887,6 @@ static void mriBindingExecutePerSession(Config &conf) {
 
     mriBindingInit();
 
-#if TARGET_OS_IPHONE
     /* Snapshot Object.constants right after mriBindingInit registers the
      * RGSS classes but before game scripts run. On subsequent sessions,
      * any constants not in this baseline were defined by game scripts and
@@ -2018,7 +1931,6 @@ static void mriBindingExecutePerSession(Config &conf) {
             return Qnil;
         }, Qnil, &err);
     }
-#endif
 
 #if RAPI_FULL > 187
     VALUE rbArgv = rb_get_argv();
@@ -2049,11 +1961,9 @@ static void mriBindingExecutePerSession(Config &conf) {
             rb_ary_push(lpaths, pathv);
         }
     }
-#ifndef WORKDIR_CURRENT
     else {
         rb_ary_push(lpaths, mkxp_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
     }
-#endif
     
     std::string &customScript = conf.customScript;
     if (!customScript.empty()) {
@@ -2070,13 +1980,9 @@ static void mriBindingExecutePerSession(Config &conf) {
     if (!NIL_P(exc) && !rb_obj_is_kind_of(exc, rb_eSystemExit))
         showExc(exc, btData);
     
-#if TARGET_OS_IPHONE
     /* On iOS, keep the Ruby VM alive across game sessions.
      * ruby_cleanup() corrupts Ruby 1.8's internal state and
      * makes ruby_init() crash on subsequent calls. */
-#else
-    ruby_cleanup(0);
-#endif
     
     shState->rtData().rqTermAck.set();
 }

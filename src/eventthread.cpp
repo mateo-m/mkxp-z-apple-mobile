@@ -36,30 +36,16 @@
 #include "sharedstate.h"
 #include "graphics.h"
 
-#ifndef MKXPZ_BUILD_XCODE
-#include "settingsmenu.h"
-#include "gamecontrollerdb.txt.xxd"
-#else
 #include "system/system.h"
 #include "filesystem/filesystem.h"
-#include "TouchBar.h"
-#endif
 
 #include "al-util.h"
 #include "debugwriter.h"
 
-#ifdef __APPLE__
 #include <TargetConditionals.h>
-#endif
-#if TARGET_OS_IPHONE
 #include "app_bridge.h"
 extern void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h);
 extern void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h);
-#endif
-
-#ifndef __APPLE__
-#include "util/string-util.h"
-#endif
 
 #include <string.h>
 
@@ -174,10 +160,11 @@ void EventThread::process(RGSSThreadData &rtData)
     
     initALCFunctions(rtData.alcDev);
     
-    // XXX this function breaks input focus on OSX
-#ifndef __APPLE__
-    SDL_SetEventFilter(eventFilter, &rtData);
-#endif
+    /* SDL_SetEventFilter(eventFilter, &rtData) is intentionally not
+     * called on Apple platforms - it was found to break input focus
+     * on OSX back when this engine targeted desktop. The filter is
+     * equally unnecessary on iOS so the call is omitted entirely. */
+
     
     fullscreen = rtData.config.fullscreen;
     int toggleFSMod = rtData.config.anyAltToggleFS ? KMOD_ALT : KMOD_LALT;
@@ -196,13 +183,7 @@ void EventThread::process(RGSSThreadData &rtData)
     
     bool terminate = false;
     
-#ifdef MKXPZ_BUILD_XCODE
     SDL_GameControllerAddMappingsFromFile(mkxp_fs::getPathForAsset("gamecontrollerdb", "txt").c_str());
-#else
-    SDL_GameControllerAddMappingsFromRW(
-        SDL_RWFromConstMem(___assets_gamecontrollerdb_txt, ___assets_gamecontrollerdb_txt_len),
-    1);
-#endif
     
     SDL_JoystickUpdate();
     if (SDL_NumJoysticks() > 0 && SDL_IsGameController(0)) {
@@ -228,12 +209,10 @@ void EventThread::process(RGSSThreadData &rtData)
     SDL_StopTextInput();
     
     textInputBuffer.clear();
-#ifndef MKXPZ_BUILD_XCODE
-    SettingsMenu *sMenu = 0;
-#else
-    // Will always be 0
+    /* SettingsMenu was a desktop SDL-drawn overlay; dropped with the
+     * desktop-code removal. Kept as a null pointer so legacy dispatch
+     * sites still compile. */
     void *sMenu = 0;
-#endif
     
     while (true)
     {
@@ -242,20 +221,6 @@ void EventThread::process(RGSSThreadData &rtData)
             Debug() << "EventThread: Event error";
             break;
         }
-#ifndef MKXPZ_BUILD_XCODE
-        if (sMenu && sMenu->onEvent(event))
-        {
-            if (sMenu->destroyReq())
-            {
-                delete sMenu;
-                sMenu = 0;
-                
-                updateCursorState(cursorInWindow && windowFocused, gameScreen);
-            }
-            
-            continue;
-        }
-#endif
         
         /* Preselect and discard unwanted events here */
         switch (event.type)
@@ -286,7 +251,6 @@ void EventThread::process(RGSSThreadData &rtData)
                         winH = event.window.data2;
                         
                         int drwW, drwH;
-#if TARGET_OS_IPHONE
                         // Drive the ANGLE CAMetalLayer drawableSize update
                         // on the main thread BEFORE posting to the RGSS
                         // thread. Otherwise eglQuerySurface returns stale
@@ -294,9 +258,6 @@ void EventThread::process(RGSSThreadData &rtData)
                         // computes a nonsense backingScaleFactor / winSize /
                         // scOffset on rotation.
                         mkxpGL_RefreshDrawableSize(win, &drwW, &drwH);
-#else
-                        SDL_GL_GetDrawableSize(win, &drwW, &drwH);
-#endif
                         
                         windowSizeMsg.post(Vec2i(winW, winH));
                         drawableSizeMsg.post(Vec2i(drwW, drwH));
@@ -375,17 +336,10 @@ void EventThread::process(RGSSThreadData &rtData)
                         break;
                     }
 
-#ifndef MKXPZ_BUILD_XCODE
-                    if (!sMenu)
-                    {
-                        sMenu = new SettingsMenu(rtData);
-                        updateCursorState(false, gameScreen);
-                    }
-                    
-                    sMenu->raise();
-#else
                     openSettingsWindow();
-#endif
+                    (void)rtData;
+                    (void)sMenu;
+                    (void)gameScreen;
                 }
                 
                 if (event.key.keysym.scancode == SDL_SCANCODE_F2)
@@ -563,20 +517,7 @@ void EventThread::process(RGSSThreadData &rtData)
                         
                     case REQUEST_MESSAGEBOX :
                     {
-#if TARGET_OS_IPHONE
                         mkxp_setErrorMessage((const char*)event.user.data1);
-#elif !defined(__APPLE__)
-                        // Try to format the message with additional newlines
-                        std::string message = copyWithNewlines((const char*) event.user.data1,
-                                                               70);
-                        SDL_ShowSimpleMessageBox(event.user.code,
-                                                 rtData.config.windowTitle.c_str(),
-                                                 message.c_str(), win);
-#else
-                        SDL_ShowSimpleMessageBox(event.user.code,
-                                                 rtData.config.windowTitle.c_str(),
-                                                 (const char*)event.user.data1, win);
-#endif
                         free(event.user.data1);
                         msgBoxDone.set();
                         break;
@@ -587,17 +528,7 @@ void EventThread::process(RGSSThreadData &rtData)
                         break;
                         
                     case REQUEST_SETTINGS :
-#ifndef MKXPZ_BUILD_XCODE
-                        if (!sMenu)
-                        {
-                            sMenu = new SettingsMenu(rtData);
-                            updateCursorState(false, gameScreen);
-                        }
-                        
-                        sMenu->raise();
-#else
                         openSettingsWindow();
-#endif
                         break;
                         
                     case UPDATE_FPS :
@@ -644,9 +575,7 @@ void EventThread::process(RGSSThreadData &rtData)
     if (SDL_GameControllerGetAttached(ctrl))
         SDL_GameControllerClose(ctrl);
     
-#ifndef MKXPZ_BUILD_XCODE
-    delete sMenu;
-#endif
+    (void)sMenu;
 }
 
 int EventThread::eventFilter(void *data, SDL_Event *event)
@@ -870,19 +799,13 @@ SDL_GameController *EventThread::controller() const
 
 void EventThread::notifyFrame()
 {
-#ifdef MKXPZ_BUILD_XCODE
-    uint32_t frames = round(shState->graphics().averageFrameRate());
-    updateTouchBarFPSDisplay(frames);
-#endif
+    /* Touch Bar FPS display was macOS-only; dropped with the
+     * desktop-code removal. */
     if (!fps.sendUpdates)
         return;
-    
+
     SDL_Event event;
-#ifdef MKXPZ_BUILD_XCODE
-    event.user.code = frames;
-#else
     event.user.code = round(shState->graphics().averageFrameRate());
-#endif
     event.user.type = usrIdStart + UPDATE_FPS;
     SDL_PushEvent(&event);
 }

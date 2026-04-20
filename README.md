@@ -1,24 +1,20 @@
 # mkxp-z (Apple mobile fork)
 
-Fork of [mkxp-z](https://github.com/mkxp-z/mkxp-z) with the iOS- and iPadOS-specific changes needed to embed the engine inside [Empo](https://github.com/mateo-m/empo-app). Upstream does not target mobile Apple platforms, so this branch carries patches that:
+Fork of [mkxp-z](https://github.com/mkxp-z/mkxp-z) targeting iOS, iPadOS, and tvOS. This is the engine powering [Empo](https://github.com/mateo-m/empo-app). Upstream does not target mobile Apple platforms; this fork has diverged far enough that upstream convergence is no longer a goal, though individual fixes may still be offered upstream as targeted patches.
 
-- Keep SDL, the GL context, OpenAL, and the Ruby VM alive across multiple game sessions (iOS can't relaunch the app mid-process).
-- Cross-compile Ruby 1.8 from [JoiPlay's fork](https://github.com/joiplay/ruby) for RGSS1 compatibility.
-- Expose a small C bridge (`src/app_bridge.h`) so a SwiftUI host can drive the engine without touching its internals.
-- Work around Apple-specific quirks - FBO 0 isn't the screen, `alcMakeContextCurrent` must run on the main thread, Ruby 1.8's 512 KB pthread stack is too small, and so on.
+What this fork provides:
 
-The goal is to stay as close to upstream as possible and rebase onto it when it makes sense.
+- **Persistent engine state** across game sessions. SDL, the ANGLE EGL context, OpenAL, and the Ruby VM all survive the main process for as long as the app is running, so sessions can be quit and relaunched without process restart.
+- **ANGLE (OpenGL ES over Metal) only.** The legacy EAGL path was removed because it crashed on device rotation and Apple deprecated OpenGL ES in iOS 12.
+- **Ruby 3.1 with syntax-transform patches** for game-script compatibility, and Ruby 1.8 still supported for RGSS1 titles.
+- **`src/app_bridge.h`** - a small C ABI the SwiftUI host uses to drive the engine (pause, resume, inject input, swap game paths, etc.) without touching internals.
+- **Apple-platform quirks handled** - CAMetalLayer rotation, cross-session alias/cvar/singleton-method cleanup in the persistent Ruby VM, iOS AVAudioSession coordination, screen-FBO capture timing, and so on.
 
 ## Building
 
-For iOS/iPadOS, this engine is consumed as a git submodule by [empo-app](https://github.com/mateo-m/empo-app), which handles dependency builds, Xcode project generation, and packaging. See the empo-app README.
+This engine is consumed as a git submodule by [empo-app](https://github.com/mateo-m/empo-app), which builds it via Xcode along with the app shell, dependency libraries, and packaging. It does not build standalone. Refer to the empo-app README for build instructions.
 
-Desktop builds are currently broken on this fork:
-
-- **macOS via meson** was already disabled upstream (use their Xcode project).
-- **Linux and Windows** still have the upstream `meson.build`, but the new source files we added (`src/app_bridge.cpp`, `src/display/movie.cpp`, etc.) aren't registered in `src/meson.build`, so linking would fail. Fixing it is doable - add the missing files and guard the iOS-only ones with `#if TARGET_OS_IPHONE` - but it isn't done yet.
-
-If you want the desktop builds, [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) is the place to go.
+Desktop builds (macOS / Linux / Windows) are **not supported** on this fork. The desktop-specific code paths, build system files (meson, platform Makefiles, Xcode project for macOS), and platform shims have all been removed. If you want desktop builds of mkxp-z, use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) instead.
 
 ## License
 
