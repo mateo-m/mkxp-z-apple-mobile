@@ -577,6 +577,67 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
   *outCtx = ctx;
   return true;
 }
+
+/* Block until the Library UI selects a game. On quit, returns false.
+ * On success, copies the selected path into `dataDir` and resets
+ * bridge state + cwd so the engine picks up the new game. Called
+ * between game sessions (not before the first one - that wait happens
+ * before SDL_Init in main()). */
+static bool waitForNextGame(char *dataDir, size_t dataDirLen) {
+  mkxp_setEngineTerminated();
+  EventThread::resetAllInputStates();
+
+  const char *nextPath = mkxp_waitForGamePath();
+  if (!nextPath || !nextPath[0])
+    return false; // empty path = quit
+
+  snprintf(dataDir, dataDirLen, "%s", nextPath);
+
+  /* Reset bridge state AFTER copying the path, so the UI has had
+   * time to observe mkxp_isEngineTerminated() during
+   * mkxp_waitForGamePath(). */
+  mkxp_resetBridgeState();
+
+  mkxp_fs::setCurrentDirectory(dataDir);
+  return true;
+}
+
+/* Wait for rqTermAck with run-loop pumping so SwiftUI stays responsive.
+ * Gives up after 10 seconds. Returns true if ack received. */
+static bool waitForRGSSAck(RGSSThreadData &rtData) {
+  for (int i = 0; i < 1000; ++i) {
+    if (rtData.rqTermAck) {
+      Debug() << "RGSS thread ack'd request after" << i * 10 << "ms";
+      return true;
+    }
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+  }
+  return false;
+}
+
+/* Block until the RGSS thread posts sessionDone. Pumps the run loop
+ * meanwhile so the UI stays responsive during teardown. */
+static void waitForSessionDone(SDL_sem *sessionDone) {
+  while (SDL_SemTryWait(sessionDone) != 0) {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+  }
+}
+
+/* Clear the framebuffer to black between sessions so the next session
+ * doesn't briefly flash the last frame of the previous one. The GL
+ * context is held by the RGSS thread (blocked on sessionReady at this
+ * point); claim it on the main thread for this single clear, then
+ * release. */
+static void clearFramebufferBetweenSessions(SDL_Window *win,
+                                             SDL_GLContext ctx,
+                                             GLuint screenFBO) {
+  mkxpGL_MakeCurrent(win, ctx);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, screenFBO);
+  gl.ClearColor(0, 0, 0, 1);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  mkxpGL_SwapWindow(win);
+  mkxpGL_MakeCurrent(win, NULL);
+}
 #endif // TARGET_OS_IPHONE
 
 int main(int argc, char *argv[]) {
@@ -689,160 +750,95 @@ int main(int argc, char *argv[]) {
     SDL_Thread *rgssThread = nullptr;
     bool firstSession = true;
     while (true) {
-    // On subsequent sessions, wait for the library to provide a new game path
-    if (!firstSession) {
-        mkxp_setEngineTerminated();
-        EventThread::resetAllInputStates();
-        const char *nextPath = mkxp_waitForGamePath();
-        if (nextPath && nextPath[0]) {
-            snprintf(dataDir, sizeof(dataDir), "%s", nextPath);
-        } else {
-            break; // empty path = quit
-        }
-        // Reset bridge state AFTER copying the path, so the UI has had time
-        // to observe mkxp_isEngineTerminated() during mkxp_waitForGamePath().
-        mkxp_resetBridgeState();
+      /* On sessions after the first, block until the Library UI
+       * provides the next game. An empty path means the user quit. */
+      if (!firstSession && !waitForNextGame(dataDir, sizeof(dataDir)))
+        break;
+      firstSession = false;
 
-        // Set working directory to the selected game
-        mkxp_fs::setCurrentDirectory(dataDir);
-    }
-    firstSession = false;
+      /* Read the game's config. */
+      Config conf;
+      conf.read(argc, argv);
 
-    /* Read the game's config */
-    Config conf;
-    conf.read(argc, argv);
+      if (conf.windowTitle.empty())
+        conf.windowTitle = conf.game.title;
 
-    if (conf.windowTitle.empty())
-      conf.windowTitle = conf.game.title;
+      assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
+      printRgssVersion(conf.rgssVersion);
 
-    assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
-    printRgssVersion(conf.rgssVersion);
+      initSyntaxTransform(conf);
 
-    initSyntaxTransform(conf);
+      SDL_SetWindowTitle(persistWin, conf.windowTitle.c_str());
 
-    /* Update the persistent window for this game session */
-    SDL_SetWindowTitle(persistWin, conf.windowTitle.c_str());
+      if (!mode.refresh_rate)
+        conf.syncToRefreshrate = false;
 
-    if (!mode.refresh_rate)
-      conf.syncToRefreshrate = false;
+      EventThread eventThread;
 
-    EventThread eventThread;
+      RGSSThreadData rtData(&eventThread, argv[0], persistWin, persistAlcDev,
+                            persistAlcCtx, mode.refresh_rate,
+                            mkxp_sys::getScalingFactor(), conf, persistGLCtx);
 
-    RGSSThreadData rtData(&eventThread, argv[0], persistWin, persistAlcDev,
-                          persistAlcCtx, mode.refresh_rate,
-                          mkxp_sys::getScalingFactor(), conf, persistGLCtx);
+      int winW, winH, drwW, drwH;
+      SDL_GetWindowSize(persistWin, &winW, &winH);
+      rtData.windowSizeMsg.post(Vec2i(winW, winH));
 
-    int winW, winH, drwW, drwH;
-    SDL_GetWindowSize(persistWin, &winW, &winH);
-    rtData.windowSizeMsg.post(Vec2i(winW, winH));
+      mkxpGL_GetDrawableSize(persistWin, &drwW, &drwH);
+      rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
 
-    mkxpGL_GetDrawableSize(persistWin, &drwW, &drwH);
-    rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
+      rtData.bindingUpdateMsg.post(loadBindings(conf));
 
-    /* Load and post key bindings */
-    rtData.bindingUpdateMsg.post(loadBindings(conf));
+      /* Drain stale events (especially SDL_QUIT) left over from the
+       * previous session so the event loop doesn't exit immediately. */
+      SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
-    /* Drain stale events (especially SDL_QUIT) left over from the
-     * previous session so the event loop doesn't exit immediately. */
-    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-
-    if (!rgssThread) {
+      if (!rgssThread) {
         /* First session: create the persistent RGSS thread.
          * Ruby 3.1's GC is precise, so 1 MB is plenty. */
         rgssThread = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                   1 * 1024 * 1024, &rtData);
-    } else {
+                                                    1 * 1024 * 1024, &rtData);
+      } else {
         /* Subsequent sessions: signal the persistent RGSS thread
          * with the new session data. */
         s_nextRTData = &rtData;
         SDL_SemPost(s_rgssSessionReady);
-    }
-
-    /* Start event processing (blocks until game ends) */
-    eventThread.process(rtData);
-
-    /* Request RGSS thread to stop */
-    rtData.rqTerm.set();
-
-    /* Wait for RGSS thread to finish THIS session (not the thread itself).
-     * The thread stays alive, waiting for the next session.
-     * On iOS, pump the run loop so SwiftUI can render (e.g. transition
-     * back to library after an error alert). SDL_Delay alone blocks
-     * the main thread and freezes the UI. */
-    for (int i = 0; i < 1000; ++i) {
-      if (rtData.rqTermAck) {
-        Debug() << "RGSS thread ack'd request after" << i * 10 << "ms";
-        break;
       }
-#if TARGET_OS_IPHONE
-      CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
-#else
-      SDL_Delay(10);
-#endif
-    }
 
-    if (rtData.rqTermAck) {
-        /* Wait for the RGSS thread to finish cleanup (SharedState::finiInstance)
-         * before we proceed. It will post s_rgssSessionDone then block on
-         * s_rgssSessionReady.
-         * On iOS, use non-blocking SemTryWait + run loop pump so the
-         * UI stays responsive during teardown. */
-#if TARGET_OS_IPHONE
-        while (SDL_SemTryWait(s_rgssSessionDone) != 0) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
-        }
-#else
-        SDL_SemWait(s_rgssSessionDone);
-#endif
-    } else {
-#if TARGET_OS_IPHONE
-      // The RGSS thread is still running (probably in an infinite loop)
-      // and never called checkShutdown(). Our single-reused-thread
-      // architecture cannot respawn a new VM while the old one is
-      // blocked, so the only safe recovery is to force-quit the app.
-      // Mark the state and post the alert; the UI will terminate the
-      // process when the user taps OK.
-      mkxp_setEngineHung();
-      // Intentionally generic - by the time this alert is seen, the
-      // user may have already selected a different game in the Library.
-      // Referring to the stuck game by title would confuse them.
-      mkxp_setErrorMessage(
-          "The previous game stopped responding. The app will now close.");
-#else
-      SDL_ShowSimpleMessageBox(
-          SDL_MESSAGEBOX_ERROR, conf.game.title.c_str(),
-          std::string("The RGSS script seems to be stuck. "+conf.game.title+" will now force quit.").c_str(),
-          persistWin);
-#endif
-    }
+      /* Run event processing until the game ends. */
+      eventThread.process(rtData);
 
-    if (!rtData.rgssErrorMsg.empty()) {
-      Debug() << rtData.rgssErrorMsg;
-#if TARGET_OS_IPHONE
-      mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
-#else
-      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, conf.game.title.c_str(),
-                               rtData.rgssErrorMsg.c_str(), persistWin);
-#endif
-    }
+      /* Ask the RGSS thread to stop, then wait for it. */
+      rtData.rqTerm.set();
+      const bool acked = waitForRGSSAck(rtData);
 
-    /* Clean up any remaining events */
-    eventThread.cleanup();
+      if (acked) {
+        /* RGSS thread is shutting down: wait for it to finish
+         * SharedState::finiInstance before we proceed. */
+        waitForSessionDone(s_rgssSessionDone);
+      } else {
+        /* The RGSS thread is stuck (never called checkShutdown).
+         * Our single-reused-thread architecture cannot respawn a
+         * new VM while the old one is blocked, so the only safe
+         * recovery is to force-quit the app. The UI will terminate
+         * the process when the user taps OK. */
+        mkxp_setEngineHung();
+        /* Intentionally generic - by the time this alert is seen,
+         * the user may have already selected a different game in
+         * the Library. */
+        mkxp_setErrorMessage(
+            "The previous game stopped responding. The app will now close.");
+      }
 
-    /* Clear the framebuffer to black so the next session doesn't
-     * briefly flash the last frame of the previous session.
-     * NOTE: GL context is held by the RGSS thread (which is blocked
-     * on s_rgssSessionReady). Temporarily claim it here. */
-    mkxpGL_MakeCurrent(persistWin, persistGLCtx);
-    gl.BindFramebuffer(GL_FRAMEBUFFER, s_screenFBO);
-    gl.ClearColor(0, 0, 0, 1);
-    gl.Clear(GL_COLOR_BUFFER_BIT);
-    mkxpGL_SwapWindow(persistWin);
-    mkxpGL_MakeCurrent(persistWin, NULL);
+      if (!rtData.rgssErrorMsg.empty()) {
+        Debug() << rtData.rgssErrorMsg;
+        mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
+      }
 
-    Debug() << "Game session ended.";
+      eventThread.cleanup();
 
-    continue;
+      clearFramebufferBetweenSessions(persistWin, persistGLCtx, s_screenFBO);
+
+      Debug() << "Game session ended.";
     } // end while(true) game session loop
 
     /* Signal the RGSS thread to exit */
