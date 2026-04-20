@@ -226,15 +226,24 @@ void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
 
 #if TARGET_OS_IPHONE
 /* Persistent RGSS thread for iOS.
- * Ruby 1.8's VM has internal state (parser, symbol table, thread-local
- * storage) bound to the thread that called ruby_init(). Creating a new
- * thread for each game session causes crashes because the VM's stack
- * boundaries and TLS references become stale.
- * Solution: keep the RGSS thread alive across sessions. The main thread
- * posts new RGSSThreadData via these shared variables. */
-static SDL_sem *s_rgssSessionReady = nullptr;   // main → RGSS: "new session available"
-static SDL_sem *s_rgssSessionDone  = nullptr;    // RGSS → main: "session finished"
-static RGSSThreadData *s_nextRTData = nullptr;   // the data for the next session
+ * Ruby's VM has internal state (parser, symbol table, thread-local
+ * storage) bound to the thread that called ruby_init(). Creating a
+ * new thread for each game session causes crashes because the VM's
+ * stack boundaries and TLS references become stale. Solution: keep
+ * the RGSS thread alive across sessions and receive new session data
+ * via EngineHost's semaphores. */
+
+/* Forward-declaration only. The actual class definition is below.
+ * The RGSS thread reaches the session-coordination members through
+ * this pointer, which is set by EngineHost::init() and cleared by
+ * EngineHost::shutdown(). Exactly one EngineHost exists per process
+ * so this pointer is safe to use globally. */
+class EngineHost;
+static EngineHost *s_host = nullptr;
+
+static SDL_sem *hostSessionReady();
+static SDL_sem *hostSessionDone();
+static RGSSThreadData *hostNextRTData();
 
 int rgssThreadFun(void *userdata) {
   RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
@@ -283,20 +292,21 @@ int rgssThreadFun(void *userdata) {
 
     SharedState::finiInstance();
 
-    /* Release GL context so the main thread can safely claim or
-     * destroy it during a hot-swap. Deleting/reusing a context
-     * that's still current on another thread is undefined behavior. */
+    /* Release GL context so the main thread can safely claim it
+     * (e.g. for the inter-session clear). Making the same context
+     * current on another thread while it's still bound here is
+     * undefined behavior. */
     mkxpGL_MakeCurrent(threadData->window, NULL);
 
     /* Signal main thread that session is done */
-    SDL_SemPost(s_rgssSessionDone);
+    SDL_SemPost(hostSessionDone());
 
     /* Wait for the main thread to provide the next session's data.
-     * This blocks until main calls SDL_SemPost(s_rgssSessionReady). */
-    SDL_SemWait(s_rgssSessionReady);
+     * Blocks until EngineHost posts its sessionReady semaphore. */
+    SDL_SemWait(hostSessionReady());
 
     /* Pick up the new RGSSThreadData */
-    threadData = s_nextRTData;
+    threadData = hostNextRTData();
     if (!threadData)
       break; // null = quit
 
@@ -640,16 +650,23 @@ static void clearFramebufferBetweenSessions(SDL_Window *win,
 }
 
 /* EngineHost owns the iOS process-wide engine resources (window, EGL
- * context, OpenAL device/context, RGSS thread) and drives the game
- * session loop. Lifecycle: init() -> runSessions() -> shutdown().
- * The three phases must be called in that order; init() returning
- * false means the host is already torn down and runSessions/shutdown
- * must not be called. */
+ * context, OpenAL device/context, RGSS thread, session-coordination
+ * semaphores) and drives the game session loop. Lifecycle:
+ * init() -> runSessions() -> shutdown(). The three phases must be
+ * called in that order; init() returning false means the host is
+ * already torn down and runSessions/shutdown must not be called. */
 class EngineHost {
 public:
   bool init(int argc, char *argv[]);
   void runSessions(int argc, char *argv[]);
   void shutdown();
+
+  /* Session-coordination accessors used by rgssThreadFun via the
+   * s_host global pointer. Members are raw because the RGSS thread
+   * and main thread synchronize via the semaphores themselves. */
+  SDL_sem         *sessionReady()  { return sessionReady_; }
+  SDL_sem         *sessionDone()   { return sessionDone_; }
+  RGSSThreadData  *nextRTData()    { return nextRTData_; }
 
 private:
   SDL_Window      *persistWin_    = nullptr;
@@ -659,7 +676,17 @@ private:
   SDL_Thread      *rgssThread_    = nullptr;
   SDL_DisplayMode  displayMode_{};
   char             dataDir_[512]{};
+  SDL_sem         *sessionReady_  = nullptr; // main -> RGSS: "new session available"
+  SDL_sem         *sessionDone_   = nullptr; // RGSS -> main: "session finished"
+  RGSSThreadData  *nextRTData_    = nullptr; // session data the RGSS thread picks up
 };
+
+/* Accessor shims so rgssThreadFun (a C-shaped function) can reach
+ * EngineHost's members without including a class header or exposing
+ * members publicly to any other TU. */
+static SDL_sem *hostSessionReady() { return s_host ? s_host->sessionReady() : nullptr; }
+static SDL_sem *hostSessionDone()  { return s_host ? s_host->sessionDone()  : nullptr; }
+static RGSSThreadData *hostNextRTData() { return s_host ? s_host->nextRTData() : nullptr; }
 
 bool EngineHost::init(int argc, char *argv[]) {
   /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
@@ -710,8 +737,11 @@ bool EngineHost::init(int argc, char *argv[]) {
 
   SDL_GetDisplayMode(0, 0, &displayMode_);
 
-  s_rgssSessionReady = SDL_CreateSemaphore(0);
-  s_rgssSessionDone  = SDL_CreateSemaphore(0);
+  sessionReady_ = SDL_CreateSemaphore(0);
+  sessionDone_  = SDL_CreateSemaphore(0);
+
+  /* Publish ourselves so the RGSS thread can reach session members. */
+  s_host = this;
   return true;
 }
 
@@ -764,12 +794,12 @@ void EngineHost::runSessions(int argc, char *argv[]) {
        * Ruby 3.1's GC is precise, so 1 MB is plenty. */
       rgssThread_ = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
                                                     1 * 1024 * 1024, &rtData);
-    } else {
-      /* Subsequent sessions: signal the persistent RGSS thread
-       * with the new session data. */
-      s_nextRTData = &rtData;
-      SDL_SemPost(s_rgssSessionReady);
-    }
+      } else {
+        /* Subsequent sessions: signal the persistent RGSS thread
+         * with the new session data. */
+        nextRTData_ = &rtData;
+        SDL_SemPost(sessionReady_);
+      }
 
     /* Run event processing until the game ends. */
     eventThread.process(rtData);
@@ -778,11 +808,11 @@ void EngineHost::runSessions(int argc, char *argv[]) {
     rtData.rqTerm.set();
     const bool acked = waitForRGSSAck(rtData);
 
-    if (acked) {
-      /* RGSS thread is shutting down: wait for it to finish
-       * SharedState::finiInstance before we proceed. */
-      waitForSessionDone(s_rgssSessionDone);
-    } else {
+      if (acked) {
+        /* RGSS thread is shutting down: wait for it to finish
+         * SharedState::finiInstance before we proceed. */
+        waitForSessionDone(sessionDone_);
+      } else {
       /* The RGSS thread is stuck (never called checkShutdown).
        * Our single-reused-thread architecture cannot respawn a
        * new VM while the old one is blocked, so the only safe
@@ -811,21 +841,27 @@ void EngineHost::runSessions(int argc, char *argv[]) {
 
 void EngineHost::shutdown() {
   /* Signal the RGSS thread to exit. */
-  s_nextRTData = nullptr;
-  if (s_rgssSessionReady)
-    SDL_SemPost(s_rgssSessionReady);
+  nextRTData_ = nullptr;
+  if (sessionReady_)
+    SDL_SemPost(sessionReady_);
   if (rgssThread_) {
     SDL_WaitThread(rgssThread_, 0);
     rgssThread_ = nullptr;
   }
-  if (s_rgssSessionReady) {
-    SDL_DestroySemaphore(s_rgssSessionReady);
-    s_rgssSessionReady = nullptr;
+  if (sessionReady_) {
+    SDL_DestroySemaphore(sessionReady_);
+    sessionReady_ = nullptr;
   }
-  if (s_rgssSessionDone) {
-    SDL_DestroySemaphore(s_rgssSessionDone);
-    s_rgssSessionDone = nullptr;
+  if (sessionDone_) {
+    SDL_DestroySemaphore(sessionDone_);
+    sessionDone_ = nullptr;
   }
+
+  /* Stop publishing ourselves. After this the RGSS thread must not
+   * try to use any EngineHost member (shouldn't happen since we
+   * waited for it above, but keep the contract explicit). */
+  if (s_host == this)
+    s_host = nullptr;
 
   /* Cleanup persistent resources. Unreachable in normal flow but
    * kept for completeness in case the session loop ever exits. */
