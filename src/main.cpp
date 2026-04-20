@@ -120,21 +120,44 @@ static void setGLES2Attributes() {
 }
 #endif
 
+/* Process-lifetime buffers populated by printGLInfo() once the EGL
+ * context is current. Exposed to the app layer via
+ * mkxp_getANGLEVersion() / mkxp_getMetalDeviceName() so the SwiftUI
+ * debug overlay can show them without re-parsing GL strings. */
+static char s_angleVersion[128]    = "unknown";
+static char s_metalDeviceName[128] = "unknown";
+
+extern "C" const char *mkxp_getANGLEVersion(void) {
+    return s_angleVersion;
+}
+
+extern "C" const char *mkxp_getMetalDeviceName(void) {
+    return s_metalDeviceName;
+}
+
 static void printGLInfo() {
     const std::string renderer(glGetStringInt(GL_RENDERER));
     const std::string version(glGetStringInt(GL_VERSION));
     std::regex rgx("ANGLE \\((.+), ANGLE Metal Renderer: (.+), Version (.+)\\)");
-        
+
     std::smatch matches;
     if (std::regex_search(renderer, matches, rgx)) {
-        
+
         Debug() << "Backend           :" << "Metal";
         Debug() << "Metal Device      :" << matches[2] << "(" + matches[1].str() + ")";
         Debug() << "Renderer Version  :" << matches[3].str();
-        
-    std::smatch vmatches;
+
+        /* Cache the Metal device name for the debug overlay.
+         * matches[2] is the device string (e.g. "Apple A15 GPU"). */
+        snprintf(s_metalDeviceName, sizeof(s_metalDeviceName), "%s",
+                 matches[2].str().c_str());
+
+        std::smatch vmatches;
         if (std::regex_search(version, vmatches, std::regex("\\(ANGLE (.+) git hash: .+\\)"))) {
             Debug() << "ANGLE Version     :" << vmatches[1].str();
+            /* Cache the ANGLE version for the debug overlay. */
+            snprintf(s_angleVersion, sizeof(s_angleVersion), "%s",
+                     vmatches[1].str().c_str());
         }
     } else {
       Debug() << "Backend      :" << "OpenGL";

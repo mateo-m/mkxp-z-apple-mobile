@@ -136,6 +136,20 @@ int         mkxp_getSupportedRGSSVersionMask(void);
 // The returned pointer is a static string literal, do not free.
 const char *mkxp_getRubyVersion(void);
 
+// ANGLE version string, extracted from GL_VERSION at engine init.
+// Example: "2.1.0.abcdef1234". Returns "unknown" before the engine
+// has initialized GL, or if the GL_VERSION string didn't match the
+// expected ANGLE format. The returned pointer is a process-lifetime
+// buffer, do not free.
+const char *mkxp_getANGLEVersion(void);
+
+// Metal device name, extracted from GL_RENDERER at engine init.
+// Example: "Apple A15 GPU" or "Apple A17 Pro GPU". Returns "unknown"
+// before the engine has initialized GL, or if the GL_RENDERER string
+// didn't match the expected ANGLE format. The returned pointer is a
+// process-lifetime buffer, do not free.
+const char *mkxp_getMetalDeviceName(void);
+
 // Game viewport rect (logical points)
 
 void        mkxp_setGameRect(float x, float y, float w, float h);
