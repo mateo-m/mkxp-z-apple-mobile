@@ -416,12 +416,22 @@ def kappatalize(s)
 	return s
 end
 
+# `method_defined?` does not see private methods. On iOS this preload runs
+# once per game session in a persistent Ruby VM, so a second-session pass
+# must not re-alias `initialize` (it would capture our wrapper as the
+# alias target, leading to infinite recursion when the wrapper calls the
+# "native" initialize). Treat both public and private methods as "already
+# defined" for our idempotency guards.
+def mkxp_method_or_alias_defined?(klass, name)
+	klass.method_defined?(name) || klass.private_method_defined?(name)
+end
+
 class Win32API
 	NATIVE_ON_WINDOWS = true unless const_defined?("NATIVE_ON_WINDOWS")
 	TOLERATE_ERRORS = true unless const_defined?("TOLERATE_ERRORS")
 	LOG_NATIVE = false unless const_defined?("LOG_NATIVE")
 
-	alias_method :mkxp_native_initialize, :initialize unless method_defined?(:mkxp_native_initialize)
+	alias_method :mkxp_native_initialize, :initialize unless mkxp_method_or_alias_defined?(self, :mkxp_native_initialize)
 	def initialize(dll, func, *args)
 		@dll = dll
 		@func = func
@@ -450,7 +460,7 @@ class Win32API
 
 	end
 
-	alias_method :mkxp_native_call, :call unless method_defined?(:mkxp_native_call)
+	alias_method :mkxp_native_call, :call unless mkxp_method_or_alias_defined?(self, :mkxp_native_call)
 	def call(*args)
 		if @mkxp_wrap_impl
 			return @mkxp_wrap_impl.call(args)
