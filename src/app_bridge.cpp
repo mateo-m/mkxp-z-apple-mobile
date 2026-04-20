@@ -279,6 +279,27 @@ int mkxp_getSupportedRGSSVersionMask(void) {
 #endif
 }
 
+const char *mkxp_getRubyVersion(void) {
+    // The build system injects MKXPZ_RUBY_VERSION as a quoted string
+    // literal (e.g. "3.1" / "1.8") matching the linked Ruby runtime.
+    // If the define is missing the bridge returns "unknown" and logs
+    // once so the discrepancy is noticed in debug logs rather than
+    // silently misreporting a version.
+#if defined(MKXPZ_RUBY_VERSION)
+    return MKXPZ_RUBY_VERSION;
+#else
+    static std::atomic<bool> warned{false};
+    bool expected = false;
+    if (warned.compare_exchange_strong(expected, true)) {
+        mkxp_debugLog("BRIDGE", "app_bridge.cpp [C++]",
+                      "MKXPZ_RUBY_VERSION is not defined; build system "
+                      "should inject it via GCC_PREPROCESSOR_DEFINITIONS. "
+                      "Reporting \"unknown\" to the UI.");
+    }
+    return "unknown";
+#endif
+}
+
 const char *mkxp_getGameTitle(void) {
     if (s_engineTerminated.load(std::memory_order_acquire)) return "";
     if (!SharedState::instance) return "";
