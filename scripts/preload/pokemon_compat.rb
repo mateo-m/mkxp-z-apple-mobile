@@ -30,43 +30,36 @@ end
 # internal native C++ object is already freed, raising RGSSError.
 #
 # We wrap property accessors to return safe defaults instead of
-# crashing. These patches must re-apply every session because
-# mriBindingInit() re-registers native methods, overwriting our
-# wrappers.
+# crashing. Two constraints:
+#   - The alias must run only ONCE across all sessions. Re-aliasing on
+#     session 2 would capture our own wrapper (from session 1) as the
+#     "original", producing infinite recursion.
+#   - The wrapper `define_method` must run EVERY session because
+#     mriBindingInit re-registers the native C method on Sprite / Window
+#     / etc. at the start of every session, overwriting our wrapper.
+def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
+  return unless klass.method_defined?(meth)
+  orig = :"_mkxp_orig_#{meth}"
+  unless klass.method_defined?(orig) || klass.private_method_defined?(orig)
+    klass.send(:alias_method, orig, meth)
+  end
+  klass.send(:define_method, meth) do
+    return default if disposed?
+    begin
+      send(orig)
+    rescue RGSSError
+      default
+    end
+  end
+end
+
 _disposed_safe_zero = [:x, :y, :z, :ox, :oy, :width, :height,
                         :opacity, :back_opacity, :contents_opacity]
 _disposed_safe_false = [:visible]
 
 [Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
-  _disposed_safe_zero.each do |meth|
-    next unless klass.method_defined?(meth)
-    orig = :"_mkxp_orig_#{meth}"
-    # Always re-alias: mriBindingInit re-registers native methods each
-    # session, overwriting our wrapper. We must re-alias and re-wrap.
-    klass.send(:alias_method, orig, meth)
-    klass.send(:define_method, meth) do
-      return 0 if disposed?
-      begin
-        send(orig)
-      rescue RGSSError
-        0
-      end
-    end
-  end
-
-  _disposed_safe_false.each do |meth|
-    next unless klass.method_defined?(meth)
-    orig = :"_mkxp_orig_#{meth}"
-    klass.send(:alias_method, orig, meth)
-    klass.send(:define_method, meth) do
-      return false if disposed?
-      begin
-        send(orig)
-      rescue RGSSError
-        false
-      end
-    end
-  end
+  _disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
+  _disposed_safe_false.each { |m| _mkxp_install_disposed_safe_wrapper(klass, m, false) }
 end
 
 # --- Null mouse shim ---

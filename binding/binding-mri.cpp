@@ -98,6 +98,8 @@ extern const char module_rpg3[];
 static VALUE topSelf;
 
 static void mriBindingExecute();
+static void mriBindingExecuteInitOnce(Config &conf);
+static void mriBindingExecutePerSession(Config &conf);
 static void mriBindingTerminate();
 static void mriBindingReset();
 
@@ -288,6 +290,18 @@ static VALUE legacy_kernel_match(VALUE self, VALUE other) {
 #endif // RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 
+/* Idempotent wrapper around rb_define_alias for iOS, where mriBindingInit
+ * runs once per game session in a persistent Ruby VM. On the second and
+ * later sessions, the original implementation has already been replaced by
+ * our own wrapper (from session 1). Re-aliasing would capture our wrapper
+ * as the "original", producing infinite recursion when the wrapper calls
+ * the alias. Skip the alias if it's already defined. */
+static void mkxp_define_alias_once(VALUE klass, const char *aliasName,
+                                   const char *origName) {
+    if (rb_method_boundp(klass, rb_intern(aliasName), /*ex=*/0)) return;
+    rb_define_alias(klass, aliasName, origName);
+}
+
 static void mriBindingInit() {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 #if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
@@ -356,8 +370,8 @@ static void mriBindingInit() {
         _rb_define_module_function(rb_mKernel, "print", mriPrint);
         _rb_define_module_function(rb_mKernel, "p", mriP);
         
-        rb_define_alias(rb_singleton_class(rb_mKernel), "_mkxp_kernel_caller_alias",
-                        "caller");
+        mkxp_define_alias_once(rb_singleton_class(rb_mKernel),
+                               "_mkxp_kernel_caller_alias", "caller");
         _rb_define_module_function(rb_mKernel, "caller", _kernelCaller);
     }
     
@@ -415,10 +429,10 @@ static void mriBindingInit() {
     
     /* Ruby 1.8 String#[] / String#[]= compatibility (C-level for $~ safety) */
 #if RAPI_FULL > 187
-    rb_define_alias(rb_cString, "_mkxp_c_aref", "[]");
-    rb_define_alias(rb_cString, "_mkxp_c_aset", "[]=");
-    rb_define_alias(rb_cString, "_mkxp_c_getbyte", "getbyte");
-    rb_define_method(rb_cString, "[]", mkxpStringAref, -1);
+    mkxp_define_alias_once(rb_cString, "_mkxp_c_aref",    "[]");
+    mkxp_define_alias_once(rb_cString, "_mkxp_c_aset",    "[]=");
+    mkxp_define_alias_once(rb_cString, "_mkxp_c_getbyte", "getbyte");
+    rb_define_method(rb_cString, "[]",  mkxpStringAref, -1);
     rb_define_method(rb_cString, "[]=", mkxpStringAset, -1);
 #endif
     
@@ -1582,17 +1596,232 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
     showMsg(ms);
 }
 
+/* On iOS the Ruby VM is initialized once and reused across game sessions
+ * because Ruby 3.1 does not support ruby_init/ruby_cleanup cycles within a
+ * single process. On non-iOS the VM is torn down at the end of execute()
+ * and the process exits, so everything runs exactly once. */
+#if TARGET_OS_IPHONE
+static bool s_rubyVMInitialized = false;
+static int s_lastRgssVer = 0;
+
+/* Reset per-session game state that accumulated in the persistent VM
+ * during the previous session. Must run before the new game's scripts
+ * start so game-defined constants / singletons / globals from the
+ * previous session don't bleed into the new one. */
+static void resetBetweenSessions() {
+    /* 1. Remove game-defined constants from Object. Anything not in the
+     *    baseline (captured right after mriBindingInit on session 1)
+     *    was defined by game scripts and must go to prevent
+     *    superclass-mismatch errors between different games. */
+    VALUE baseConsts = rb_gv_get("$__mkxp_base_consts");
+    if (!NIL_P(baseConsts)) {
+        /* Constants defined by engine preloads (pokemon_compat etc.) are
+         * not in the baseline but are safe to keep — they're engine code,
+         * not game code. */
+        VALUE preloadKeep = rb_ary_new();
+        rb_ary_push(preloadKeep, rb_id2sym(rb_intern("MkxpNullMouse")));
+        VALUE currentConsts = rb_funcall(rb_cObject, rb_intern("constants"), 0);
+        long len = RARRAY_LEN(currentConsts);
+        for (long ci = 0; ci < len; ++ci) {
+            VALUE cname = rb_ary_entry(currentConsts, ci);
+            if (rb_funcall(baseConsts, rb_intern("include?"), 1, cname) == Qtrue)
+                continue;
+            if (rb_funcall(preloadKeep, rb_intern("include?"), 1, cname) == Qtrue)
+                continue;
+            int err = 0;
+            rb_protect([](VALUE arg) -> VALUE {
+                rb_funcall(rb_cObject, rb_intern("remove_const"), 1, arg);
+                return Qnil;
+            }, cname, &err);
+        }
+    }
+
+    /* (Game-script method cleanup is unnecessary: mriBindingInit re-runs
+     *  every session in mriBindingExecutePerSession and re-installs all C
+     *  methods, overwriting any game-script redefinitions from the
+     *  previous session.) */
+
+    /* 2. Clear class/module instance variables on engine-owned classes.
+     *    Games use ivars on class objects (e.g. `@SpriteResizerMethodsAliased`
+     *    on Sprite) as one-shot guards for their alias blocks. These
+     *    guards persist across sessions with the Ruby VM, so on session
+     *    2 the guarded alias blocks silently skip, leaving game-added
+     *    helper methods undefined after their guarded `alias` was
+     *    skipped. Clearing the ivars forces the alias blocks to run
+     *    again on session 2+. */
+    {
+        int err = 0;
+        rb_protect([](VALUE) -> VALUE {
+            const char *classesToClear[] = {
+                "Bitmap", "Sprite", "Window", "Viewport", "Plane",
+                "Tilemap", "Font", "String", "Input", "Graphics",
+                "Audio", nullptr
+            };
+            for (int i = 0; classesToClear[i]; ++i) {
+                ID id = rb_intern(classesToClear[i]);
+                if (!rb_const_defined(rb_cObject, id)) continue;
+                VALUE klass = rb_const_get(rb_cObject, id);
+                VALUE ivars = rb_funcall(klass, rb_intern("instance_variables"), 0);
+                long n = RARRAY_LEN(ivars);
+                for (long k = 0; k < n; ++k) {
+                    VALUE name = rb_ary_entry(ivars, k);
+                    rb_ivar_set(klass, SYM2ID(name), Qnil);
+                }
+            }
+            return Qnil;
+        }, Qnil, &err);
+    }
+
+    /* 3. Clear game globals that persist across sessions. */
+    rb_set_errinfo(Qnil);
+
+    /* Pokemon Essentials / Pokemon fangames.
+     * $mouse is replaced with a MkxpNullMouse shim (defined in
+     * pokemon_compat preload) rather than nil, because scripts call
+     * methods on it every frame (leftClick?, x, y, etc.). */
+    {
+        int err = 0;
+        rb_protect([](VALUE) -> VALUE {
+            ID nullId = rb_intern("MkxpNullMouse");
+            if (rb_const_defined(rb_cObject, nullId)) {
+                VALUE nullKlass = rb_const_get(rb_cObject, nullId);
+                VALUE instance = rb_class_new_instance(0, NULL, nullKlass);
+                rb_gv_set("$mouse", instance);
+            } else {
+                rb_gv_set("$mouse", Qnil);
+            }
+            return Qnil;
+        }, Qnil, &err);
+    }
+    rb_gv_set("$game_exists", Qnil);   /* Uranium hard-reset flag */
+    rb_gv_set("$PokemonSystem", Qnil);
+    rb_gv_set("$PokemonGlobal", Qnil);
+    rb_gv_set("$Trainer", Qnil);
+
+    /* Standard RGSS globals (used by all RPG Maker games) */
+    rb_gv_set("$game_switches", Qnil);
+    rb_gv_set("$game_variables", Qnil);
+    rb_gv_set("$game_self_switches", Qnil);
+    rb_gv_set("$game_screen", Qnil);
+    rb_gv_set("$game_map", Qnil);
+    rb_gv_set("$game_player", Qnil);
+    rb_gv_set("$game_party", Qnil);
+    rb_gv_set("$game_troop", Qnil);
+    rb_gv_set("$game_temp", Qnil);
+    rb_gv_set("$game_system", Qnil);
+    rb_gv_set("$scene", Qnil);
+    rb_gv_set("$data_system", Qnil);
+    rb_gv_set("$data_actors", Qnil);
+    rb_gv_set("$data_classes", Qnil);
+    rb_gv_set("$data_skills", Qnil);
+    rb_gv_set("$data_items", Qnil);
+    rb_gv_set("$data_weapons", Qnil);
+    rb_gv_set("$data_armors", Qnil);
+    rb_gv_set("$data_enemies", Qnil);
+    rb_gv_set("$data_troops", Qnil);
+    rb_gv_set("$data_states", Qnil);
+    rb_gv_set("$data_animations", Qnil);
+    rb_gv_set("$data_tilesets", Qnil);
+    rb_gv_set("$data_common_events", Qnil);
+
+    /* 4. Force GC to collect stale Ruby objects from previous session. */
+    rb_gc();
+}
+
+/* Remove Window/Tilemap classes and the RGSS data module so the next
+ * session (with a possibly different rgssVer) can rebind them to the
+ * correct C implementation. */
+static void unbindRgssVersionSpecifics() {
+    int err = 0;
+    rb_protect([](VALUE) -> VALUE {
+        ID winId = rb_intern("Window");
+        if (rb_const_defined(rb_cObject, winId))
+            rb_funcall(rb_cObject, rb_intern("remove_const"), 1, ID2SYM(winId));
+        ID tmId = rb_intern("Tilemap");
+        if (rb_const_defined(rb_cObject, tmId))
+            rb_funcall(rb_cObject, rb_intern("remove_const"), 1, ID2SYM(tmId));
+        ID rpgId = rb_intern("RPG");
+        if (rb_const_defined(rb_cObject, rpgId))
+            rb_funcall(rb_cObject, rb_intern("remove_const"), 1, ID2SYM(rpgId));
+        return Qnil;
+    }, Qnil, &err);
+}
+
+/* Rebind rgssVer-dependent classes and evaluate the matching RPG module. */
+static void bindRgssVersionSpecifics(Config &conf) {
+    if (rgssVer == 1) {
+        windowBindingInit();
+        tilemapBindingInit();
+    } else {
+        windowVXBindingInit();
+        tilemapVXBindingInit();
+    }
+
+    if (rgssVer >= 3) {
+        _rb_define_module_function(rb_mKernel, "rgss_main", mriRgssMain);
+        _rb_define_module_function(rb_mKernel, "rgss_stop", mriRgssStop);
+
+        _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
+        _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
+
+        rb_define_global_const("RGSS_VERSION", mkxp_str_new_cstr("3.0.1"));
+    } else {
+        _rb_define_module_function(rb_mKernel, "print", mriPrint);
+        _rb_define_module_function(rb_mKernel, "p", mriP);
+    }
+
+    if (rgssVer == 1)
+        rb_eval_string(module_rpg1);
+    else if (rgssVer == 2)
+        rb_eval_string(module_rpg2);
+    else if (rgssVer == 3)
+        rb_eval_string(module_rpg3);
+}
+#endif /* TARGET_OS_IPHONE */
+
 static void mriBindingExecute() {
     Config &conf = shState->rtData().config;
-    
+
+#if TARGET_OS_IPHONE
+    /* On iOS the Ruby VM is persistent across sessions. Do the one-time
+     * initialization only on session 1; subsequent sessions reuse the
+     * existing VM but reset per-session game state. */
+    const bool firstSession = !s_rubyVMInitialized;
+    const bool rgssVerChanged = s_rubyVMInitialized && (rgssVer != s_lastRgssVer);
+
+    if (!firstSession) {
+        resetBetweenSessions();
+        if (rgssVerChanged) {
+            unbindRgssVersionSpecifics();
+            bindRgssVersionSpecifics(conf);
+        }
+        s_lastRgssVer = rgssVer;
+    } else {
+        s_rubyVMInitialized = true;
+        s_lastRgssVer = rgssVer;
+        mriBindingExecuteInitOnce(conf);
+    }
+#else
+    mriBindingExecuteInitOnce(conf);
+#endif
+
+    mriBindingExecutePerSession(conf);
+}
+
+/* One-time Ruby VM setup, runs on the first mriBindingExecute() call per
+ * process. On iOS the VM persists across game sessions; on other platforms
+ * ruby_cleanup is called after each session and the process exits. */
+static void mriBindingExecuteInitOnce(Config &conf) {
 #if RAPI_MAJOR >= 2
     /* Normally only a ruby executable would do a sysinit,
      * but not doing it will lead to crashes due to closed
      * stdio streams on some platforms (eg. Windows) */
+    {
     int argc = 0;
     char **argv = 0;
     ruby_sysinit(&argc, &argv);
-    
+    }
+
     RUBY_INIT_STACK;
     ruby_init();
     
@@ -1653,11 +1882,7 @@ static void mriBindingExecute() {
     }
 #else
     ruby_init();
-    // TODO (Phase 3): multi-session cleanup for Ruby 3.1 goes here.
-    // The previous implementation was 1.8-specific. Ruby 3.1 supports
-    // ruby_cleanup()/ruby_init() cycles, but Object.constants diff and
-    // Input singleton method cleanup still apply.
-#if 0 /* DISABLED: 1.8-only session cleanup, to be rewritten for 3.1 */
+#if 0 /* DEAD: 1.8-only per-session cleanup; kept for historical reference */
     if (false) {
         /* The RGSS thread is now persistent on iOS — same thread for all
          * sessions. rb_gc_stack_start should still be valid, but update
@@ -1800,7 +2025,7 @@ static void mriBindingExecute() {
     // Set the default encoding for regular expressions to UTF-8 when using syntax transform targeting Ruby <= 1.8
     rb_gv_set("$KCODE", rb_str_new_cstr("UTF8"));
     rb_gv_set("$-K", rb_str_new_cstr("UTF8"));
-    
+
     topSelf = rgssVer == 1 ? Qnil : rb_eval_string("self");
     // Register as a GC root so Ruby doesn't collect the value between
     // sessions when nothing on the stack references it.
@@ -1809,7 +2034,40 @@ static void mriBindingExecute() {
         rb_gc_register_address(&topSelf);
         topSelfRegistered = true;
     }
-    
+}
+
+/* Per-session Ruby setup and game script execution, runs every call to
+ * mriBindingExecute(). Runs mriBindingInit every session to reinstall C
+ * methods on top of any game-script redefinitions from the previous
+ * session. All rb_define_alias sites in mriBindingInit must be
+ * idempotent across sessions (see mkxp_define_alias_once). */
+static void mriBindingExecutePerSession(Config &conf) {
+    /* RbData must be live before mriBindingInit: inputBindingInit on RGSS3
+     * writes getRbData()->buttoncodeHash. */
+    RbData rbData;
+    shState->setBindingData(&rbData);
+    BacktraceData btData;
+
+    mriBindingInit();
+
+#if TARGET_OS_IPHONE
+    /* Snapshot Object.constants right after mriBindingInit registers the
+     * RGSS classes but before game scripts run. On subsequent sessions,
+     * any constants not in this baseline were defined by game scripts and
+     * must be removed to prevent superclass-mismatch errors between
+     * different games.
+     * Only capture once — the baseline is the same across sessions
+     * because mriBindingInit is deterministic. */
+    {
+        VALUE existing = rb_gv_get("$__mkxp_base_consts");
+        if (NIL_P(existing)) {
+            VALUE consts = rb_funcall(rb_cObject, rb_intern("constants"), 0);
+            VALUE dup = rb_funcall(consts, rb_intern("dup"), 0);
+            rb_gv_set("$__mkxp_base_consts", dup);
+        }
+    }
+#endif
+
 #if RAPI_FULL > 187
     VALUE rbArgv = rb_get_argv();
 #else
@@ -1842,29 +2100,6 @@ static void mriBindingExecute() {
 #ifndef WORKDIR_CURRENT
     else {
         rb_ary_push(lpaths, mkxp_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
-    }
-#endif
-    
-    RbData rbData;
-    shState->setBindingData(&rbData);
-    BacktraceData btData;
-    
-    mriBindingInit();
-    
-#if TARGET_OS_IPHONE
-    /* Snapshot Object.constants AFTER mriBindingInit registers RGSS classes
-     * but BEFORE game scripts run. On subsequent sessions, any constants not
-     * in this baseline were defined by game scripts and must be removed to
-     * prevent superclass-mismatch errors between different games.
-     * Use C API to avoid parser accumulation. */
-    {
-        static bool baselineCaptured = false;
-        if (!baselineCaptured) {
-            VALUE consts = rb_funcall(rb_cObject, rb_intern("constants"), 0);
-            VALUE dup = rb_funcall(consts, rb_intern("dup"), 0);
-            rb_gv_set("$__mkxp_base_consts", dup);
-            baselineCaptured = true;
-        }
     }
 #endif
     

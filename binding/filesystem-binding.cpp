@@ -289,9 +289,16 @@ void fileIntBindingInit() {
 #if RAPI_FULL > 187
     /* We overload the built-in 'Marshal::load()' function to silently
      * insert our utf8proc that ensures all read strings will be
-     * UTF-8 encoded */
+     * UTF-8 encoded.
+     *
+     * On iOS this init runs once per session; the alias must be
+     * idempotent or it captures our own _marshalLoad wrapper from
+     * the previous session as the "original", producing infinite
+     * recursion. */
     VALUE marsh = rb_const_get(rb_cObject, rb_intern("Marshal"));
-    rb_define_alias(rb_singleton_class(marsh), "_mkxp_load_alias", "load");
+    VALUE marshSC = rb_singleton_class(marsh);
+    if (!rb_method_boundp(marshSC, rb_intern("_mkxp_load_alias"), /*ex=*/0))
+        rb_define_alias(marshSC, "_mkxp_load_alias", "load");
     _rb_define_module_function(marsh, "load", _marshalLoad);
 #endif
 }
