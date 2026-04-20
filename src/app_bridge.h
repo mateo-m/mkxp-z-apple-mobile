@@ -131,6 +131,11 @@ const char *mkxp_getGameTitle(void);
 // Determined at compile time by which Ruby runtime is linked.
 int         mkxp_getSupportedRGSSVersionMask(void);
 
+// Ruby runtime version the engine was built against.
+// Example: "3.1" for Ruby 3.1, "1.8" for Ruby 1.8.
+// The returned pointer is a static string literal, do not free.
+const char *mkxp_getRubyVersion(void);
+
 // Game viewport rect (logical points)
 
 void        mkxp_setGameRect(float x, float y, float w, float h);
