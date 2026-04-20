@@ -516,6 +516,69 @@ static void shutdownSDLLibs() {
   SDL_Quit();
 }
 
+#if TARGET_OS_IPHONE
+/* Create the iOS persistent SDL window. No SDL_WINDOW_OPENGL flag
+ * because ANGLE uses a plain CALayer (not a CAEAGLLayer) as its
+ * native window. Returns nullptr on failure after posting an error. */
+static SDL_Window *createPersistentWindow(const Config &initConf) {
+  Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
+
+  /* Allow all orientations. Without this, SDL infers supported
+   * orientations from the window w/h: a landscape-shaped game
+   * (e.g. 640x480) would lock the window to landscape only,
+   * preventing portrait gameplay. */
+  SDL_SetHint(SDL_HINT_ORIENTATIONS,
+              "Portrait LandscapeLeft LandscapeRight");
+
+  SDL_Window *win = SDL_CreateWindow(
+      initConf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
+      SDL_WINDOWPOS_UNDEFINED, initConf.defScreenW,
+      initConf.defScreenH, winFlags);
+
+  if (!win)
+    showInitError(std::string("Error creating window: ") + SDL_GetError());
+
+  return win;
+}
+
+/* Initialize ANGLE and yield the EGL context pointer. Must be called
+ * from the main thread; the RGSS thread claims the context at session
+ * start. Returns nullptr on failure. */
+static SDL_GLContext createPersistentGL(SDL_Window *win) {
+  if (!initANGLE(win))
+    return nullptr;
+
+  /* Use the EGL context pointer as a non-null sentinel so
+   * mkxpGL_MakeCurrent can distinguish bind from unbind. */
+  SDL_GLContext ctx = (SDL_GLContext)s_eglContext;
+
+  /* Release from main thread - the RGSS thread will claim it.
+   * EGL contexts can only be current on one thread at a time. */
+  mkxpGL_MakeCurrent(win, NULL);
+  Debug() << "Using ANGLE (Metal)";
+  return ctx;
+}
+
+/* Open the default OpenAL device and create a context on it. The
+ * device pointer is written to *outDev; the context to *outCtx.
+ * Returns false on failure. */
+static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
+  ALCdevice *dev = alcOpenDevice(0);
+  if (!dev) {
+    showInitError("Could not detect an available audio device.");
+    return false;
+  }
+
+  ALCcontext *ctx = alcCreateContext(dev, 0);
+  if (ctx)
+    alcMakeContextCurrent(ctx);
+
+  *outDev = dev;
+  *outCtx = ctx;
+  return true;
+}
+#endif // TARGET_OS_IPHONE
+
 int main(int argc, char *argv[]) {
   try {
 
@@ -597,53 +660,23 @@ int main(int argc, char *argv[]) {
     Config initConf;
     initConf.read(argc, argv);
 
-    /* iOS uses ANGLE/Metal exclusively. The SDL_WINDOW_OPENGL flag
-     * is NOT set because ANGLE uses a plain CALayer (not a
-     * CAEAGLLayer) as its native window. */
-    Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
-
-    /* Allow all orientations. Without this, SDL infers supported
-     * orientations from the window w/h: a landscape-shaped game
-     * (e.g. 640x480) would lock the window to landscape only,
-     * preventing portrait gameplay. */
-    SDL_SetHint(SDL_HINT_ORIENTATIONS,
-                "Portrait LandscapeLeft LandscapeRight");
-
-    SDL_Window *persistWin = SDL_CreateWindow(
-        initConf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
-        SDL_WINDOWPOS_UNDEFINED, initConf.defScreenW,
-        initConf.defScreenH, winFlags);
-
-    if (!persistWin) {
-      showInitError(std::string("Error creating window: ") + SDL_GetError());
+    SDL_Window *persistWin = createPersistentWindow(initConf);
+    if (!persistWin)
       return 0;
-    }
 
-    if (!initANGLE(persistWin)) {
-        SDL_DestroyWindow(persistWin);
-        return 0;
-    }
-
-    /* Use the EGL context pointer as a non-null sentinel so
-     * mkxpGL_MakeCurrent can distinguish bind from unbind. */
-    SDL_GLContext persistGLCtx = (SDL_GLContext)s_eglContext;
-
-    /* Release from main thread - the RGSS thread will claim it.
-     * EGL contexts can only be current on one thread at a time. */
-    mkxpGL_MakeCurrent(persistWin, NULL);
-    Debug() << "Using ANGLE (Metal)";
-
-    ALCdevice *persistAlcDev = alcOpenDevice(0);
-    if (!persistAlcDev) {
-      showInitError("Could not detect an available audio device.");
-      if (persistGLCtx) SDL_GL_DeleteContext(persistGLCtx);
+    SDL_GLContext persistGLCtx = createPersistentGL(persistWin);
+    if (!persistGLCtx) {
       SDL_DestroyWindow(persistWin);
       return 0;
     }
 
-    ALCcontext *persistAlcCtx = alcCreateContext(persistAlcDev, 0);
-    if (persistAlcCtx)
-      alcMakeContextCurrent(persistAlcCtx);
+    ALCdevice *persistAlcDev = nullptr;
+    ALCcontext *persistAlcCtx = nullptr;
+    if (!createPersistentAudio(&persistAlcDev, &persistAlcCtx)) {
+      teardownANGLE();
+      SDL_DestroyWindow(persistWin);
+      return 0;
+    }
 
     SDL_DisplayMode mode;
     SDL_GetDisplayMode(0, 0, &mode);
