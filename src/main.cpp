@@ -102,7 +102,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
 static void showInitError(const std::string &msg);
-#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+#if TARGET_OS_IPHONE
 static bool initANGLE(SDL_Window *win);
 static void teardownANGLE();
 extern "C" void *mkxp_getANGLENativeLayer(void *sdlWindow);
@@ -112,7 +112,7 @@ static inline const char *glGetStringInt(GLenum name) {
   return (const char *)gl.GetString(name);
 }
 
-#ifdef GLES2_HEADER
+#if defined(GLES2_HEADER) && !TARGET_OS_IPHONE
 static void setGLES2Attributes() {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -152,88 +152,52 @@ static void printGLInfo() {
 static SDL_GLContext initGL(SDL_Window *win, Config &conf,
                             RGSSThreadData *threadData);
 
-/* On iOS, the screen FBO is non-zero (SDL creates an FBO backed by
- * CAEAGLLayer). This ID is captured once during initGL() and reused
- * for all sessions, since the window and GL context persist.
+/* On iOS, ANGLE is the only renderer. The screen FBO is captured
+ * once during initANGLE() (typically 0 under ANGLE/Metal) and reused
+ * for all sessions, since the window and EGL context persist.
  * Re-querying GL_FRAMEBUFFER_BINDING on subsequent sessions would
- * return 0 (because SharedState::finiInstance deleted all game FBOs
- * and GL reverts the binding to 0), which is wrong on iOS. */
+ * be unsafe because SharedState::finiInstance deletes all game FBOs
+ * and the binding may not be what we expect. */
 #if TARGET_OS_IPHONE
 static GLuint s_screenFBO = 0;
-// Atomic because the RGSS thread reads this every frame (swapGLBuffer,
-// makeCurrent) while the main thread writes it at startup and on
-// renderer hot-swap. Though both writes happen when the RGSS thread
-// is not actually running concurrently (init / session-boundary
-// semaphore), plain loads/stores on a non-atomic are UB under the
-// C++ memory model and the compiler may emit unsafe codegen.
-std::atomic<MKXPRenderer> s_currentRenderer{MKXP_RENDERER_OPENGL_ES};
-#ifdef MKXPZ_HAS_ANGLE
 EGLDisplay s_eglDisplay = EGL_NO_DISPLAY;
 EGLSurface s_eglSurface = EGL_NO_SURFACE;
 EGLContext s_eglContext = EGL_NO_CONTEXT;
 #endif
-#endif
 
 #if TARGET_OS_IPHONE
-// Wrappers that dispatch to EGL or SDL depending on renderer.
-static void mkxpGL_MakeCurrent(SDL_Window *win, SDL_GLContext ctx) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-        if (ctx)
-            eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
-        else
-            eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        return;
-    }
-#endif
-    SDL_GL_MakeCurrent(win, ctx);
+// iOS uses ANGLE/EGL exclusively. These wrappers forward to the EGL
+// equivalents; `ctx` is a sentinel (the EGL context pointer cast to
+// SDL_GLContext for type compatibility with the RGSSThreadData struct).
+static void mkxpGL_MakeCurrent(SDL_Window * /*win*/, SDL_GLContext ctx) {
+    if (ctx)
+        eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
+    else
+        eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
-static void mkxpGL_SwapWindow(SDL_Window *win) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-        eglSwapBuffers(s_eglDisplay, s_eglSurface);
-        return;
-    }
-#endif
-    SDL_GL_SwapWindow(win);
+static void mkxpGL_SwapWindow(SDL_Window * /*win*/) {
+    eglSwapBuffers(s_eglDisplay, s_eglSurface);
 }
 
-// SDL_GL_GetDrawableSize returns logical points under ANGLE (no SDL GL
-// context). Query the EGL surface for the real pixel dimensions instead.
-void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-        EGLint eglW = 0, eglH = 0;
-        eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_WIDTH, &eglW);
-        eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_HEIGHT, &eglH);
-        if (w) *w = eglW;
-        if (h) *h = eglH;
-        return;
-    }
-#endif
-    SDL_GL_GetDrawableSize(win, w, h);
+// Query the EGL surface for real pixel dimensions. SDL_GL_GetDrawableSize
+// would return logical points under ANGLE (no SDL GL context is bound).
+void mkxpGL_GetDrawableSize(SDL_Window * /*win*/, int *w, int *h) {
+    EGLint eglW = 0, eglH = 0;
+    eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_WIDTH, &eglW);
+    eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_HEIGHT, &eglH);
+    if (w) *w = eglW;
+    if (h) *h = eglH;
 }
 
-#ifdef MKXPZ_HAS_ANGLE
 extern "C" void mkxp_refreshANGLENativeLayerSize(void *sdlWindow, int *outW, int *outH);
-#endif
 
-// Use at rotation / resize events. Under ANGLE, eglQuerySurface
-// returns a drawable size cached during the last obtainNextDrawable
-// call - i.e., last frame's pre-rotation dims. Instead of trusting
-// that cache, we drive the Metal layer update ourselves on the main
-// thread and return the resulting pixel size. Under OpenGL ES this
-// falls through to the normal query since SDL's EAGL view updates
-// its backing dims synchronously in layoutSubviews.
+// Called on rotation / resize. eglQuerySurface returns a drawable size
+// cached during the last obtainNextDrawable call (pre-rotation). Drive
+// the CAMetalLayer update on the main thread ourselves and return the
+// resulting pixel size.
 void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-        mkxp_refreshANGLENativeLayerSize(win, w, h);
-        return;
-    }
-#endif
-    SDL_GL_GetDrawableSize(win, w, h);
+    mkxp_refreshANGLENativeLayerSize(win, w, h);
 }
 #endif
 
@@ -313,13 +277,12 @@ int rgssThreadFun(void *userdata) {
     if (!threadData)
       break; // null = quit
 
-    /* Reclaim the GL context for this thread. Required after a
-     * renderer hot-swap, where the old context was destroyed and
-     * a new one created on the main thread. */
+    /* Reclaim the EGL context for this thread. The context is the
+     * same one used by every session - ANGLE's EGL context persists
+     * for the life of the process. */
     mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
 
-    /* Screen FBO may differ between renderers (EAGL uses a non-zero
-     * FBO, ANGLE typically uses 0). */
+    /* Screen FBO is captured once at init and typically 0 under ANGLE. */
     FBO::screenFramebufferID = FBO::ID(s_screenFBO);
     gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
     FBO::boundFramebufferID = FBO::screenFramebufferID;
@@ -611,18 +574,10 @@ int main(int argc, char *argv[]) {
     Config initConf;
     initConf.read(argc, argv);
 
-#ifdef MKXPZ_HAS_ANGLE
-    s_currentRenderer.store(mkxp_getSelectedRenderer(), std::memory_order_release);
-#endif
-
+    /* iOS uses ANGLE/Metal exclusively. The SDL_WINDOW_OPENGL flag
+     * is NOT set because ANGLE uses a plain CALayer (not a
+     * CAEAGLLayer) as its native window. */
     Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
-
-    if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
-        winFlags |= SDL_WINDOW_OPENGL;
-#ifdef GLES2_HEADER
-        setGLES2Attributes();
-#endif
-    }
 
     /* Allow all orientations. Without this, SDL infers supported
      * orientations from the window w/h: a landscape-shaped game
@@ -641,30 +596,19 @@ int main(int argc, char *argv[]) {
       return 0;
     }
 
-    SDL_GLContext persistGLCtx = nullptr;
-
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-#ifdef MKXPZ_HAS_ANGLE
-        if (!initANGLE(persistWin)) {
-            SDL_DestroyWindow(persistWin);
-            return 0;
-        }
-        // Use the EGL context pointer as a non-null sentinel so
-        // mkxpGL_MakeCurrent can distinguish bind from unbind.
-        persistGLCtx = (SDL_GLContext)s_eglContext;
-        // Release from main thread — the RGSS thread will claim it.
-        // EGL contexts can only be current on one thread at a time.
-        mkxpGL_MakeCurrent(persistWin, NULL);
-        Debug() << "Using" << mkxp_rendererName(s_currentRenderer);
-#endif
-    } else {
-        persistGLCtx = initGL(persistWin, initConf, nullptr);
-        if (!persistGLCtx) {
-            SDL_DestroyWindow(persistWin);
-            return 0;
-        }
-        Debug() << "Using" << mkxp_rendererName(s_currentRenderer);
+    if (!initANGLE(persistWin)) {
+        SDL_DestroyWindow(persistWin);
+        return 0;
     }
+
+    /* Use the EGL context pointer as a non-null sentinel so
+     * mkxpGL_MakeCurrent can distinguish bind from unbind. */
+    SDL_GLContext persistGLCtx = (SDL_GLContext)s_eglContext;
+
+    /* Release from main thread - the RGSS thread will claim it.
+     * EGL contexts can only be current on one thread at a time. */
+    mkxpGL_MakeCurrent(persistWin, NULL);
+    Debug() << "Using ANGLE (Metal)";
 
     ALCdevice *persistAlcDev = alcOpenDevice(0);
     if (!persistAlcDev) {
@@ -841,115 +785,6 @@ int main(int argc, char *argv[]) {
     mkxpGL_MakeCurrent(persistWin, NULL);
 
     Debug() << "Game session ended.";
-
-#ifdef MKXPZ_HAS_ANGLE
-    /* Hot-swap renderer if the user changed the setting between sessions.
-     * The SDL window must be destroyed and recreated because SDL bakes
-     * the layer type (CAEAGLLayer vs plain CALayer) at creation time
-     * based on the SDL_WINDOW_OPENGL flag. */
-    {
-      MKXPRenderer wantRenderer = mkxp_getSelectedRenderer();
-      if (wantRenderer != s_currentRenderer) {
-        Debug() << "Renderer change requested:"
-                << mkxp_rendererName(s_currentRenderer)
-                << "->"
-                << mkxp_rendererName(wantRenderer);
-
-        /* Tear down current renderer */
-        if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-          teardownANGLE();
-        } else if (persistGLCtx) {
-          SDL_GL_DeleteContext(persistGLCtx);
-          persistGLCtx = nullptr;
-        }
-
-        /* Destroy old window — layer type can't be changed after creation */
-        SDL_DestroyWindow(persistWin);
-        persistWin = nullptr;
-
-        /* Recreate window with correct flags */
-        Uint32 newFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
-        if (wantRenderer != MKXP_RENDERER_ANGLE) {
-          newFlags |= SDL_WINDOW_OPENGL;
-          setGLES2Attributes();
-        }
-
-        SDL_SetHint(SDL_HINT_ORIENTATIONS,
-                     "Portrait LandscapeLeft LandscapeRight");
-
-        persistWin = SDL_CreateWindow(
-            conf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
-            SDL_WINDOWPOS_UNDEFINED, conf.defScreenW,
-            conf.defScreenH, newFlags);
-
-        if (!persistWin) {
-          Debug() << "Failed to recreate window for renderer swap:"
-                  << SDL_GetError();
-          /* Fatal — can't continue without a window */
-          break;
-        }
-
-        /* Init new renderer */
-        bool swapOK = false;
-        if (wantRenderer == MKXP_RENDERER_ANGLE) {
-          swapOK = initANGLE(persistWin);
-          if (swapOK)
-            persistGLCtx = (SDL_GLContext)s_eglContext;
-        } else {
-          persistGLCtx = initGL(persistWin, conf, nullptr);
-          swapOK = (persistGLCtx != nullptr);
-        }
-
-        if (swapOK) {
-          s_currentRenderer.store(wantRenderer, std::memory_order_release);
-          char swapBuf[256];
-          snprintf(swapBuf, sizeof(swapBuf),
-                   "Renderer swap complete - %s screenFBO:%u glCtx:%s",
-                   mkxp_rendererName(s_currentRenderer), s_screenFBO,
-                   persistGLCtx ? "valid" : "NULL");
-          mkxp_debugLog("HOTSWAP", "main.cpp", swapBuf);
-        } else {
-          /* Swap failed — recreate with the old renderer */
-          Debug() << "Renderer swap failed, reverting...";
-          SDL_DestroyWindow(persistWin);
-
-          Uint32 fallbackFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
-          if (s_currentRenderer != MKXP_RENDERER_ANGLE) {
-            fallbackFlags |= SDL_WINDOW_OPENGL;
-            setGLES2Attributes();
-          }
-
-          persistWin = SDL_CreateWindow(
-              conf.windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED,
-              SDL_WINDOWPOS_UNDEFINED, conf.defScreenW,
-              conf.defScreenH, fallbackFlags);
-
-          if (!persistWin) {
-            Debug() << "Failed to recreate fallback window — fatal";
-            break;
-          }
-
-          if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-            if (!initANGLE(persistWin)) {
-              Debug() << "Failed to reinit ANGLE — fatal";
-              break;
-            }
-            persistGLCtx = (SDL_GLContext)s_eglContext;
-          } else {
-            persistGLCtx = initGL(persistWin, conf, nullptr);
-            if (!persistGLCtx) {
-              Debug() << "Failed to reinit OpenGL ES — fatal";
-              break;
-            }
-          }
-          Debug() << "Reverted to" << mkxp_rendererName(s_currentRenderer);
-        }
-
-        /* Release GL — the RGSS thread will reclaim it */
-        mkxpGL_MakeCurrent(persistWin, NULL);
-      }
-    }
-#endif
 
     continue;
     } // end while(true) game session loop
@@ -1251,7 +1086,7 @@ int main(int argc, char *argv[]) {
   }
 }
 
-#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
+#if TARGET_OS_IPHONE
 static bool initANGLE(SDL_Window *win) {
   s_eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   if (s_eglDisplay == EGL_NO_DISPLAY) {
@@ -1314,7 +1149,7 @@ static bool initANGLE(SDL_Window *win) {
 
   glGetProcAddressOverride = (GLGetProcAddressFunc)eglGetProcAddress;
 
-  // Capture screen FBO (may be 0 under ANGLE, unlike Apple's EAGL)
+  // Capture screen FBO (typically 0 under ANGLE/Metal).
   GLint fbo = 0;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
   s_screenFBO = static_cast<GLuint>(fbo);
@@ -1371,17 +1206,6 @@ static SDL_GLContext initGL(SDL_Window *win, Config &conf,
     GLINIT_SHOWERROR(std::string("Could not create OpenGL context: ") + SDL_GetError());
     return 0;
   }
-
-#if TARGET_OS_IPHONE
-  /* Capture the screen FBO right after context creation, while SDL's
-   * CAEAGLLayer-backed FBO is still bound. This value persists for the
-   * lifetime of the window and is reused by all game sessions. */
-  {
-    GLint fbo = 0;
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
-    s_screenFBO = static_cast<GLuint>(fbo);
-  }
-#endif
 
   try {
     initGLFunctions();

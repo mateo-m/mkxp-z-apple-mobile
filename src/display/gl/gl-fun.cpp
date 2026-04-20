@@ -84,11 +84,6 @@ Exception(Exception::MKXPError, "%s", msg)
 
 void initGLFunctions()
 {
-    /* Zero the entire struct so extension-dependent pointers and
-     * capability flags don't carry over from a previous renderer
-     * (e.g. after a hot-swap between EAGL and ANGLE). */
-    memset(&gl, 0, sizeof(gl));
-
 #define EXT_SUFFIX ""
     GL_20_FUN;
     

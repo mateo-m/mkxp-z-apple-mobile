@@ -59,37 +59,22 @@
 #include <vector>
 
 #if TARGET_OS_IPHONE
-#ifdef MKXPZ_HAS_ANGLE
-#include <atomic>
 #include <EGL/egl.h>
 #include "app_bridge.h"
-extern std::atomic<MKXPRenderer> s_currentRenderer;
 extern EGLDisplay s_eglDisplay;
 extern EGLSurface s_eglSurface;
 extern EGLContext s_eglContext;
-#else
-#include "app_bridge.h"
-static const MKXPRenderer s_currentRenderer = MKXP_RENDERER_OPENGL_ES;
-#endif
-#endif
+
 // Local copies of mkxpGL_SwapWindow / mkxpGL_MakeCurrent from main.cpp.
-// Duplicated because both TUs need static access to the ANGLE globals.
-static inline void graphicsGL_SwapWindow(SDL_Window *win) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) { eglSwapBuffers(s_eglDisplay, s_eglSurface); return; }
-#endif
-    SDL_GL_SwapWindow(win);
+// Duplicated because both TUs need access to the EGL globals.
+static inline void graphicsGL_SwapWindow(SDL_Window * /*win*/) {
+    eglSwapBuffers(s_eglDisplay, s_eglSurface);
 }
-static inline void graphicsGL_MakeCurrent(SDL_Window *win, SDL_GLContext ctx) {
-#ifdef MKXPZ_HAS_ANGLE
-    if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-        if (ctx) eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
-        else eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        return;
-    }
-#endif
-    SDL_GL_MakeCurrent(win, ctx);
+static inline void graphicsGL_MakeCurrent(SDL_Window * /*win*/, SDL_GLContext ctx) {
+    if (ctx) eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
+    else eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
+#endif
 #include <errno.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -512,8 +497,8 @@ struct GraphicsPrivate {
     scSize(scRes),
     winSize(rtData->config.defScreenW, rtData->config.defScreenH),
     screen(scRes.x, scRes.y), threadData(rtData),
-#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
-    glCtx(s_currentRenderer == MKXP_RENDERER_ANGLE ? (SDL_GLContext)s_eglContext : SDL_GL_GetCurrentContext()),
+#if TARGET_OS_IPHONE
+    glCtx((SDL_GLContext)s_eglContext),
 #else
     glCtx(SDL_GL_GetCurrentContext()),
 #endif
@@ -538,17 +523,15 @@ struct GraphicsPrivate {
             winSize = Vec2i(winW, winH);
 
             int drwW, drwH;
-#if TARGET_OS_IPHONE && defined(MKXPZ_HAS_ANGLE)
-            if (s_currentRenderer == MKXP_RENDERER_ANGLE) {
-                // SDL_GL_GetDrawableSize returns logical points under ANGLE
-                // (no SDL GL context). Query EGL surface size instead.
+#if TARGET_OS_IPHONE
+            // SDL_GL_GetDrawableSize returns logical points under ANGLE
+            // (no SDL GL context). Query EGL surface size instead.
+            {
                 EGLint eglW = 0, eglH = 0;
                 eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_WIDTH, &eglW);
                 eglQuerySurface(s_eglDisplay, s_eglSurface, EGL_HEIGHT, &eglH);
                 drwW = eglW;
                 drwH = eglH;
-            } else {
-                SDL_GL_GetDrawableSize(rtData->window, &drwW, &drwH);
             }
 #else
             SDL_GL_GetDrawableSize(rtData->window, &drwW, &drwH);

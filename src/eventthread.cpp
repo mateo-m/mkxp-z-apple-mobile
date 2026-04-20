@@ -287,13 +287,12 @@ void EventThread::process(RGSSThreadData &rtData)
                         
                         int drwW, drwH;
 #if TARGET_OS_IPHONE
-                        // Use the refreshing variant so ANGLE's
-                        // CAMetalLayer drawableSize gets pushed to the
-                        // new orientation BEFORE we post to the RGSS
-                        // thread. Otherwise eglQuerySurface returns
-                        // stale pre-rotation pixel dims and
-                        // Graphics::checkResize computes a nonsense
-                        // backingScaleFactor / winSize / scOffset.
+                        // Drive the ANGLE CAMetalLayer drawableSize update
+                        // on the main thread BEFORE posting to the RGSS
+                        // thread. Otherwise eglQuerySurface returns stale
+                        // pre-rotation pixel dims and Graphics::checkResize
+                        // computes a nonsense backingScaleFactor / winSize /
+                        // scOffset on rotation.
                         mkxpGL_RefreshDrawableSize(win, &drwW, &drwH);
 #else
                         SDL_GL_GetDrawableSize(win, &drwW, &drwH);
