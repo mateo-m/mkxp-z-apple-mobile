@@ -44,10 +44,6 @@
 #include <iconv.h>
 #endif
 
-#ifdef __WIN32__
-#include <direct.h>
-#endif
-
 struct SDLRWIoContext {
   SDL_RWops *ops;
   std::string filename;

@@ -35,9 +35,7 @@
 #include <SDL_thread.h>
 #include <SDL_timer.h>
 
-#if TARGET_OS_IPHONE
 #include <OpenAL/al.h>
-#endif
 
 struct AudioPrivate
 {
@@ -52,10 +50,8 @@ struct AudioPrivate
     
     float volumeRatio;
 
-#if TARGET_OS_IPHONE
 	/* Source IDs that were AL_PLAYING when pauseSources() was called. */
 	std::vector<ALuint> pausedSourceIDs;
-#endif
 
 	/* The 'MeWatch' is responsible for detecting
 	 * a playing ME, quickly fading out the BGM and
@@ -437,7 +433,6 @@ void Audio::reset()
 	p->se.stop();
 }
 
-#if TARGET_OS_IPHONE
 /* Collect every OpenAL source owned by Audio, check which are
  * AL_PLAYING, pause those, and stash their IDs for resumeSources(). */
 void Audio::pauseSources()
@@ -470,6 +465,5 @@ void Audio::resumeSources()
 		alSourcePlay(src);
 	p->pausedSourceIDs.clear();
 }
-#endif
 
 Audio::~Audio() { delete p; }
