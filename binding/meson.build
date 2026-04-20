@@ -5,9 +5,15 @@ if get_option('mri_includes') == ''
         global_args += '-fdeclspec'
     endif
     global_dependencies += dependency('ruby-' + ver)
+    global_args += '-DMKXPZ_RUBY_VERSION="@0@"'.format(ver)
 else
     global_args += ('-I' + get_option('mri_includes'))
     global_dependencies += compilers['cpp'].find_library(get_option('mri_library'), dirs: get_option('mri_libpath'))
+    # MKXPZ_RUBY_VERSION can be set via -Dmri_version when using custom
+    # includes/libpath; if unset, the bridge reports "unknown".
+    if get_option('mri_version') != ''
+        global_args += '-DMKXPZ_RUBY_VERSION="@0@"'.format(get_option('mri_version'))
+    endif
 endif
 
 global_include_dirs += include_directories('.')

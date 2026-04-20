@@ -430,9 +430,17 @@ static void initSyntaxTransform(Config &conf) {
   mkxp_syntax_transform_target_ruby_version_major = conf.syntaxTransformCustomVersionMajor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMajor;
   mkxp_syntax_transform_target_ruby_version_minor = conf.syntaxTransformCustomVersionMinor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMinor;
   mkxp_syntax_transform_target_ruby_version_teeny = conf.syntaxTransformCustomVersionTeeny == INT_MAX ? -1 : conf.syntaxTransformCustomVersionTeeny;
-#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-
   Debug() << "Syntax transform:" << buf;
+#else
+  // The user configured a syntax-transform mode but this build was
+  // compiled against an unpatched Ruby runtime. The setting has no
+  // effect; make it loud in the logs so the mismatch doesn't look
+  // like a silent misconfiguration.
+  if (conf.syntaxTransform != 0)
+    Debug() << "Syntax transform: requested" << buf << "but patches"
+               " are not compiled in (MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES"
+               " undefined); setting will be ignored.";
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 }
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
