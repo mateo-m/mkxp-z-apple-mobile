@@ -15,13 +15,17 @@ $game_exists = nil
 # Audio.bgs_play / Audio.me_play to route through ::FmodEx, which on iOS
 # resolves to IOS::NullStub and drops audio on the floor. The override
 # block is guarded by `unless @bgm_play` on the Audio module - it only
-# runs the first time the script is evaluated. Module ivars persist
-# across mkxp sessions, so on the second and later sessions the override
-# is skipped and the engine's native Audio.bgm_play keeps music playing.
-# Pre-set @bgm_play here so the override is skipped from the very first
-# session. Applies to any game that uses this idiom.
+# runs the first time the script is evaluated, so pre-setting @bgm_play
+# to a truthy value defeats it.
+#
+# Force @bgm_play to true every preload (not just when undefined). The
+# engine's resetBetweenSessions() nilifies all ivars on engine-owned
+# modules between sessions, including @bgm_play. An `instance_variable_defined?`
+# guard would see the ivar still exists (nil counts as defined in Ruby)
+# and skip the set, leaving Uranium's `unless @bgm_play` to fire again
+# on session 2+ and drop audio on the floor.
 if defined?(Audio) && Audio.is_a?(Module)
-  Audio.instance_variable_set(:@bgm_play, true) unless Audio.instance_variable_defined?(:@bgm_play)
+  Audio.instance_variable_set(:@bgm_play, true)
 end
 
 # --- Disposed RGSS object safety patches ---

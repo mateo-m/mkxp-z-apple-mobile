@@ -29,9 +29,7 @@
 
 #include <SDL_rect.h>
 
-#if TARGET_OS_IPHONE
 extern "C" int mkxp_getMetalMaxTextureSize(void);
-#endif
 
 static void applyBool(GLenum state, bool mode) {
   mode ? gl.Enable(state) : gl.Disable(state);
@@ -111,7 +109,6 @@ GLState::Caps::Caps() {
   gl.GetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexSize);
   realMaxTexSize = maxTexSize;
 
-#if TARGET_OS_IPHONE
   /* iOS runs ANGLE/Metal exclusively. ANGLE can report GL_MAX_TEXTURE_SIZE
    * exceeding the actual Metal device limit (e.g. 16384 on a device that
    * only supports 8192). Query the real hardware limit. */
@@ -122,7 +119,6 @@ GLState::Caps::Caps() {
       realMaxTexSize = metalMax;
     }
   }
-#endif
 }
 
 GLState::GLState(const Config &conf) {

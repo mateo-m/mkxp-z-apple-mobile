@@ -431,7 +431,16 @@ class Win32API
 	TOLERATE_ERRORS = true unless const_defined?("TOLERATE_ERRORS")
 	LOG_NATIVE = false unless const_defined?("LOG_NATIVE")
 
-	alias_method :mkxp_native_initialize, :initialize unless mkxp_method_or_alias_defined?(self, :mkxp_native_initialize)
+	# mkxp-z-apple-mobile has no native Win32API implementation - the
+	# MiniFFI binding is Windows-only and was dropped when the fork
+	# narrowed to iOS/iPadOS/tvOS. The alias_method calls below check
+	# whether a native :initialize / :call exists before capturing it,
+	# so this file works both with and without the native binding
+	# (and tolerates re-execution across game sessions on a persistent
+	# Ruby VM, where a second pass must not re-alias onto our wrapper).
+	if mkxp_method_or_alias_defined?(self, :initialize) && !mkxp_method_or_alias_defined?(self, :mkxp_native_initialize)
+		alias_method :mkxp_native_initialize, :initialize
+	end
 	def initialize(dll, func, *args)
 		@dll = dll
 		@func = func
@@ -451,16 +460,20 @@ class Win32API
 		end
 
 		@mkxp_native_available = false
-		begin
-			mkxp_native_initialize(@dll, @func, *args)
-			@mkxp_native_available = true
-			return
-		rescue
+		if respond_to?(:mkxp_native_initialize)
+			begin
+				mkxp_native_initialize(@dll, @func, *args)
+				@mkxp_native_available = true
+				return
+			rescue
+			end
 		end
 
 	end
 
-	alias_method :mkxp_native_call, :call unless mkxp_method_or_alias_defined?(self, :mkxp_native_call)
+	if mkxp_method_or_alias_defined?(self, :call) && !mkxp_method_or_alias_defined?(self, :mkxp_native_call)
+		alias_method :mkxp_native_call, :call
+	end
 	def call(*args)
 		if @mkxp_wrap_impl
 			return @mkxp_wrap_impl.call(args)

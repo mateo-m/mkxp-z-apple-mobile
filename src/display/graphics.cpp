@@ -51,14 +51,9 @@
 #include <SDL_mutex.h>
 #include <SDL_thread.h>
 
-#ifdef MKXPZ_STEAM
-#include "steamshim_child.h"
-#endif
-
 #include <algorithm>
 #include <vector>
 
-#if TARGET_OS_IPHONE
 #include <EGL/egl.h>
 #include "app_bridge.h"
 extern EGLDisplay s_eglDisplay;
@@ -74,7 +69,7 @@ static inline void graphicsGL_MakeCurrent(SDL_Window * /*win*/, SDL_GLContext ct
     if (ctx) eglMakeCurrent(s_eglDisplay, s_eglSurface, s_eglSurface, s_eglContext);
     else eglMakeCurrent(s_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
-#endif
+
 #include <errno.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -86,11 +81,7 @@ static inline void graphicsGL_MakeCurrent(SDL_Window * /*win*/, SDL_GLContext ct
 
 #define DEF_FRAMERATE (rgssVer == 1 ? 40 : 60)
 
-#if TARGET_OS_IPHONE
-  #define IOS_CHECK_PAUSE() p->checkPause()
-#else
-  #define IOS_CHECK_PAUSE() ((void)0)
-#endif
+#define IOS_CHECK_PAUSE() p->checkPause()
 
 struct PingPong {
     TEXFBO rt[2];
@@ -497,11 +488,7 @@ struct GraphicsPrivate {
     scSize(scRes),
     winSize(rtData->config.defScreenW, rtData->config.defScreenH),
     screen(scRes.x, scRes.y), threadData(rtData),
-#if TARGET_OS_IPHONE
     glCtx((SDL_GLContext)s_eglContext),
-#else
-    glCtx(SDL_GL_GetCurrentContext()),
-#endif
     multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
@@ -523,7 +510,6 @@ struct GraphicsPrivate {
             winSize = Vec2i(winW, winH);
 
             int drwW, drwH;
-#if TARGET_OS_IPHONE
             // SDL_GL_GetDrawableSize returns logical points under ANGLE
             // (no SDL GL context). Query EGL surface size instead.
             {
@@ -533,9 +519,6 @@ struct GraphicsPrivate {
                 drwW = eglW;
                 drwH = eglH;
             }
-#else
-            SDL_GL_GetDrawableSize(rtData->window, &drwW, &drwH);
-#endif
             backingScaleFactor = (float)drwW / winW;
             winSize = Vec2i(drwW, drwH);
         }
@@ -584,7 +567,6 @@ struct GraphicsPrivate {
         
         rtData->screenOffset = scOffset / backingScaleFactor;
 
-#if TARGET_OS_IPHONE
         // Publish the game viewport rect in logical points for the touch overlay.
         // scOffset.y is in GL coordinates (origin bottom-left), convert to
         // screen coordinates (origin top-left) for UIKit.
@@ -593,14 +575,12 @@ struct GraphicsPrivate {
         float screenY = (winSize.y - scOffset.y - scSize.y) / uiSc;
         mkxp_setGameRect(scOffset.x / uiSc, screenY,
                          scSize.x / uiSc, scSize.y / uiSc);
-#endif
     }
     
     /* Enforces fixed aspect ratio, if desired */
     void recalculateScreenSize(bool fixedAspectRatio) {
         scSize = winSize;
         
-#if TARGET_OS_IPHONE
         {
             float saTop = 0, saBottom = 0, saLeft = 0, saRight = 0;
             mkxp_getSafeAreaInsets(&saTop, &saBottom, &saLeft, &saRight);
@@ -680,33 +660,6 @@ struct GraphicsPrivate {
                 scOffset.y = (availH - scSize.y) / 2;
             }
         }
-#else
-        if (!fixedAspectRatio) {
-            if (!integerScaleActive || (integerScaleActive && integerLastMileScaling)) {
-                scOffset = Vec2i(0, 0);
-                return;
-            }
-        }
-        
-        if (integerScaleActive && !integerLastMileScaling) {
-            scOffset.x = ((winSize.x / 2) - (scRes.x / 2) * integerScaleFactor.x);
-            scOffset.y = ((winSize.y / 2) - (scRes.y / 2) * integerScaleFactor.y);
-            
-            scSize = Vec2i(scRes.x * integerScaleFactor.x, scRes.y * integerScaleFactor.y);
-            return;
-        }
-        
-        float resRatio = (float)scRes.x / scRes.y;
-        float winRatio = (float)winSize.x / winSize.y;
-        
-        if (resRatio > winRatio)
-            scSize.y = scSize.x / resRatio;
-        else if (resRatio < winRatio)
-            scSize.x = scSize.y * resRatio;
-        
-        scOffset.x = (winSize.x - scSize.x) / 2.f;
-        scOffset.y = (winSize.y - scSize.y) / 2.f;
-#endif
     }
     
     static int findHighestFittingScale(int base, int target) {
@@ -761,7 +714,6 @@ struct GraphicsPrivate {
         Vec2i oldWinSize = winSize;
         bool sizeChanged = threadData->windowSizeMsg.poll(winSize);
 
-#if TARGET_OS_IPHONE
         bool insetsChanged = mkxp_consumeSafeAreaInsetsChanged();
         if (insetsChanged && !sizeChanged) {
             // During rotation iOS can fire several size/inset events per
@@ -789,7 +741,6 @@ struct GraphicsPrivate {
             SDL_Rect screen = {scOffset.x, scOffset.y, scSize.x, scSize.y};
             threadData->ethread->notifyGameScreenChange(screen);
         }
-#endif
 
         if (sizeChanged) {
             /* Drain all pending async GL work (e.g. pixel processing
@@ -871,24 +822,18 @@ struct GraphicsPrivate {
     
     void swapGLBuffer() {
         fpsLimiter.delay();
-#if TARGET_OS_IPHONE
         graphicsGL_SwapWindow(threadData->window);
-#else
-        SDL_GL_SwapWindow(threadData->window);
-#endif
         
         ++frameCount;
         
         threadData->ethread->notifyFrame();
 
-#if TARGET_OS_IPHONE
         if (mkxp_isGLContextBroken()) {
             shutdown();
             return;
         }
 
         mkxp_signalFrameRendered();
-#endif
     }
     
     void compositeToBuffer(TEXFBO &buffer) {
@@ -984,7 +929,6 @@ struct GraphicsPrivate {
             GLMeta::blitSource(screen.getPP().frontBuffer(), scaleIsSpecial);
         }
 
-#if TARGET_OS_IPHONE
         if (mkxp_getShowViewportBounds()) {
             float r, g, b, a;
             mkxp_getViewportBoundsColor(&r, &g, &b, &a);
@@ -994,9 +938,6 @@ struct GraphicsPrivate {
         } else {
             FBO::clear();
         }
-#else
-        FBO::clear();
-#endif
         metaBlitBufferFlippedScaled(sourceSize, scaleIsSpecial);
         
         GLMeta::blitEnd();
@@ -1010,15 +951,9 @@ struct GraphicsPrivate {
         if (!threadData->syncPoint.mainSyncLocked())
             return;
         
-#if TARGET_OS_IPHONE
         graphicsGL_MakeCurrent(threadData->window, 0);
         threadData->syncPoint.waitMainSync();
         graphicsGL_MakeCurrent(threadData->window, glCtx);
-#else
-        SDL_GL_MakeCurrent(threadData->window, 0);
-        threadData->syncPoint.waitMainSync();
-        SDL_GL_MakeCurrent(threadData->window, glCtx);
-#endif
         
         fpsLimiter.resetFrameAdjust();
     }
@@ -1075,12 +1010,9 @@ struct GraphicsPrivate {
         GLMeta::blitEnd();
 
         swapGLBuffer();
-#if TARGET_OS_IPHONE
         checkPause();
-#endif
     }
 
-#if TARGET_OS_IPHONE
     /* Check for a pending pause request.  mkxp_checkPause() handles
      * audio source pausing and blocks until resumed; we just need
      * to reset frame timing afterward so the limiter doesn't try
@@ -1126,7 +1058,6 @@ struct GraphicsPrivate {
         /* Reset frame timing so the limiter doesn't try to catch up. */
         fpsLimiter.resetFrameAdjust();
     }
-#endif
 };
 
 Graphics::Graphics(RGSSThreadData *data) {
@@ -1152,12 +1083,10 @@ double Graphics::lastUpdate() {
 }
 
 void Graphics::update(bool checkForShutdown) {
-#if TARGET_OS_IPHONE
     if (mkxp_isGLContextBroken()) {
         shState->checkShutdown();
         return;
     }
-#endif
     p->threadData->rqWindowAdjust.wait();
     p->last_update = shState->runTime();
     
@@ -1174,13 +1103,7 @@ void Graphics::update(bool checkForShutdown) {
         p->checkShutDownReset();
     
     p->checkSyncLock();
-    
-    
-#ifdef MKXPZ_STEAM
-    if (STEAMSHIM_alive())
-        STEAMSHIM_pump();
-#endif
-    
+
     if (p->frozen)
         return;
     
@@ -1475,37 +1398,17 @@ void Graphics::resizeScreen(int width, int height) {
     
     glState.scissorBox.set(IntRect(0, 0, p->scRes.x, p->scRes.y));
     
-#if !TARGET_OS_IPHONE
-    /* On iOS the window is always fullscreen — requestWindowResize is a
-     * no-op that can corrupt the internal size state. Skip it. */
-    shState->eThread().requestWindowResize(width, height);
-#else
     /* Trigger a size recalculation so the viewport is updated. */
     p->recalculateScreenSize(shState->config().fixedAspectRatio);
     p->updateScreenResoRatio(p->threadData);
     SDL_Rect screen = {p->scOffset.x, p->scOffset.y, p->scSize.x, p->scSize.y};
     p->threadData->ethread->notifyGameScreenChange(screen);
-#endif
 }
 
 void Graphics::resizeWindow(int width, int height, bool center) {
-#if TARGET_OS_IPHONE
     /* On iOS the window is always fullscreen — resizing is meaningless. */
     (void)width; (void)height; (void)center;
     return;
-#else
-    p->threadData->rqWindowAdjust.wait();
-    p->checkResize();
-    
-    if (width == p->winSize.x / p->backingScaleFactor &&
-        height == p->winSize.y / p->backingScaleFactor)
-            return;
-
-    shState->eThread().requestWindowResize(width, height);
-    
-    if (center)
-        this->center();
-#endif
 }
 
 bool Graphics::updateMovieInput(Movie *movie) {
@@ -1758,11 +1661,7 @@ void Graphics::repaintWait(const AtomicFlag &exitCond, bool checkReset) {
         
         FBO::clear();
         p->metaBlitBufferFlippedScaled(scaleIsSpecial);
-#if TARGET_OS_IPHONE
         graphicsGL_SwapWindow(p->threadData->window);
-#else
-        SDL_GL_SwapWindow(p->threadData->window);
-#endif
         p->fpsLimiter.delay();
         
         p->threadData->ethread->notifyFrame();

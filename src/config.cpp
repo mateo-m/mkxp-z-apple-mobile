@@ -166,17 +166,9 @@ void Config::read(int argc, char *argv[]) {
         {"frameSkip", false},
         {"syncToRefreshrate", false},
         {"solidFonts", json::array({})},
-#if defined(__APPLE__) && defined(__aarch64__)
         {"preferMetalRenderer", true},
-#else
-        {"preferMetalRenderer", false},
-#endif
         {"subImageFix", false},
-#ifdef __WIN32__
-        {"enableBlitting", false},
-#else
         {"enableBlitting", true},
-#endif
         {"integerScalingActive", false},
         {"integerScalingLastMile", true},
         {"maxTextureSize", 0},
@@ -316,9 +308,7 @@ try { exp } catch (...) {}
     for (std::string & solidFont : solidFonts)
         std::transform(solidFont.begin(), solidFont.end(), solidFont.begin(),
             [](unsigned char c) { return std::tolower(c); });
-#ifdef __APPLE__
     SET_OPT(preferMetalRenderer, boolean);
-#endif
     SET_OPT(subImageFix, boolean);
     SET_OPT(enableBlitting, boolean);
     SET_OPT_CUSTOMKEY(integerScaling.active, integerScalingActive, boolean);
@@ -367,20 +357,11 @@ try { exp } catch (...) {}
     SE.sourceCount = clamp(SE.sourceCount, 1, 64);
     BGM.trackCount = clamp(BGM.trackCount, 1, 16);
     
-    // Determine whether to open a console window on... Windows
-    winConsole = getEnvironmentBool("MKXPZ_WINDOWS_CONSOLE", editor.debug);
-    
-#ifdef __APPLE__
-    // Determine whether to use the Metal renderer on macOS
-    // Environment variable takes priority over the json setting
-    preferMetalRenderer = isMetalSupported() && getEnvironmentBool("MKXPZ_MACOS_METAL", preferMetalRenderer);
-#endif
-    
-    // Determine whether to allow manual selection of a game folder on startup
-    // Only works on macOS atm, mainly used to test games located outside of the bundle.
-    // The config is re-read after the window is already created, so some entries
-    // may not take effect
-    manualFolderSelect = getEnvironmentBool("MKXPZ_FOLDER_SELECT", false);
+    /* winConsole / manualFolderSelect / MKXPZ_MACOS_METAL env overrides
+     * were all desktop-only knobs. On iOS the config values are whatever
+     * the JSON declares and the values remain at their defaults. */
+    winConsole = false;
+    manualFolderSelect = false;
     
     raw = optsJ;
 }
