@@ -6,7 +6,8 @@
 # Pokemon Uranium checks $game_exists on startup and calls
 # system('Uranium') + exit to relaunch itself. On iOS, system() is
 # neutralized (see platform_compat.rb), but we also clear the flag so the
-# hard-reset code path is never reached.
+# hard-reset code path is never reached. The between-session reset hook
+# at the bottom of this file handles subsequent sessions.
 $game_exists = nil
 
 # --- Uranium FmodEx override suppression ---
@@ -65,16 +66,35 @@ end
 # --- Null mouse shim ---
 # Pokemon Essentials games set $mouse = Game_Mouse.new. Between
 # sessions, constant cleanup removes Game_Mouse but $mouse still
-# holds an orphaned instance. Setting $mouse = nil doesn't work
-# because defined?($mouse) still returns "global-variable" in
-# Ruby 1.8.
-#
-# MkxpNullMouse absorbs any method call, returning false/0/nil.
-# The C++ cleanup code (binding-mri.cpp) pre-creates an instance
-# and assigns it to $mouse before constant removal.
+# holds an orphaned instance. MkxpNullMouse absorbs any method call,
+# returning false/0/nil, and is installed on $mouse by the reset hook
+# below.
 class MkxpNullMouse
   def method_missing(*) false end
   def respond_to_missing?(*) true end
   def x; 0 end
   def y; 0 end
+end
+
+# --- Between-session reset hook ---
+# The C side invokes each Proc in $__mkxp_reset_hooks right before
+# a new game session's scripts run. Use this to scrub Pokemon-specific
+# state that would otherwise bleed from the previous session.
+#
+# MkxpNullMouse is added to $__mkxp_preload_keep_consts so the engine's
+# constant scrubber doesn't remove it (it's not in the session-1
+# baseline because it was defined after the baseline snapshot).
+$__mkxp_preload_keep_consts ||= []
+$__mkxp_preload_keep_consts << :MkxpNullMouse unless $__mkxp_preload_keep_consts.include?(:MkxpNullMouse)
+
+$__mkxp_reset_hooks ||= []
+unless $__mkxp_reset_hooks.any? { |h| h.respond_to?(:source_location) && h.source_location[0] == __FILE__ }
+  $__mkxp_reset_hooks << lambda do
+    # Pokemon Essentials / Pokemon fangames globals.
+    $mouse = MkxpNullMouse.new
+    $game_exists = nil      # Uranium hard-reset flag
+    $PokemonSystem = nil
+    $PokemonGlobal = nil
+    $Trainer = nil
+  end
 end

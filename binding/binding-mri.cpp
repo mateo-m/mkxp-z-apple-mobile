@@ -1604,22 +1604,24 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
 static bool s_rubyVMInitialized = false;
 static int s_lastRgssVer = 0;
 
-/* Reset per-session game state that accumulated in the persistent VM
- * during the previous session. Must run before the new game's scripts
- * start so game-defined constants / singletons / globals from the
- * previous session don't bleed into the new one. */
+/* Reset per-session state that accumulated in the persistent VM during
+ * the previous session. This handles engine-generic cleanup only: the C
+ * side scrubs constants, class ivars, and the standard RGSS $game_*
+ * globals. Any game-specific cleanup (e.g. Pokemon Essentials' $mouse,
+ * $PokemonSystem, $Trainer) lives in Ruby preloads and is invoked via
+ * the `$__mkxp_reset_hooks` hook array. */
 static void resetBetweenSessions() {
-    /* 1. Remove game-defined constants from Object. Anything not in the
-     *    baseline (captured right after mriBindingInit on session 1)
-     *    was defined by game scripts and must go to prevent
-     *    superclass-mismatch errors between different games. */
+    /* 1. Remove constants defined by game scripts.
+     *    - Constants in the session-1 baseline are engine-owned, keep them.
+     *    - Constants listed in $__mkxp_preload_keep_consts are defined by
+     *      our own preloads (e.g. MkxpNullMouse), keep them too.
+     *    - Anything else was defined by game scripts in the previous
+     *      session; remove to prevent superclass-mismatch errors when
+     *      the new game re-defines them. */
     VALUE baseConsts = rb_gv_get("$__mkxp_base_consts");
     if (!NIL_P(baseConsts)) {
-        /* Constants defined by engine preloads (pokemon_compat etc.) are
-         * not in the baseline but are safe to keep — they're engine code,
-         * not game code. */
-        VALUE preloadKeep = rb_ary_new();
-        rb_ary_push(preloadKeep, rb_id2sym(rb_intern("MkxpNullMouse")));
+        VALUE preloadKeep = rb_gv_get("$__mkxp_preload_keep_consts");
+        if (NIL_P(preloadKeep)) preloadKeep = rb_ary_new();
         VALUE currentConsts = rb_funcall(rb_cObject, rb_intern("constants"), 0);
         long len = RARRAY_LEN(currentConsts);
         for (long ci = 0; ci < len; ++ci) {
@@ -1637,8 +1639,8 @@ static void resetBetweenSessions() {
     }
 
     /* (Game-script method cleanup is unnecessary: mriBindingInit re-runs
-     *  every session in mriBindingExecutePerSession and re-installs all C
-     *  methods, overwriting any game-script redefinitions from the
+     *  every session in mriBindingExecutePerSession and re-installs all
+     *  C methods, overwriting any game-script redefinitions from the
      *  previous session.) */
 
     /* 2. Clear class/module instance variables on engine-owned classes.
@@ -1646,9 +1648,8 @@ static void resetBetweenSessions() {
      *    on Sprite) as one-shot guards for their alias blocks. These
      *    guards persist across sessions with the Ruby VM, so on session
      *    2 the guarded alias blocks silently skip, leaving game-added
-     *    helper methods undefined after their guarded `alias` was
-     *    skipped. Clearing the ivars forces the alias blocks to run
-     *    again on session 2+. */
+     *    helper methods undefined after we've cleaned up. Clearing the
+     *    ivars forces the alias blocks to run again on session 2+. */
     {
         int err = 0;
         rb_protect([](VALUE) -> VALUE {
@@ -1672,59 +1673,44 @@ static void resetBetweenSessions() {
         }, Qnil, &err);
     }
 
-    /* 3. Clear game globals that persist across sessions. */
+    /* 3. Clear standard RGSS globals (used by every RPG Maker game). */
     rb_set_errinfo(Qnil);
+    static const char *rgssGlobals[] = {
+        "$game_switches", "$game_variables", "$game_self_switches",
+        "$game_screen", "$game_map", "$game_player", "$game_party",
+        "$game_troop", "$game_temp", "$game_system", "$scene",
+        "$data_system", "$data_actors", "$data_classes", "$data_skills",
+        "$data_items", "$data_weapons", "$data_armors", "$data_enemies",
+        "$data_troops", "$data_states", "$data_animations",
+        "$data_tilesets", "$data_common_events",
+        nullptr
+    };
+    for (int i = 0; rgssGlobals[i]; ++i)
+        rb_gv_set(rgssGlobals[i], Qnil);
 
-    /* Pokemon Essentials / Pokemon fangames.
-     * $mouse is replaced with a MkxpNullMouse shim (defined in
-     * pokemon_compat preload) rather than nil, because scripts call
-     * methods on it every frame (leftClick?, x, y, etc.). */
+    /* 4. Run game-specific reset hooks registered by preloads.
+     *    Each preload may push a Proc onto $__mkxp_reset_hooks to
+     *    participate in between-session cleanup (e.g. pokemon_compat
+     *    clears $PokemonSystem, $Trainer, and replaces $mouse with a
+     *    fresh MkxpNullMouse instance). */
     {
         int err = 0;
         rb_protect([](VALUE) -> VALUE {
-            ID nullId = rb_intern("MkxpNullMouse");
-            if (rb_const_defined(rb_cObject, nullId)) {
-                VALUE nullKlass = rb_const_get(rb_cObject, nullId);
-                VALUE instance = rb_class_new_instance(0, NULL, nullKlass);
-                rb_gv_set("$mouse", instance);
-            } else {
-                rb_gv_set("$mouse", Qnil);
+            VALUE hooks = rb_gv_get("$__mkxp_reset_hooks");
+            if (NIL_P(hooks) || !RB_TYPE_P(hooks, T_ARRAY)) return Qnil;
+            long n = RARRAY_LEN(hooks);
+            for (long i = 0; i < n; ++i) {
+                VALUE hook = rb_ary_entry(hooks, i);
+                int inner = 0;
+                rb_protect([](VALUE h) -> VALUE {
+                    return rb_funcall(h, rb_intern("call"), 0);
+                }, hook, &inner);
             }
             return Qnil;
         }, Qnil, &err);
     }
-    rb_gv_set("$game_exists", Qnil);   /* Uranium hard-reset flag */
-    rb_gv_set("$PokemonSystem", Qnil);
-    rb_gv_set("$PokemonGlobal", Qnil);
-    rb_gv_set("$Trainer", Qnil);
 
-    /* Standard RGSS globals (used by all RPG Maker games) */
-    rb_gv_set("$game_switches", Qnil);
-    rb_gv_set("$game_variables", Qnil);
-    rb_gv_set("$game_self_switches", Qnil);
-    rb_gv_set("$game_screen", Qnil);
-    rb_gv_set("$game_map", Qnil);
-    rb_gv_set("$game_player", Qnil);
-    rb_gv_set("$game_party", Qnil);
-    rb_gv_set("$game_troop", Qnil);
-    rb_gv_set("$game_temp", Qnil);
-    rb_gv_set("$game_system", Qnil);
-    rb_gv_set("$scene", Qnil);
-    rb_gv_set("$data_system", Qnil);
-    rb_gv_set("$data_actors", Qnil);
-    rb_gv_set("$data_classes", Qnil);
-    rb_gv_set("$data_skills", Qnil);
-    rb_gv_set("$data_items", Qnil);
-    rb_gv_set("$data_weapons", Qnil);
-    rb_gv_set("$data_armors", Qnil);
-    rb_gv_set("$data_enemies", Qnil);
-    rb_gv_set("$data_troops", Qnil);
-    rb_gv_set("$data_states", Qnil);
-    rb_gv_set("$data_animations", Qnil);
-    rb_gv_set("$data_tilesets", Qnil);
-    rb_gv_set("$data_common_events", Qnil);
-
-    /* 4. Force GC to collect stale Ruby objects from previous session. */
+    /* 5. Force GC to collect stale Ruby objects from previous session. */
     rb_gc();
 }
 
@@ -1882,136 +1868,6 @@ static void mriBindingExecuteInitOnce(Config &conf) {
     }
 #else
     ruby_init();
-#if 0 /* DEAD: 1.8-only per-session cleanup; kept for historical reference */
-    if (false) {
-        /* The RGSS thread is now persistent on iOS — same thread for all
-         * sessions. rb_gc_stack_start should still be valid, but update
-         * it as a safety measure in case the stack frame shifted. */
-        volatile VALUE stack_anchor = Qnil;
-        rb_gc_stack_start = (VALUE *)&stack_anchor;
-
-        /* ---- Full session cleanup using C API only ---- */
-
-        /* Pre-create a MkxpNullMouse instance before cleanup removes
-         * game constants. MkxpNullMouse is defined in preload, not in
-         * the baseline, so it would be removed during constant cleanup. */
-        VALUE nullMouseInstance = Qnil;
-        {
-            ID mkxpNullMouseId = rb_intern("MkxpNullMouse");
-            if (rb_const_defined(rb_cObject, mkxpNullMouseId)) {
-                VALUE mkxpNullMouseClass = rb_const_get(rb_cObject, mkxpNullMouseId);
-                nullMouseInstance = rb_class_new_instance(0, NULL, mkxpNullMouseClass);
-            }
-        }
-
-        /* 1. Remove game-defined constants from Object.
-         *    Anything not in the baseline (captured after mriBindingInit)
-         *    was defined by game scripts and must go to prevent
-         *    superclass-mismatch errors between different games. */
-        {
-            VALUE baseConsts = rb_gv_get("$__mkxp_base_consts");
-            if (baseConsts != Qnil) {
-                VALUE currentConsts = rb_funcall(rb_cObject, rb_intern("constants"), 0);
-                long len = RARRAY_LEN(currentConsts);
-                for (long ci = 0; ci < len; ++ci) {
-                    VALUE cname = rb_ary_entry(currentConsts, ci);
-                    if (rb_funcall(baseConsts, rb_intern("include?"), 1, cname) == Qfalse) {
-                        /* In Ruby 1.8, constants are strings, not symbols. */
-                        const char *cnameStr = RSTRING_PTR(cname);
-                        /* Don't remove MkxpNullMouse — it's defined in preload,
-                         * not in the baseline, but needed across sessions. */
-                        if (cnameStr && strcmp(cnameStr, "MkxpNullMouse") == 0)
-                            continue;
-                        int err = 0;
-                        rb_protect([](VALUE arg) -> VALUE {
-                            rb_funcall(rb_cObject, rb_intern("remove_const"), 1, arg);
-                            return Qnil;
-                        }, cname, &err);
-                    }
-                }
-            }
-        }
-
-        /* 2. Clean up Input singleton methods added by game scripts.
-         *    Games like Pokemon Essentials replace Input.update etc.
-         *    Don't touch Graphics — removing its singletons corrupts viewport. */
-        {
-            VALUE inputMod = rb_const_get(rb_cObject, rb_intern("Input"));
-            VALUE sclass = rb_singleton_class(inputMod);
-            VALUE methods = rb_funcall(sclass, rb_intern("instance_methods"), 1, Qfalse);
-            long mlen = RARRAY_LEN(methods);
-            for (long mi = 0; mi < mlen; ++mi) {
-                VALUE mname = rb_ary_entry(methods, mi);
-                int err = 0;
-                rb_protect([](VALUE args) -> VALUE {
-                    VALUE sc = rb_ary_entry(args, 0);
-                    VALUE mn = rb_ary_entry(args, 1);
-                    rb_funcall(sc, rb_intern("remove_method"), 1, mn);
-                    return Qnil;
-                }, rb_ary_new3(2, sclass, mname), &err);
-            }
-        }
-
-        /* 3. Clear class-level ivars that wrap C++ objects owned by the
-         *    previous session. These live on class/module objects that
-         *    survive across sessions and hold wrapped pointers into
-         *    session-1 engine state. Nil'ing them lets Ruby GC release
-         *    the stale wrappers so they can be rebuilt next session. */
-        {
-            int err = 0;
-            rb_protect([](VALUE) -> VALUE {
-                VALUE fontKlass = rb_const_get(rb_cObject, rb_intern("Font"));
-                rb_iv_set(fontKlass, "default_color",     Qnil);
-                rb_iv_set(fontKlass, "default_out_color", Qnil);
-                rb_iv_set(fontKlass, "default_name",      Qnil);
-                VALUE inputMod  = rb_const_get(rb_cObject, rb_intern("Input"));
-                rb_iv_set(inputMod, "buttoncodes", Qnil);
-                return Qnil;
-            }, Qnil, &err);
-        }
-
-        /* 4. Clear game globals that persist across sessions. */
-
-        /* Engine state */
-        rb_set_errinfo(Qnil);
-
-        /* Pokemon Essentials / Pokemon fangames */
-        rb_gv_set("$mouse", nullMouseInstance);
-        rb_gv_set("$game_exists", Qnil);       /* Uranium hard-reset flag */
-        rb_gv_set("$PokemonSystem", Qnil);
-        rb_gv_set("$PokemonGlobal", Qnil);
-        rb_gv_set("$Trainer", Qnil);
-
-        /* Standard RGSS globals (used by all RPG Maker games) */
-        rb_gv_set("$game_switches", Qnil);
-        rb_gv_set("$game_variables", Qnil);
-        rb_gv_set("$game_self_switches", Qnil);
-        rb_gv_set("$game_screen", Qnil);
-        rb_gv_set("$game_map", Qnil);
-        rb_gv_set("$game_player", Qnil);
-        rb_gv_set("$game_party", Qnil);
-        rb_gv_set("$game_troop", Qnil);
-        rb_gv_set("$game_temp", Qnil);
-        rb_gv_set("$game_system", Qnil);
-        rb_gv_set("$scene", Qnil);
-        rb_gv_set("$data_system", Qnil);
-        rb_gv_set("$data_actors", Qnil);
-        rb_gv_set("$data_classes", Qnil);
-        rb_gv_set("$data_skills", Qnil);
-        rb_gv_set("$data_items", Qnil);
-        rb_gv_set("$data_weapons", Qnil);
-        rb_gv_set("$data_armors", Qnil);
-        rb_gv_set("$data_enemies", Qnil);
-        rb_gv_set("$data_troops", Qnil);
-        rb_gv_set("$data_states", Qnil);
-        rb_gv_set("$data_animations", Qnil);
-        rb_gv_set("$data_tilesets", Qnil);
-        rb_gv_set("$data_common_events", Qnil);
-
-        /* 5. Force GC to collect stale Ruby objects from previous session. */
-        rb_gc();
-    }
-#endif /* DISABLED: 1.8-only session cleanup */
 #ifdef __WIN32__
     if (!conf.winConsole) {
         VALUE iostr = rb_str_new2("NUL");
