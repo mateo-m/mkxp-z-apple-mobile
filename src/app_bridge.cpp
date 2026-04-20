@@ -271,11 +271,13 @@ int mkxp_getRGSSVersion(void) {
 int mkxp_getSupportedRGSSVersionMask(void) {
     // Ruby 1.8 reliably runs RGSS1 and RGSS2 (both use 1.8-era syntax).
     // RGSS3 requires Ruby 1.9+ which in this build means Ruby 3.1 with
-    // syntax-transform patches.
-#if defined(MKXPZ_LEGACY_RUBY)
-    return (1 << 0) | (1 << 1);
-#else
+    // the syntax-transform patches. MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+    // is defined by the build system only when the patched Ruby is
+    // linked; it stays undefined on unpatched builds.
+#if defined(MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES)
     return (1 << 0) | (1 << 1) | (1 << 2);
+#else
+    return (1 << 0) | (1 << 1);
 #endif
 }
 
