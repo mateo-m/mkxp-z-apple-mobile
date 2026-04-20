@@ -638,22 +638,238 @@ static void clearFramebufferBetweenSessions(SDL_Window *win,
   mkxpGL_SwapWindow(win);
   mkxpGL_MakeCurrent(win, NULL);
 }
+
+/* EngineHost owns the iOS process-wide engine resources (window, EGL
+ * context, OpenAL device/context, RGSS thread) and drives the game
+ * session loop. Lifecycle: init() -> runSessions() -> shutdown().
+ * The three phases must be called in that order; init() returning
+ * false means the host is already torn down and runSessions/shutdown
+ * must not be called. */
+class EngineHost {
+public:
+  bool init(int argc, char *argv[]);
+  void runSessions(int argc, char *argv[]);
+  void shutdown();
+
+private:
+  SDL_Window      *persistWin_    = nullptr;
+  SDL_GLContext    persistGLCtx_  = nullptr;
+  ALCdevice       *persistAlcDev_ = nullptr;
+  ALCcontext      *persistAlcCtx_ = nullptr;
+  SDL_Thread      *rgssThread_    = nullptr;
+  SDL_DisplayMode  displayMode_{};
+  char             dataDir_[512]{};
+};
+
+bool EngineHost::init(int argc, char *argv[]) {
+  /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
+   * creates a window that would cover the Library UI, so we wait
+   * for the user to pick a game first. */
+  const char *selectedPath = mkxp_waitForGamePath();
+  if (selectedPath && selectedPath[0])
+    snprintf(dataDir_, sizeof(dataDir_), "%s", selectedPath);
+
+  SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
+  SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+#ifdef GLES2_HEADER
+  SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
+#endif
+  SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
+
+  if (!initSDLLibs())
+    return false;
+
+  /* Working directory for the first game (needed to read Config). */
+  mkxp_fs::setCurrentDirectory(dataDir_);
+
+  Config initConf;
+  initConf.read(argc, argv);
+
+  persistWin_ = createPersistentWindow(initConf);
+  if (!persistWin_) {
+    shutdownSDLLibs();
+    return false;
+  }
+
+  persistGLCtx_ = createPersistentGL(persistWin_);
+  if (!persistGLCtx_) {
+    SDL_DestroyWindow(persistWin_);
+    persistWin_ = nullptr;
+    shutdownSDLLibs();
+    return false;
+  }
+
+  if (!createPersistentAudio(&persistAlcDev_, &persistAlcCtx_)) {
+    teardownANGLE();
+    SDL_DestroyWindow(persistWin_);
+    persistWin_ = nullptr;
+    persistGLCtx_ = nullptr;
+    shutdownSDLLibs();
+    return false;
+  }
+
+  SDL_GetDisplayMode(0, 0, &displayMode_);
+
+  s_rgssSessionReady = SDL_CreateSemaphore(0);
+  s_rgssSessionDone  = SDL_CreateSemaphore(0);
+  return true;
+}
+
+void EngineHost::runSessions(int argc, char *argv[]) {
+  bool firstSession = true;
+  while (true) {
+    /* On sessions after the first, block until the Library UI
+     * provides the next game. An empty path means the user quit. */
+    if (!firstSession && !waitForNextGame(dataDir_, sizeof(dataDir_)))
+      break;
+    firstSession = false;
+
+    Config conf;
+    conf.read(argc, argv);
+
+    if (conf.windowTitle.empty())
+      conf.windowTitle = conf.game.title;
+
+    assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
+    printRgssVersion(conf.rgssVersion);
+
+    initSyntaxTransform(conf);
+
+    SDL_SetWindowTitle(persistWin_, conf.windowTitle.c_str());
+
+    if (!displayMode_.refresh_rate)
+      conf.syncToRefreshrate = false;
+
+    EventThread eventThread;
+
+    RGSSThreadData rtData(&eventThread, argv[0], persistWin_, persistAlcDev_,
+                          persistAlcCtx_, displayMode_.refresh_rate,
+                          mkxp_sys::getScalingFactor(), conf, persistGLCtx_);
+
+    int winW, winH, drwW, drwH;
+    SDL_GetWindowSize(persistWin_, &winW, &winH);
+    rtData.windowSizeMsg.post(Vec2i(winW, winH));
+
+    mkxpGL_GetDrawableSize(persistWin_, &drwW, &drwH);
+    rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
+
+    rtData.bindingUpdateMsg.post(loadBindings(conf));
+
+    /* Drain stale events (especially SDL_QUIT) left over from the
+     * previous session so the event loop doesn't exit immediately. */
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+
+    if (!rgssThread_) {
+      /* First session: create the persistent RGSS thread.
+       * Ruby 3.1's GC is precise, so 1 MB is plenty. */
+      rgssThread_ = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
+                                                    1 * 1024 * 1024, &rtData);
+    } else {
+      /* Subsequent sessions: signal the persistent RGSS thread
+       * with the new session data. */
+      s_nextRTData = &rtData;
+      SDL_SemPost(s_rgssSessionReady);
+    }
+
+    /* Run event processing until the game ends. */
+    eventThread.process(rtData);
+
+    /* Ask the RGSS thread to stop, then wait for it. */
+    rtData.rqTerm.set();
+    const bool acked = waitForRGSSAck(rtData);
+
+    if (acked) {
+      /* RGSS thread is shutting down: wait for it to finish
+       * SharedState::finiInstance before we proceed. */
+      waitForSessionDone(s_rgssSessionDone);
+    } else {
+      /* The RGSS thread is stuck (never called checkShutdown).
+       * Our single-reused-thread architecture cannot respawn a
+       * new VM while the old one is blocked, so the only safe
+       * recovery is to force-quit the app. The UI will terminate
+       * the process when the user taps OK. */
+      mkxp_setEngineHung();
+      /* Intentionally generic - by the time this alert is seen,
+       * the user may have already selected a different game in
+       * the Library. */
+      mkxp_setErrorMessage(
+          "The previous game stopped responding. The app will now close.");
+    }
+
+    if (!rtData.rgssErrorMsg.empty()) {
+      Debug() << rtData.rgssErrorMsg;
+      mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
+    }
+
+    eventThread.cleanup();
+
+    clearFramebufferBetweenSessions(persistWin_, persistGLCtx_, s_screenFBO);
+
+    Debug() << "Game session ended.";
+  }
+}
+
+void EngineHost::shutdown() {
+  /* Signal the RGSS thread to exit. */
+  s_nextRTData = nullptr;
+  if (s_rgssSessionReady)
+    SDL_SemPost(s_rgssSessionReady);
+  if (rgssThread_) {
+    SDL_WaitThread(rgssThread_, 0);
+    rgssThread_ = nullptr;
+  }
+  if (s_rgssSessionReady) {
+    SDL_DestroySemaphore(s_rgssSessionReady);
+    s_rgssSessionReady = nullptr;
+  }
+  if (s_rgssSessionDone) {
+    SDL_DestroySemaphore(s_rgssSessionDone);
+    s_rgssSessionDone = nullptr;
+  }
+
+  /* Cleanup persistent resources. Unreachable in normal flow but
+   * kept for completeness in case the session loop ever exits. */
+  if (persistGLCtx_) {
+    SDL_GL_DeleteContext(persistGLCtx_);
+    persistGLCtx_ = nullptr;
+  }
+  alcMakeContextCurrent(NULL);
+  if (persistAlcCtx_) {
+    alcDestroyContext(persistAlcCtx_);
+    persistAlcCtx_ = nullptr;
+  }
+  if (persistAlcDev_) {
+    alcCloseDevice(persistAlcDev_);
+    persistAlcDev_ = nullptr;
+  }
+  if (persistWin_) {
+    SDL_DestroyWindow(persistWin_);
+    persistWin_ = nullptr;
+  }
+}
 #endif // TARGET_OS_IPHONE
 
 int main(int argc, char *argv[]) {
   try {
 
 #if TARGET_OS_IPHONE
-    // --- FIRST LAUNCH: wait for Library UI before SDL_Init ---
-    // SDL_Init creates an OpenGL window that would cover the Library UI,
-    // so we wait for the user to pick a game first.
-    char dataDir[512]{};
-    const char *selectedPath = mkxp_waitForGamePath();
-    if (selectedPath && selectedPath[0]) {
-        // snprintf always null-terminates, unlike strncpy.
-        snprintf(dataDir, sizeof(dataDir), "%s", selectedPath);
-    }
+    // ================================================================
+    // iOS: delegate the whole init -> runSessions -> shutdown cycle
+    // to EngineHost. The non-iOS path below keeps the original
+    // single-session flow because it doesn't share persistent
+    // resources between sessions.
+    // ================================================================
+    EngineHost host;
+    if (!host.init(argc, argv)) {
+#ifdef MKXPZ_STEAM
+      STEAMSHIM_deinit();
 #endif
+      return 0;
+    }
+    host.runSessions(argc, argv);
+    host.shutdown();
+
+#else // !TARGET_OS_IPHONE — original single-session flow
 
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
     SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
@@ -672,9 +888,7 @@ int main(int argc, char *argv[]) {
     }
 
 #ifndef WORKDIR_CURRENT
-#if !TARGET_OS_IPHONE
     char dataDir[512]{};
-#endif
 #if defined(__linux__)
     char *tmp{};
     tmp = getenv("SRCDIR");
@@ -708,157 +922,6 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    // ================================================================
-    // iOS: Create persistent window, GL context, and AL device ONCE.
-    // These survive across game sessions to avoid GL context issues.
-    // ================================================================
-#if TARGET_OS_IPHONE
-    // Set working directory for the first game (needed to read Config)
-    mkxp_fs::setCurrentDirectory(dataDir);
-
-    /* Read initial config to get window title/size (Config is re-read
-     * per session, but we need one now for window creation). */
-    Config initConf;
-    initConf.read(argc, argv);
-
-    SDL_Window *persistWin = createPersistentWindow(initConf);
-    if (!persistWin)
-      return 0;
-
-    SDL_GLContext persistGLCtx = createPersistentGL(persistWin);
-    if (!persistGLCtx) {
-      SDL_DestroyWindow(persistWin);
-      return 0;
-    }
-
-    ALCdevice *persistAlcDev = nullptr;
-    ALCcontext *persistAlcCtx = nullptr;
-    if (!createPersistentAudio(&persistAlcDev, &persistAlcCtx)) {
-      teardownANGLE();
-      SDL_DestroyWindow(persistWin);
-      return 0;
-    }
-
-    SDL_DisplayMode mode;
-    SDL_GetDisplayMode(0, 0, &mode);
-
-    // ================================================================
-    // Game session loop — persistent RGSS thread
-    // ================================================================
-    s_rgssSessionReady = SDL_CreateSemaphore(0);
-    s_rgssSessionDone  = SDL_CreateSemaphore(0);
-    SDL_Thread *rgssThread = nullptr;
-    bool firstSession = true;
-    while (true) {
-      /* On sessions after the first, block until the Library UI
-       * provides the next game. An empty path means the user quit. */
-      if (!firstSession && !waitForNextGame(dataDir, sizeof(dataDir)))
-        break;
-      firstSession = false;
-
-      /* Read the game's config. */
-      Config conf;
-      conf.read(argc, argv);
-
-      if (conf.windowTitle.empty())
-        conf.windowTitle = conf.game.title;
-
-      assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
-      printRgssVersion(conf.rgssVersion);
-
-      initSyntaxTransform(conf);
-
-      SDL_SetWindowTitle(persistWin, conf.windowTitle.c_str());
-
-      if (!mode.refresh_rate)
-        conf.syncToRefreshrate = false;
-
-      EventThread eventThread;
-
-      RGSSThreadData rtData(&eventThread, argv[0], persistWin, persistAlcDev,
-                            persistAlcCtx, mode.refresh_rate,
-                            mkxp_sys::getScalingFactor(), conf, persistGLCtx);
-
-      int winW, winH, drwW, drwH;
-      SDL_GetWindowSize(persistWin, &winW, &winH);
-      rtData.windowSizeMsg.post(Vec2i(winW, winH));
-
-      mkxpGL_GetDrawableSize(persistWin, &drwW, &drwH);
-      rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
-
-      rtData.bindingUpdateMsg.post(loadBindings(conf));
-
-      /* Drain stale events (especially SDL_QUIT) left over from the
-       * previous session so the event loop doesn't exit immediately. */
-      SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-
-      if (!rgssThread) {
-        /* First session: create the persistent RGSS thread.
-         * Ruby 3.1's GC is precise, so 1 MB is plenty. */
-        rgssThread = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                    1 * 1024 * 1024, &rtData);
-      } else {
-        /* Subsequent sessions: signal the persistent RGSS thread
-         * with the new session data. */
-        s_nextRTData = &rtData;
-        SDL_SemPost(s_rgssSessionReady);
-      }
-
-      /* Run event processing until the game ends. */
-      eventThread.process(rtData);
-
-      /* Ask the RGSS thread to stop, then wait for it. */
-      rtData.rqTerm.set();
-      const bool acked = waitForRGSSAck(rtData);
-
-      if (acked) {
-        /* RGSS thread is shutting down: wait for it to finish
-         * SharedState::finiInstance before we proceed. */
-        waitForSessionDone(s_rgssSessionDone);
-      } else {
-        /* The RGSS thread is stuck (never called checkShutdown).
-         * Our single-reused-thread architecture cannot respawn a
-         * new VM while the old one is blocked, so the only safe
-         * recovery is to force-quit the app. The UI will terminate
-         * the process when the user taps OK. */
-        mkxp_setEngineHung();
-        /* Intentionally generic - by the time this alert is seen,
-         * the user may have already selected a different game in
-         * the Library. */
-        mkxp_setErrorMessage(
-            "The previous game stopped responding. The app will now close.");
-      }
-
-      if (!rtData.rgssErrorMsg.empty()) {
-        Debug() << rtData.rgssErrorMsg;
-        mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
-      }
-
-      eventThread.cleanup();
-
-      clearFramebufferBetweenSessions(persistWin, persistGLCtx, s_screenFBO);
-
-      Debug() << "Game session ended.";
-    } // end while(true) game session loop
-
-    /* Signal the RGSS thread to exit */
-    s_nextRTData = nullptr;
-    SDL_SemPost(s_rgssSessionReady);
-    SDL_WaitThread(rgssThread, 0);
-    SDL_DestroySemaphore(s_rgssSessionReady);
-    SDL_DestroySemaphore(s_rgssSessionDone);
-
-    /* Cleanup persistent resources (unreachable in normal flow,
-     * but good form in case we ever break out of the loop) */
-    if (persistGLCtx)
-      SDL_GL_DeleteContext(persistGLCtx);
-    alcMakeContextCurrent(NULL);
-    if (persistAlcCtx)
-      alcDestroyContext(persistAlcCtx);
-    alcCloseDevice(persistAlcDev);
-    SDL_DestroyWindow(persistWin);
-
-#else // !TARGET_OS_IPHONE — original single-session flow
 
     // ================================================================
     // Non-iOS: single-pass flow (no session loop)
