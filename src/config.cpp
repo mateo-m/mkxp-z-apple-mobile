@@ -8,6 +8,8 @@
 #include "config.h"
 #include <SDL_filesystem.h>
 #include <assert.h>
+#include <cctype>
+#include <dirent.h>
 
 #include <stdint.h>
 #include <vector>
@@ -393,30 +395,85 @@ void Config::readGameINI() {
         return;
     }
     
+    // The canonical RPG Maker `Game.ini` filename is derived from
+    // `execName` (defaults to "Game"). Games like Pokemon Uranium
+    // ship their ini under a custom name (Uranium.ini) and rely on
+    // the desktop launcher to match - Windows picks `Foo.ini` by
+    // looking up the .exe name at runtime. On iOS there's no .exe
+    // to sniff, so when `execName + ".ini"` doesn't exist, fall
+    // back to scanning the game root for any *.ini that has the
+    // two mandatory `[Game]` keys (`Library` + `Scripts`). Every
+    // real RPG Maker XP / VX / VX Ace title has both; sibling
+    // inis shipped for things like audio configs / language files
+    // lack one or the other, so this check filters them out.
     std::string iniFileName(execName + ".ini");
-    SDLRWStream iniFile(iniFileName.c_str(), "r");
-    
-    bool convSuccess = false;
-    if (iniFile)
-    {
+
+    auto tryLoadIni = [&](const std::string &path,
+                          bool requireGameKeys) -> bool {
+        SDLRWStream iniFile(path.c_str(), "r");
+        if (!iniFile) return false;
         INIConfiguration ic;
-        if (ic.load(iniFile.stream()))
-        {
-            GUARD(game.title = ic.getStringProperty("Game", "Title"););
-            GUARD(game.scripts = ic.getStringProperty("Game", "Scripts"););
-            
-            strReplace(game.scripts, '\\', '/');
-            
-            if (game.title.empty()) {
-                Debug() << iniFileName + ": Could not find Game.Title";
+        if (!ic.load(iniFile.stream())) return false;
+
+        std::string localTitle, localScripts, localLibrary;
+        GUARD(localTitle = ic.getStringProperty("Game", "Title"););
+        GUARD(localScripts = ic.getStringProperty("Game", "Scripts"););
+        GUARD(localLibrary = ic.getStringProperty("Game", "Library"););
+        strReplace(localScripts, '\\', '/');
+
+        if (requireGameKeys &&
+            (localScripts.empty() || localLibrary.empty())) {
+            return false;
+        }
+
+        game.title = localTitle;
+        game.scripts = localScripts;
+        if (game.title.empty()) {
+            Debug() << path + ": Could not find Game.Title";
+        }
+        if (game.scripts.empty()) {
+            Debug() << path + ": Could not find Game.Scripts";
+        }
+        return true;
+    };
+
+    bool convSuccess = false;
+    bool iniLoaded = tryLoadIni(iniFileName, false);
+
+    if (!iniLoaded || game.scripts.empty()) {
+        Debug() << "Could not read" << iniFileName
+                << "- scanning game root for alternate game ini";
+        DIR *dir = opendir(".");
+        if (dir) {
+            while (struct dirent *ent = readdir(dir)) {
+                std::string name(ent->d_name);
+                if (name.size() < 5) continue;
+                std::string suffix = name.substr(name.size() - 4);
+                for (char &c : suffix) c = std::tolower(c);
+                if (suffix != ".ini") continue;
+                if (name == iniFileName) continue;
+                if (tryLoadIni(name, true)) {
+                    iniFileName = name;
+                    // Sync execName to the ini's basename so
+                    // sharedstate.cpp picks up `Uranium.rgssad`
+                    // instead of `Game.rgssad` when mounting the
+                    // RGSS archive. Everything else downstream
+                    // that keys off execName (mkxp.json
+                    // overrides, save-data paths) also benefits.
+                    execName = name.substr(0, name.size() - 4);
+                    iniLoaded = true;
+                    Debug() << "Using alternate game ini:" << name
+                            << "(execName -> " << execName << ")";
+                    break;
+                }
             }
-            
-            if (game.scripts.empty())
-                Debug() << iniFileName + ": Could not find Game.Scripts";
+            closedir(dir);
         }
     }
-    else
-        Debug() << "Could not read" << iniFileName;
+
+    if (!iniLoaded) {
+        Debug() << "No usable game ini found";
+    }
     
     try {
         game.title = Encoding::convertString(game.title);
