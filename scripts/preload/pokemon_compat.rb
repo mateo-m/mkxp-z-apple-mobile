@@ -2,6 +2,22 @@
 # Compatibility patches for Pokemon Essentials / Pokemon fangames.
 # Separated from platform_compat.rb to keep engine-generic code clean.
 
+# --- Pokemon Essentials text-entry path ---
+# JoiPlay sets this top-level constant so Pokemon Essentials fan
+# games consulting it (older Essentials builds, Uranium, Reborn,
+# others) pick the on-screen character grid instead of the
+# physical-keyboard variant. Stock Essentials doesn't reference it -
+# JoiPlay-aware games do - but it's the cheapest nudge into the
+# touch-friendly scene that doesn't require modifying the game's
+# `PokemonEntryScene` itself.
+#
+# Set here at preload so class bodies evaluating `USEKEYBOARD =
+# USEKEYBOARDTEXTENTRY` during script load see `false`. Some fan
+# games (Uranium) re-assign the constant from their own Settings
+# script, so pokemon_input.rb re-applies the override in postload
+# to win that race before `pbEnterText` ever runs.
+USEKEYBOARDTEXTENTRY = false unless defined?(USEKEYBOARDTEXTENTRY)
+
 # --- Uranium hard-reset prevention ---
 # Pokemon Uranium checks $game_exists on startup and calls
 # system('Uranium') + exit to relaunch itself. On iOS, system() is
