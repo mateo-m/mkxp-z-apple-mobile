@@ -38,6 +38,7 @@
 #include "binding.h"
 #include "exception.h"
 #include "sharedmidistate.h"
+#include "patcher.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -102,6 +103,8 @@ struct SharedStatePrivate
     
     std::chrono::time_point<std::chrono::steady_clock> startupTime;
 
+    Patcher patcher;
+
 	SharedStatePrivate(RGSSThreadData *threadData)
 	    : bindingData(0),
 	      sdlWindow(threadData->window),
@@ -115,7 +118,8 @@ struct SharedStatePrivate
 	      audio(*threadData),
 	      _glState(threadData->config),
 	      fontState(threadData->config),
-	      stampCounter(0)
+	      stampCounter(0),
+	      patcher(threadData->config.patches)
 	{}
 	
 	void init(RGSSThreadData *threadData)
@@ -129,8 +133,8 @@ struct SharedStatePrivate
 
 		std::string archPath = config.execName + gameArchExt();
 
-		for (size_t i = 0; i < config.patches.size(); ++i)
-			fileSystem.addPath(config.patches[i].c_str());
+		for (size_t i = 0; i < config.patchPaths.size(); ++i)
+			fileSystem.addPath(config.patchPaths[i].c_str());
 
 		/* Check if a game archive exists */
 		FILE *tmp = fopen(archPath.c_str(), "rb");
@@ -260,6 +264,7 @@ GSATT(TexPool&, texPool)
 GSATT(Quad&, gpQuad)
 GSATT(SharedFontState&, fontState)
 GSATT(SharedMidiState&, midiState)
+GSATT(Patcher&, patcher)
 
 void SharedState::setBindingData(void *data)
 {

@@ -119,6 +119,22 @@ struct Config {
     std::vector<std::string> preloadScripts;
     std::vector<std::string> postloadScripts;
     std::vector<std::string> rtps;
+    // Filesystem overlay paths (zip archives or directories) mounted
+    // before the game folder so their assets override the bundled
+    // ones. Used for incremental updates and asset mods. Whole-file
+    // replacement, matched by filename. Originally named `patches`
+    // in upstream mkxp-z; renamed to `patchPaths` so `patches` can
+    // carry JoiPlay-compatible meaning (script text rewrites) which
+    // matches what our user base expects. Config key: `patchPaths`.
+    std::vector<std::string> patchPaths;
+    // JoiPlay-style script text-patcher inputs. Each entry is a JSON
+    // file with a top-level "rpgm" array of {key, value} objects.
+    // Keys prefixed with "[regex]" are applied as ECMAScript regex
+    // replacements; others are literal substring replacements.
+    // Applied to RGSS script sections at load time, in memory only,
+    // so save compatibility is preserved. Config key: `patches`
+    // (matches JoiPlay so community-maintained patch JSONs drop in
+    // without modification).
     std::vector<std::string> patches;
     
     std::vector<std::string> fontSubs;

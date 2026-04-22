@@ -192,3 +192,61 @@ class << Dir
     _mkxp_orig_chdir(dir, &block)
   end
 end
+
+# --- DL / DL::CFunc legacy fake module ---
+# Older Pokemon Essentials forks and a few community plugins use
+# Ruby 1.8's `require 'dl'` + `DL::CFunc` to call user32 / kernel32
+# functions directly (pre-dating Win32API). On Ruby 3 the stdlib
+# `dl` gem doesn't exist and our `const_missing` hook only returns
+# `IOS::NullStub`, which is not hash-indexable. Scripts doing
+# `dll = DL.dlopen('user32'); dll['GetSystemMetrics']` therefore
+# fail on `Hash#[]` even though the constant itself resolves.
+#
+# Ported from JoiPlay's preload.rb. `dlopen` returns a populated
+# hash so the lookup succeeds; `CFunc.new` stores the function
+# name and delegates `call` to Win32API (which our win32_wrap
+# already routes to noop / safe-default returns on iOS).
+module DL
+  class CFunc
+    def initialize(func, type = "i")
+      @func_name = func.to_s
+      @type = type
+      @impl = begin
+        Win32API.new("User32", @func_name, %w(l p), 'i') if defined?(Win32API)
+      rescue
+        nil
+      end
+    end
+
+    def call(*args)
+      return @impl.call(*args) if @impl
+      0
+    end
+
+    def to_s;  @func_name.to_s; end
+    def to_str; @func_name.to_s; end
+  end
+
+  USER32_FUNCS = %w(
+    GetActiveWindow GetSystemMetrics GetWindowRect SetWindowLong
+    SetWindowPos FindWindow GetForegroundWindow GetCursorPos
+    SetWindowText
+  ).freeze
+
+  KERNEL32_FUNCS = %w(
+    GetModuleHandle GetPrivateProfileString GetCurrentThreadId
+    GetCurrentProcess SetPriorityClass
+  ).freeze
+
+  def self.dlopen(lib = '')
+    name = lib.to_s.downcase
+    table = case name
+            when /user32/   then USER32_FUNCS
+            when /kernel32/ then KERNEL32_FUNCS
+            else []
+            end
+    h = Hash.new { |_, k| k.to_s }  # unknown keys echo their own name
+    table.each { |fn| h[fn] = fn }
+    h
+  end
+end

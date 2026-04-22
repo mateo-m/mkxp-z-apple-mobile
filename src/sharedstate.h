@@ -81,6 +81,11 @@ struct SharedState
 	Font &defaultFont() const;
 	SharedMidiState &midiState() const;
 
+	/* JoiPlay-style script text patcher. Holds the merged patch
+	   list loaded from config.scriptPatches JSON files. Apply
+	   against each RGSS script section at load time. */
+	class Patcher &patcher() const;
+
 	sigslot::signal<> prepareDraw;
 
 	unsigned int genTimeStamp();

@@ -38,6 +38,7 @@
 #include "binding.h"
 
 #include "sharedstate.h"
+#include "patcher.h"
 #include "eventthread.h"
 #include "display/gl/glstate.h"
 
@@ -1271,6 +1272,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             "pokemon_compat",
             "win32_wrap",
             "mkxp_wrap",
+            "http_compat",
             nullptr
         };
         
@@ -1453,8 +1455,15 @@ static void runRMXPScripts(BacktraceData &btData) {
             
             VALUE script = rb_ary_entry(scriptArray, i);
             VALUE scriptDecoded = rb_ary_entry(script, 3);
-            VALUE string =
-            mkxp_str_new(RSTRING_PTR(scriptDecoded), RSTRING_LEN(scriptDecoded));
+            // Apply JoiPlay-style script text patches from
+            // config.scriptPatches before handing text to the
+            // Ruby VM. The patcher is a no-op when the patch
+            // list is empty, so the hot path cost is one
+            // std::string copy per script section.
+            std::string rawScript(RSTRING_PTR(scriptDecoded),
+                                  RSTRING_LEN(scriptDecoded));
+            shState->patcher().apply(rawScript);
+            VALUE string = mkxp_str_new(rawScript.data(), rawScript.size());
             
             VALUE fname;
             const char *scriptName = RSTRING_PTR(rb_ary_entry(script, 1));
