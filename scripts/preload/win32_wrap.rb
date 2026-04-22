@@ -308,6 +308,154 @@ module Win32API_Impl
 			end
 		end
 
+		# Translates a Windows virtual-key code into a hardware scancode
+		# (or vice versa). Pokemon Essentials-based games call this with
+		# uMapType = 0 (MAPVK_VK_TO_VSC) during text entry to build the
+		# arguments for ToUnicode below.
+		#
+		# We lean on the existing WIN2SDL table: for every VK in WIN32
+		# there's either a direct same-name entry in SDL's scancode
+		# table, or an aliased entry via WIN2SDL. The returned value is
+		# the SDL scancode, not the real Windows scancode - in practice
+		# games just pass it straight into ToUnicode, which in turn
+		# ignores the scancode field for character resolution, so the
+		# exact encoding doesn't matter.
+		class MapVirtualKey
+			MAPVK_VK_TO_VSC   = 0
+			MAPVK_VSC_TO_VK   = 1
+			MAPVK_VK_TO_CHAR  = 2
+
+			def call(args)
+				code = args[0].to_i
+				map_type = args[1].to_i
+
+				case map_type
+				when MAPVK_VK_TO_VSC
+					vkey_name = Scancodes::WIN32INV[code]
+					return 0 if vkey_name.nil?
+					sdl_name = Scancodes::SDL.key?(vkey_name) ? vkey_name : Scancodes::WIN2SDL[vkey_name]
+					return Scancodes::SDL[sdl_name] || 0
+				when MAPVK_VK_TO_CHAR
+					# Uppercase letter conversion. The high bit of the
+					# return value signals "dead key" on Windows; we
+					# never set it.
+					if code >= 0x41 && code <= 0x5A
+						return code
+					end
+					if code >= 0x30 && code <= 0x39
+						return code
+					end
+					return 0
+				else
+					# VSC_TO_VK and related variants aren't used by any
+					# game we ship support for. Returning 0 is the
+					# documented "no mapping" result.
+					return 0
+				end
+			end
+		end
+
+		# Converts a virtual-key code + keyboard-state buffer into the
+		# Unicode character(s) it produces on a US QWERTY layout. Only
+		# supports the printable-ASCII range because that's all any
+		# RPG Maker name-entry screen needs (a-z, A-Z, 0-9, space, and
+		# a handful of punctuation). Non-printable keys return 0
+		# (ToUnicode's documented "no translation" result).
+		#
+		# Return semantics:
+		#   >0 : number of wide-chars written to the output buffer
+		#    0 : no translation (e.g. Escape, F1, arrow keys)
+		#   <0 : dead key (not produced here)
+		class ToUnicode
+			PRESSED_BIT = 0x80
+
+			# Keyed by VK (Scancodes::WIN32[:SYMBOL]); values are
+			# [unshifted, shifted] characters. Layout is hardcoded to
+			# US QWERTY, which is what every mkxp-z-supported game
+			# assumes regardless of the actual host keyboard layout.
+			#
+			# Control keys (VK_BACK, VK_TAB, VK_RETURN, VK_ESCAPE)
+			# intentionally have no entry: Pokemon Uranium's
+			# name-entry appends whatever ToUnicode returns directly
+			# to the name string without filtering control bytes,
+			# so emitting \b here produces rectangle tofu in the
+			# text field. Real Windows returns 0 for these anyway.
+			US_LAYOUT = {
+				0x20 => [" ",  " "],  # SPACE
+				0x30 => ["0", ")"],   # 0
+				0x31 => ["1", "!"],   # 1
+				0x32 => ["2", "@"],   # 2
+				0x33 => ["3", "#"],   # 3
+				0x34 => ["4", "$"],   # 4
+				0x35 => ["5", "%"],   # 5
+				0x36 => ["6", "^"],   # 6
+				0x37 => ["7", "&"],   # 7
+				0x38 => ["8", "*"],   # 8
+				0x39 => ["9", "("],   # 9
+				0xBA => [";", ":"],   # OEM_1 semicolon
+				0xBB => ["=", "+"],   # OEM_PLUS
+				0xBC => [",", "<"],   # OEM_COMMA
+				0xBD => ["-", "_"],   # OEM_MINUS
+				0xBE => [".", ">"],   # OEM_PERIOD
+				0xBF => ["/", "?"],   # OEM_2 slash
+				0xC0 => ["`", "~"],   # OEM_3 grave
+				0xDB => ["[", "{"],   # OEM_4 left bracket
+				0xDC => ["\\", "|"],  # OEM_5 backslash
+				0xDD => ["]", "}"],   # OEM_6 right bracket
+				0xDE => ["'", '"'],   # OEM_7 apostrophe
+			}
+
+			def call(args)
+				vkey = args[0].to_i
+				_scancode = args[1].to_i
+				state = args[2]
+				out_buf = args[3]
+				buf_size = args[4].to_i
+				_flags = args[5].to_i
+
+				return 0 if state.nil? || out_buf.nil? || buf_size < 1
+
+				# Check shift / caps-lock flags inside the state
+				# buffer. ToUnicode treats both 0xA0 / 0xA1 as "shift"
+				# and 0x14 as caps-lock; the high bit of each byte is
+				# the pressed flag.
+				shift_pressed = (state[0x10].to_i & PRESSED_BIT) != 0 ||
+				                (state[0xA0].to_i & PRESSED_BIT) != 0 ||
+				                (state[0xA1].to_i & PRESSED_BIT) != 0
+				caps_on = (state[0x14].to_i & 0x01) != 0
+
+				ch = nil
+
+				if vkey >= 0x41 && vkey <= 0x5A
+					# Letter keys. Caps lock XOR shift decides case.
+					upper = caps_on ^ shift_pressed
+					ch = (vkey + (upper ? 0 : 32)).chr
+				elsif US_LAYOUT.key?(vkey)
+					ch = US_LAYOUT[vkey][shift_pressed ? 1 : 0]
+				end
+
+				return 0 if ch.nil?
+
+				# The output buffer is a Ruby string holding a packed
+				# LPWSTR - each wide char is 2 bytes, little-endian.
+				# Write the UTF-16 code unit for `ch` (only BMP chars
+				# are emitted here, so a single code unit suffices).
+				code = ch.unpack1("U")
+				lo = code & 0xFF
+				hi = (code >> 8) & 0xFF
+				out_buf[0] = lo
+				out_buf[1] = hi
+				# Null-terminate when room allows so callers that
+				# treat the buffer as a C wide-string don't read stale
+				# bytes after the written char.
+				if buf_size >= 2
+					out_buf[2] = 0
+					out_buf[3] = 0
+				end
+				return 1
+			end
+		end
+
 		class ShowCursor
 			def initialize
 				@cursor_count = 0
