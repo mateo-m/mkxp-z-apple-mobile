@@ -194,6 +194,7 @@ void Config::read(int argc, char *argv[]) {
         {"preloadScript", json::array({})},
         {"postloadScript", json::array({})},
         {"RTP", json::array({})},
+        {"patchPaths", json::array({})},
         {"patches", json::array({})},
         {"fontSub", json::array({})},
         {"fontScale", 0.0f},
@@ -331,6 +332,7 @@ try { exp } catch (...) {}
     fillStringVec(opts["preloadScript"], preloadScripts);
     fillStringVec(opts["postloadScript"], postloadScripts);
     fillStringVec(opts["RTP"], rtps);
+    fillStringVec(opts["patchPaths"], patchPaths);
     fillStringVec(opts["patches"], patches);
     fillStringVec(opts["fontSub"], fontSubs);
     for (std::string & fontSub : fontSubs)

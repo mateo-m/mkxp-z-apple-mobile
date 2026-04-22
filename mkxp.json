@@ -422,12 +422,26 @@
 
     // Similar to the RTP option, except items are loaded before
     // the game archive and folder, for incremental game updates
-    // or modding.
+    // or modding. Config key: `patchPaths`.
+    // (default: none)
+    //
+    // "patchPaths": [
+    //     "/path/to/patch1.zip",
+    //     "/path/to/patch2",
+    // ],
+
+    // JoiPlay-style script text-patcher inputs. Each entry is a
+    // path to a JSON file with a top-level "rpgm" array of
+    // {key, value} objects. When a script section is loaded, the
+    // patcher runs each rule against its text. Keys prefixed with
+    // "[regex]" are applied as ECMAScript regex replacements;
+    // others are literal substring replacements. Useful for
+    // shipping per-game fixes (e.g. a specific problematic line
+    // in a fangame) without modifying the game's own files.
     // (default: none)
     //
     // "patches": [
-    //     "/path/to/patch1.zip",
-    //     "/path/to/patch2",
+    //     "/path/to/mygame-patch.json",
     // ],
 
 
