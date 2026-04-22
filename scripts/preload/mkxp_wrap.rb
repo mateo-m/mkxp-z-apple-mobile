@@ -39,5 +39,25 @@ module MKXP
 		def cheats_enabled?
 			System::cheats_enabled?
 		end
+
+		# MKXP.rpg_version / ruby_version / power_state mirror
+		# JoiPlay's helper module so scripts written against it
+		# (notably PE fangames doing `if MKXP.rpg_version > 2`)
+		# keep working on mkxp-z.
+		def rpg_version(*args)
+			System::rpg_version(*args)
+		end
+
+		def ruby_version(*args)
+			System::ruby_version(*args)
+		end
+
+		def power_state(*args)
+			System::power_state(*args)
+		end
+
+		def platform(*args)
+			System::platform(*args)
+		end
 	end
 end

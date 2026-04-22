@@ -143,6 +143,8 @@ RB_METHOD(mkxpIsReallyLinuxHost);
 RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
+RB_METHOD(mkxpRpgVersion);
+RB_METHOD(mkxpRubyVersion);
 
 RB_METHOD(mkxpUserLanguage);
 RB_METHOD(mkxpUserName);
@@ -390,6 +392,8 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "is_really_windows?", mkxpIsReallyWindowsHost);
 
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
+    _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
+    _rb_define_module_function(mod, "ruby_version", mkxpRubyVersion);
     
     
     _rb_define_module_function(mod, "user_language", mkxpUserLanguage);
@@ -621,6 +625,27 @@ RB_METHOD(mkxpIsReallyWindowsHost) {
 RB_METHOD(mkxpCheatsEnabled) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getCheatsEnabled());
+}
+
+/* System.rpg_version - integer RGSS version (1 = XP, 2 = VX, 3 = VX
+   Ace, 0 = unknown). JoiPlay's postload.rb branches on this to
+   decide whether VX-Ace-only compat patches apply; some fangames
+   feature-detect via MKXP.rpg_version too. */
+RB_METHOD(mkxpRpgVersion) {
+    RB_UNUSED_PARAM;
+    int v = shState->rtData().config.rgssVersion;
+    if (v < 1 || v > 3) v = 0;
+    return INT2NUM(v);
+}
+
+/* System.ruby_version - "MAJOR.MINOR" string of the embedded MRI. A
+   handful of plugins branch on `MKXP.ruby_version.to_f < 2.0` to
+   decide between 1.8 and 1.9+ syntax. */
+RB_METHOD(mkxpRubyVersion) {
+    RB_UNUSED_PARAM;
+    std::string v = std::to_string(RUBY_API_VERSION_MAJOR) + "." +
+                    std::to_string(RUBY_API_VERSION_MINOR);
+    return rb_str_new_cstr(v.c_str());
 }
 
 RB_METHOD(mkxpUserLanguage) {
@@ -1306,6 +1331,8 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_input",
                     "pokemon_online_stubs",
                     "pokemon_tilemap_fix",
+                    "pokemon_graphics_compat",
+                    "nilclass_safe_stubs",
                     nullptr
                 };
                 
