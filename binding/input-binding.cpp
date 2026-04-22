@@ -569,6 +569,10 @@ struct {
     {"F7", Input::F7},
     {"F8", Input::F8},
     {"F9", Input::F9},
+    {"HOME", Input::HOME},
+    {"F7", Input::F7},
+    {"F8", Input::F8},
+    {"F9", Input::F9},
     
     {"MOUSELEFT", Input::MouseLeft},
     {"MOUSEMIDDLE", Input::MouseMiddle},

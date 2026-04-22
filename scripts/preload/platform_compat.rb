@@ -22,15 +22,84 @@ module Kernel
 end
 
 # --- Windows environment variable stubs ---
-# Many RGSS games use ENV["TEMP"] / ENV["APPDATA"] for file operations.
+# Many RGSS games use ENV["TEMP"] / ENV["APPDATA"] for file operations,
+# and some derive save paths from USERPROFILE / LOCALAPPDATA /
+# COMPUTERNAME. Mirror JoiPlay's full fake-Windows environment so
+# scripts constructing paths from ENV don't return nil and crash.
+# Values point into the iOS sandbox (or are blank strings) so File.exist?
+# returns false rather than reading unrelated system dirs.
 _tmp = "/tmp"
 begin
   _tmp = Dir.tmpdir
 rescue
 end
+_userdata = "#{_tmp}/UserData"
 ENV["TEMP"] ||= _tmp
 ENV["TMP"]  ||= _tmp
-ENV["APPDATA"] ||= _tmp
+ENV["APPDATA"]              ||= "#{_userdata}/AppData"
+ENV["LOCALAPPDATA"]         ||= "#{_userdata}/AppData"
+ENV["ALLUSERSPROFILE"]      ||= _userdata
+ENV["USERPROFILE"]          ||= _userdata
+ENV["HOMEDRIVE"]            ||= ""
+ENV["HOMEPATH"]             ||= _userdata
+ENV["SystemRoot"]           ||= _userdata
+ENV["windir"]               ||= _userdata
+ENV["COMPUTERNAME"]         ||= "Empo"
+ENV["USERNAME"]             ||= "Empo"
+ENV["USERDOMAIN"]           ||= "Empo"
+ENV["SESSIONNAME"]          ||= "Empo"
+ENV["OS"]                   ||= "Windows_NT"
+ENV["PATH"]                 ||= ""
+ENV["PATHEXT"]              ||= ""
+ENV["Platform"]             ||= ""
+ENV["NUMBER_OF_PROCESSORS"] ||= "4"
+ENV["PROCESSOR_ARCHITECTURE"] ||= "x86"
+ENV["PROCESSOR_IDENTIFIER"] ||= "Intel64 Family6"
+ENV["PROCESSOR_LEVEL"]      ||= "6"
+ENV["PROCESSOR_REVISION"]   ||= "2a07"
+ENV["AV_APPDATA"]           ||= "#{_userdata}/AppData"
+
+# --- Float bitwise-op monkey-patches ---
+# RGSS scripts occasionally do `x ^ 2` when they mean `x ** 2` (a
+# Game-Maker-idiom leak) or `x << n` to cheaply multiply by 2**n. On
+# stock Ruby these raise NoMethodError against Float. Adding the ops
+# is a zero-risk unlock for a long tail of buggy scripts.
+class Float
+  def ^(power) self ** power end
+  def <<(num)  self * (2 ** num) end
+  def >>(num)  self / (2 ** num) end
+end
+
+# --- Input::Controller state stubs ---
+# Some indie games (cited: Sometimes Always Monsters) probe
+# Input::Controller.states / first_state optimistically at startup
+# and crash with NoMethodError when the mkxp-z Input module doesn't
+# expose a matching surface. Provide an inert State whose every
+# method returns a sensible zero so probes succeed and the game
+# falls through to keyboard / touch input. Mirrors JoiPlay preload.rb.
+module Input
+  module Controller
+    class State
+      def left_trigger_value;   0 end
+      def right_trigger_value;  0 end
+      def thumb_left_x;  0 end
+      def thumb_left_y;  0 end
+      def thumb_right_x; 0 end
+      def thumb_right_y; 0 end
+      def thumb_left_dir4;  0 end
+      def thumb_left_dir8;  0 end
+      def thumb_right_dir4; 0 end
+      def thumb_right_dir8; 0 end
+      def press?(button);   false end
+      def trigger?(button); false end
+      def repeat?(button);  false end
+      def pressed_buttons;  [] end
+    end
+
+    def self.states;      [State.new] end
+    def self.first_state; State.new end
+  end
+end
 
 # --- MKXP module shim ---
 # Some game preload scripts expect the MKXP module from Ancurio's

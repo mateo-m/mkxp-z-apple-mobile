@@ -71,6 +71,9 @@ enum {
     MKXP_SCANCODE_LCTRL  = 224,
     MKXP_SCANCODE_LSHIFT = 225,
     MKXP_SCANCODE_LALT   = 226,
+
+    // Navigation
+    MKXP_SCANCODE_HOME   = 74,
 };
 
 #ifdef __cplusplus
@@ -93,6 +96,13 @@ void        mkxp_requestTerminate(void);
 int         mkxp_isEngineTerminated(void);
 void        mkxp_setEngineTerminated(void);
 void        mkxp_resetBridgeState(void);
+
+// Set by the engine when the current session ended because Ruby
+// raised SystemExit (e.g. the game's "Exit to desktop" menu). The
+// UI reads this in its engine-terminated callback to skip the
+// "game didn't exit cleanly" alert for intentional exits.
+int         mkxp_didEngineExitCleanly(void);
+void        mkxp_setEngineExitedCleanly(void);
 
 // Set when the RGSS thread failed to respond to a termination request.
 // The engine is unrecoverable: the UI should force-quit the process
@@ -192,6 +202,15 @@ bool        mkxp_getPostloadEnabled(void);
 
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);
+
+// Cheat menu toggle (UI -> Engine).
+//
+// Setter sets the runtime cheat-enabled flag. The engine's postload
+// layer reads the current value on each frame/update (Ruby-side code
+// reassigns the $CHEATS global from the bridge so the UI toggle
+// takes effect mid-game without re-entering the script).
+void        mkxp_setCheatsEnabled(bool enabled);
+bool        mkxp_getCheatsEnabled(void);
 
 void        mkxp_setViewportBoundsColor(float r, float g, float b, float a);
 void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);

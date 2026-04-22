@@ -142,6 +142,8 @@ RB_METHOD(mkxpIsReallyMacHost);
 RB_METHOD(mkxpIsReallyLinuxHost);
 RB_METHOD(mkxpIsReallyWindowsHost);
 
+RB_METHOD(mkxpCheatsEnabled);
+
 RB_METHOD(mkxpUserLanguage);
 RB_METHOD(mkxpUserName);
 RB_METHOD(mkxpGameTitle);
@@ -386,6 +388,8 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "is_really_mac?", mkxpIsReallyMacHost);
     _rb_define_module_function(mod, "is_really_linux?", mkxpIsReallyLinuxHost);
     _rb_define_module_function(mod, "is_really_windows?", mkxpIsReallyWindowsHost);
+
+    _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
     
     
     _rb_define_module_function(mod, "user_language", mkxpUserLanguage);
@@ -610,6 +614,13 @@ RB_METHOD(mkxpIsReallyLinuxHost) {
 RB_METHOD(mkxpIsReallyWindowsHost) {
     RB_UNUSED_PARAM;
     return rb_bool_new(false);
+}
+
+/* MKXP.cheats_enabled? - reads the live bridge flag so the Ruby-side
+   cheat menu can sync $CHEATS with the UI toggle each frame. */
+RB_METHOD(mkxpCheatsEnabled) {
+    RB_UNUSED_PARAM;
+    return rb_bool_new(mkxp_getCheatsEnabled());
 }
 
 RB_METHOD(mkxpUserLanguage) {
@@ -1291,7 +1302,9 @@ static void runRMXPScripts(BacktraceData &btData) {
                methods that were replaced by the game. */
             if (i == scriptCount - 1 && mkxp_getPostloadEnabled()) {
                 const char *enginePostloads[] = {
+                    "rgss_plugin_stubs",
                     "pokemon_input",
+                    "pokemon_online_stubs",
                     "pokemon_tilemap_fix",
                     nullptr
                 };
@@ -1321,6 +1334,92 @@ static void runRMXPScripts(BacktraceData &btData) {
                         }
                     } catch (...) {
                         Debug() << "Failed to load engine postload:" << enginePostloads[p];
+                    }
+                }
+
+                /* Cheat menu dispatch.
+                   Pick the right JoiPlay-derived cheat script based on the
+                   RGSS version the game targets and whether Pokemon
+                   Essentials is detected. Load only one: the scripts
+                   each define Scene_Cheat / aliases on Game_Player, so
+                   loading multiple would overwrite each other's hooks. */
+                {
+                    int cheatRgssVer = shState->rtData().config.rgssVersion;
+                    bool isPE = false;
+                    {
+                        int st = 0;
+                        VALUE pe = rb_eval_string_protect(
+                            "Object.const_defined?(:GameData) || Object.const_defined?(:PBItems)",
+                            &st);
+                        if (!st && pe != Qnil && pe != Qfalse) isPE = true;
+                    }
+
+                    const char *cheatScript = nullptr;
+                    if (isPE) {
+                        cheatScript = "cheat_pe19";
+                    } else if (cheatRgssVer == 1) {
+                        cheatScript = "cheat_rpgmxp";
+                    } else if (cheatRgssVer == 2) {
+                        cheatScript = "cheat_rpgmvx";
+                    } else if (cheatRgssVer >= 3) {
+                        cheatScript = "cheat_rpgmvxace";
+                    }
+
+                    if (cheatScript) {
+                        try {
+                            std::string pscript = mkxp_fs::contentsOfAssetAsString(
+                                (std::string("Postload/") + cheatScript).c_str(), "rb");
+                            VALUE pscriptStr = rb_utf8_str_new_cstr(pscript.c_str());
+                            VALUE pfname = rb_utf8_str_new_cstr(cheatScript);
+                            int pstate;
+                            evalString(pscriptStr, pfname, &pstate);
+                            if (pstate) {
+#if RAPI_FULL > 187
+                                VALUE pexc = rb_errinfo();
+#else
+                                VALUE pexc = rb_gv_get("$!");
+#endif
+                                if (pexc != Qnil) {
+                                    Debug() << "Error in cheat postload" << cheatScript;
+                                    rb_set_errinfo(Qnil);
+                                }
+                            }
+
+                            /* Install a Ruby-side poller that mirrors the
+                               bridge flag into $CHEATS each time Input is
+                               updated. This lets the iOS toolbar toggle
+                               take effect mid-game without re-entering
+                               the scripts. */
+                            int pollState = 0;
+                            rb_eval_string_protect(
+                                "$CHEATS = MKXP.cheats_enabled?\n"
+                                "module Input\n"
+                                "  unless respond_to?(:_mkxp_cheat_orig_update)\n"
+                                "    singleton_class.send(:alias_method, :_mkxp_cheat_orig_update, :update)\n"
+                                "    def self.update\n"
+                                "      _mkxp_cheat_orig_update\n"
+                                "      $CHEATS = MKXP.cheats_enabled?\n"
+                                "    end\n"
+                                "  end\n"
+                                "end\n",
+                                &pollState);
+                            if (pollState) {
+#if RAPI_FULL > 187
+                                VALUE pollExc = rb_errinfo();
+#else
+                                VALUE pollExc = rb_gv_get("$!");
+#endif
+                                if (pollExc != Qnil) {
+                                    VALUE msg = rb_funcall(pollExc, rb_intern("message"), 0);
+                                    Debug() << "Error installing cheat-poller:" << StringValueCStr(msg);
+                                    rb_set_errinfo(Qnil);
+                                } else {
+                                    Debug() << "Error installing cheat-poller";
+                                }
+                            }
+                        } catch (...) {
+                            Debug() << "Failed to load cheat postload:" << cheatScript;
+                        }
                     }
                 }
             }
@@ -1979,7 +2078,18 @@ static void mriBindingExecutePerSession(Config &conf) {
 #endif
     if (!NIL_P(exc) && !rb_obj_is_kind_of(exc, rb_eSystemExit))
         showExc(exc, btData);
-    
+
+    /* Flag the session as a clean exit whenever control reaches
+     * here without a pending exception, or with a SystemExit - both
+     * mean Ruby scripts finished normally (including the game's
+     * own "Exit to desktop" menu calling Kernel.exit). Only real
+     * crashes short-circuit past this path, so the default clean=
+     * false state from mkxp_setGamePath stays false in those cases
+     * and the UI shows the recovery alert. */
+    if (NIL_P(exc) || rb_obj_is_kind_of(exc, rb_eSystemExit)) {
+        mkxp_setEngineExitedCleanly();
+    }
+
     /* On iOS, keep the Ruby VM alive across game sessions.
      * ruby_cleanup() corrupts Ruby 1.8's internal state and
      * makes ruby_init() crash on subsequent calls. */

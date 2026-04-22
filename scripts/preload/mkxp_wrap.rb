@@ -35,5 +35,9 @@ module MKXP
 		def mouse_in_window(*args)
 			Input::mouse_in_window(*args)
 		end
+
+		def cheats_enabled?
+			System::cheats_enabled?
+		end
 	end
 end
