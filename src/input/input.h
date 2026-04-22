@@ -53,7 +53,11 @@ public:
 
 		/* Non-standard extensions */
 		MouseLeft = 38, MouseMiddle = 39, MouseRight = 40,
-        MouseX1 = 41, MouseX2 = 42
+        MouseX1 = 41, MouseX2 = 42,
+        /* HOME: added for JoiPlay-compatible cheat scripts. Mapped to
+           SDL_SCANCODE_HOME; mirrors JoiPlay's input binding so any
+           script that does Input.trigger?(Input::HOME) resolves. */
+        HOME = 43
 	};
     
     void recalcRepeat(unsigned int fps);

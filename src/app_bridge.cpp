@@ -34,6 +34,12 @@ static std::atomic<bool> s_pathSet{false};
 // Engine terminated flag: set by engine after full teardown.
 static std::atomic<bool> s_engineTerminated{false};
 static std::atomic<bool> s_terminateRequested{false};
+// Set when the current session ended because the Ruby VM raised
+// SystemExit (e.g. an "Exit to desktop" menu in the game called
+// Kernel.exit). The engine's main loop distinguishes this from a
+// crash so the Swift layer can return to the library silently
+// instead of showing the "game didn't exit cleanly" alert.
+static std::atomic<bool> s_engineExitedCleanly{false};
 // Set when the RGSS thread failed to ack a termination request in time.
 // The UI reads this via mkxp_isEngineHung() and force-quits the app
 // because the single-reused-thread architecture cannot recover.
@@ -63,6 +69,11 @@ static std::atomic<float> s_vpBoundsR{0};
 static std::atomic<float> s_vpBoundsG{0};
 static std::atomic<float> s_vpBoundsB{0};
 static std::atomic<float> s_vpBoundsA{1};
+
+// Cheat menu toggle. Polled by a Ruby bridge helper that keeps the
+// $CHEATS global in sync so the JoiPlay-ported cheat scripts pick
+// up UI toggles immediately.
+static std::atomic<bool>  s_cheatsEnabled{false};
 
 // Input bridge: cached SDL window ID for event injection.
 static std::atomic<uint32_t> s_sdlWindowID{0};
@@ -165,6 +176,10 @@ void mkxp_setGamePath(const char *path) {
     std::lock_guard<std::mutex> lock(s_pathMutex);
     s_gamePath = path ? path : "";
     s_pathSet.store(true, std::memory_order_release);
+    // A fresh session: clear any clean-exit flag set by the
+    // previous session so the termination callback for this one
+    // starts from the default "unclean unless proven clean" state.
+    s_engineExitedCleanly.store(false, std::memory_order_release);
 }
 
 const char *mkxp_waitForGamePath(void) {
@@ -209,6 +224,14 @@ void mkxp_requestTerminate(void) {
 
 int mkxp_isEngineTerminated(void) {
     return s_engineTerminated.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+int mkxp_didEngineExitCleanly(void) {
+    return s_engineExitedCleanly.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+void mkxp_setEngineExitedCleanly(void) {
+    s_engineExitedCleanly.store(true, std::memory_order_release);
 }
 
 int mkxp_isEngineHung(void) {
@@ -552,6 +575,14 @@ void mkxp_setShowViewportBounds(bool enabled) {
 
 bool mkxp_getShowViewportBounds(void) {
     return s_showViewportBounds.load(std::memory_order_relaxed);
+}
+
+void mkxp_setCheatsEnabled(bool enabled) {
+    s_cheatsEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool mkxp_getCheatsEnabled(void) {
+    return s_cheatsEnabled.load(std::memory_order_relaxed);
 }
 
 void mkxp_setViewportBoundsColor(float r, float g, float b, float a) {
