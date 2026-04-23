@@ -5,6 +5,18 @@
 
 require 'zlib'
 
+# --- JoiPlay-compat signal ---
+# Several Pokemon Essentials fangames (Reborn, Rejuvenation,
+# Desolation, etc.) branch on `$joiplay` to pick between JoiPlay's
+# stripped-down API surface and desktop mkxp-z's extended one.
+# Example: Reborn's `internal_se_play` uses `Audio.se_play` on
+# JoiPlay but `Audio.se_play_position` on desktop - the latter is
+# an mkxp-z extension our iOS build doesn't carry. Since we ship
+# JoiPlay-compat shims (NilClass safe-stubs, Win32API/DL stubs,
+# poke_* graphics aliases, cheats, network stubs) the JoiPlay code
+# path is what actually works here, so we set the flag.
+$joiplay = true
+
 # --- Process spawning neutralization ---
 # fork()/exec() are forbidden on iOS and cause immediate SIGKILL.
 # Neutralize all process-spawning methods at the engine level.
@@ -249,4 +261,104 @@ module DL
     table.each { |fn| h[fn] = fn }
     h
   end
+end
+
+# --- Socket / network stubs ---
+# Our embedded Ruby doesn't compile the network stdlib (socket,
+# net/http, net/https, openssl, uri) and games can't install user
+# gems (discord-rpc, poke-api-v2, rest-client). Without help a
+# single `require 'socket'` at the top of a bootstrap script
+# raises LoadError and terminates the whole eval, so Reborn and
+# similar games don't even reach the title screen. We solve this
+# in two layers:
+#
+# 1. Provide minimal no-op classes for socket primitives (below)
+#    so scripts that do `TCPSocket.open(...)` don't NameError
+#    later on.
+# 2. Intercept Kernel#require with an allowlist of known-missing
+#    network stdlib + gems. If the require matches the allowlist
+#    and the original require raises LoadError, we swallow it and
+#    return false (mimicking "already loaded") so the calling
+#    script continues. Non-network requires still propagate.
+#
+# TODO: compile Ruby with network stdlib so online features
+# actually work. See TODO.md "Engine / compatibility".
+
+module Kernel
+  # Known-missing networking requires. Match by exact path or by
+  # prefix so `net/http`, `net/https`, `net/http/status`, etc. are
+  # all absorbed by a single `net/` entry.
+  _NETWORK_REQUIRE_PATHS = [
+    "socket", "resolv", "resolv-replace",
+    "openssl", "digest",
+    "uri", "ipaddr",
+    "net", "net/",
+    "httparty", "rest-client", "rest_client",
+    "discord", "discord-rpc", "discordrb",
+    "poke-api-v2", "pokeapi",
+    "websocket", "websocket-client",
+    "json-jwt", "jwt",
+  ].freeze
+
+  _orig_require = instance_method(:require)
+
+  define_method(:require) do |path|
+    _orig_require.bind(self).call(path)
+  rescue LoadError => e
+    p = path.to_s
+    matched = _NETWORK_REQUIRE_PATHS.any? { |entry|
+      entry.end_with?("/") ? p.start_with?(entry) : p == entry
+    }
+    raise e unless matched
+    # Mark as loaded so future `require` calls short-circuit.
+    feature = p.end_with?(".rb") ? p : "#{p}.rb"
+    $LOADED_FEATURES << feature unless $LOADED_FEATURES.include?(feature)
+    false
+  end
+end
+
+class BasicSocket
+  def self.do_not_reverse_lookup; false; end
+  def self.do_not_reverse_lookup=(*); end
+  def initialize(*); end
+  def close; end
+  def closed?; true; end
+  def read(*); ""; end
+  def write(*); 0; end
+  def puts(*); nil; end
+  def gets(*); nil; end
+  def send(*); 0; end
+  def recv(*); ""; end
+  def setsockopt(*); 0; end
+  def shutdown(*); 0; end
+  def addr; ["AF_INET", 0, "0.0.0.0", "0.0.0.0"]; end
+  def peeraddr; ["AF_INET", 0, "0.0.0.0", "0.0.0.0"]; end
+end
+
+class IPSocket < BasicSocket
+  def self.getaddress(*); "0.0.0.0"; end
+end
+
+class TCPSocket < IPSocket
+  def self.open(*); new; end
+  def self.new(*); super(); end
+end
+
+class UDPSocket < IPSocket
+  def bind(*); 0; end
+  def connect(*); 0; end
+end
+
+class TCPServer < TCPSocket
+  def accept; TCPSocket.new; end
+  def accept_nonblock; raise IO::WaitReadable; end
+  def listen(*); 0; end
+end
+
+class UNIXSocket < BasicSocket
+  def self.open(*); new; end
+end
+
+class UNIXServer < UNIXSocket
+  def accept; UNIXSocket.new; end
 end

@@ -59,5 +59,31 @@ module MKXP
 		def platform(*args)
 			System::platform(*args)
 		end
+
+		# Pokemon Reborn (and several other PE fangames that target
+		# JoiPlay) gate at boot on `MKXP.plugin_version.to_i`, which
+		# encodes JoiPlay's RPG Maker Plugin version as a 5-digit
+		# integer (1.20.53 -> 12053). The check refuses to run if
+		# the integer is below a hardcoded minimum. We set
+		# `$joiplay = true` to route these games through their
+		# JoiPlay code path, so we also have to advertise a
+		# plugin version high enough to satisfy those gates. We
+		# report 99999 - well above any known minimum - so future
+		# releases that bump the floor also pass without us having
+		# to chase every version.
+		def plugin_version
+			99999
+		end
+
+		# Pokemon Reborn's ScriptLoader pipes each script section
+		# through `MKXP.apply_overrides` before `eval`, expecting
+		# the JoiPlay-shipped patcher to rewrite known-broken
+		# lines. We route to our own patcher (src/patcher.cpp),
+		# so the same config-driven rewrites work when users set
+		# `patches` in mkxp.json. Scripts that call this on
+		# engines without a patcher would just get `str` back.
+		def apply_overrides(*args)
+			System::apply_overrides(*args)
+		end
 	end
 end
