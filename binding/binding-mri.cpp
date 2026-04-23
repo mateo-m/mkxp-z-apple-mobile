@@ -144,6 +144,7 @@ RB_METHOD(mkxpIsReallyLinuxHost);
 RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
+RB_METHOD(mkxpApplyOverrides);
 RB_METHOD(mkxpRpgVersion);
 RB_METHOD(mkxpRubyVersion);
 
@@ -393,6 +394,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "is_really_windows?", mkxpIsReallyWindowsHost);
 
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
+    _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
     _rb_define_module_function(mod, "ruby_version", mkxpRubyVersion);
     
@@ -626,6 +628,24 @@ RB_METHOD(mkxpIsReallyWindowsHost) {
 RB_METHOD(mkxpCheatsEnabled) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getCheatsEnabled());
+}
+
+/* System.apply_overrides(str) - runs the JoiPlay-compatible
+   script text-patcher over `str` and returns the rewritten text.
+   Reborn and other PE fangames call MKXP.apply_overrides on each
+   script section before Kernel#eval so config-driven fixes
+   (from the `patches` mkxp.json field) can ship as data. When
+   no patches are loaded this is effectively `str.dup`. */
+RB_METHOD(mkxpApplyOverrides) {
+    VALUE arg;
+    rb_scan_args(argc, argv, "01", &arg);
+
+    if (NIL_P(arg) || !RB_TYPE_P(arg, T_STRING))
+        return arg;
+
+    std::string data(RSTRING_PTR(arg), RSTRING_LEN(arg));
+    shState->patcher().apply(data);
+    return rb_str_new(data.data(), (long)data.size());
 }
 
 /* System.rpg_version - integer RGSS version (1 = XP, 2 = VX, 3 = VX

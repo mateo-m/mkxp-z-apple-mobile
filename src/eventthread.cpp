@@ -471,7 +471,21 @@ void EventThread::process(RGSSThreadData &rtData)
                         break;
                         
                     case REQUEST_WINRESIZE :
+#if !TARGET_OS_IPHONE
+                        /* On iOS the window is always the full screen and
+                         * cannot be resized. Calling SDL_SetWindowSize here
+                         * causes SDL to cache the requested (smaller) size
+                         * as the window's logical size, so the NEXT
+                         * session's graphics init reads the stale value
+                         * from SDL_GetWindowSize instead of the actual
+                         * fullscreen dims. That leaves the viewport
+                         * shrunk until the app is restarted. Ignoring the
+                         * request is safe: Graphics::resizeScreen already
+                         * rebuilds the framebuffer at the new resolution;
+                         * only the SDL-internal size cache needs to stay
+                         * at the real window dimensions. */
                         SDL_SetWindowSize(win, event.window.data1, event.window.data2);
+#endif
                         rtData.rqWindowAdjust.clear();
                         break;
                         
