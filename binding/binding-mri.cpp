@@ -1354,6 +1354,7 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_online_stubs",
                     "pokemon_tilemap_fix",
                     "pokemon_graphics_compat",
+                    "pokemon_session_reset",
                     "nilclass_safe_stubs",
                     nullptr
                 };
@@ -1834,6 +1835,17 @@ static void resetBetweenSessions() {
         "$data_tilesets", "$data_common_events",
         nullptr
     };
+    /* Set to nil rather than truly undefining (Ruby's C API has no
+     * public way to undefine a global once it's been assigned). PE
+     * fangames (notably Reborn) use `if defined?($game_system)` as a
+     * "already-initialized" guard, which returns "global-variable"
+     * even when the value is nil. That causes their between-run
+     * init path to skip resize_screen and fullscreen-setup calls,
+     * leaving the Graphics state stuck on the previous session's
+     * scRes. Step 5 below compensates by force-resetting `@@width`
+     * and `@@height` class vars on the Graphics module back to the
+     * engine's real default so the fangame's width-check picks up
+     * the mismatch and runs its init code. */
     for (int i = 0; rgssGlobals[i]; ++i)
         rb_gv_set(rgssGlobals[i], Qnil);
 
