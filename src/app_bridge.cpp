@@ -332,14 +332,10 @@ const char *mkxp_getGameTitle(void) {
 }
 
 void mkxp_setGameRect(float x, float y, float w, float h) {
-    float oldX = s_gameRectX.load(std::memory_order_relaxed);
-    float oldY = s_gameRectY.load(std::memory_order_relaxed);
-    float oldW = s_gameRectW.load(std::memory_order_relaxed);
-    float oldH = s_gameRectH.load(std::memory_order_relaxed);
-    s_gameRectX.store(x, std::memory_order_relaxed);
-    s_gameRectY.store(y, std::memory_order_relaxed);
-    s_gameRectW.store(w, std::memory_order_relaxed);
-    s_gameRectH.store(h, std::memory_order_relaxed);
+    float oldX = s_gameRectX.exchange(x, std::memory_order_relaxed);
+    float oldY = s_gameRectY.exchange(y, std::memory_order_relaxed);
+    float oldW = s_gameRectW.exchange(w, std::memory_order_relaxed);
+    float oldH = s_gameRectH.exchange(h, std::memory_order_relaxed);
     if (x != oldX || y != oldY || w != oldW || h != oldH) {
         s_gameRectChangedCb.fire(x, y, w, h);
     }

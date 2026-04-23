@@ -939,9 +939,9 @@ struct GraphicsPrivate {
             FBO::clear();
         }
         metaBlitBufferFlippedScaled(sourceSize, scaleIsSpecial);
-        
+
         GLMeta::blitEnd();
-        
+
         swapGLBuffer();
 
         updateAvgFPS();
@@ -1625,13 +1625,13 @@ double Graphics::getScale() const {
 void Graphics::setScale(double factor) {
     p->threadData->rqWindowAdjust.wait();
     factor = clamp(factor, 0.5, 4.0);
-    
+
     if (factor == getScale())
         return;
-    
+
     int widthpx = p->scRes.x * factor;
     int heightpx = p->scRes.y * factor;
-    
+
     shState->eThread().requestWindowResize(widthpx, heightpx);
 }
 
