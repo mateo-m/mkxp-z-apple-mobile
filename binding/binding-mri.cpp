@@ -1356,6 +1356,7 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_graphics_compat",
                     "pokemon_session_reset",
                     "nilclass_safe_stubs",
+                    "pokemon_windowskin_fix",
                     nullptr
                 };
                 
