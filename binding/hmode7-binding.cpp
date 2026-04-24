@@ -114,6 +114,30 @@ int aref_int(VALUE arr, long i, int fallback = 0) {
     return NUM2INT(v);
 }
 
+// Like `aref_int` but returns `(n << 1) | 1` - the raw tagged-
+// Fixnum bit pattern RGSS1 used in memory. The original plugin
+// read these slots without the `>> 1` untag (see
+// MGC_Hmode7_1_4_4.cpp lines 154-162 and 863-864 for the six
+// trig/slope fields and the two display-offset fields that skip
+// the untag). Doubling preserves the scaling the plugin's integer
+// math assumed. Without this, projection formulas land at ~half
+// scale, sampling off-map and producing all-transparent pixels.
+int aref_int_raw_tagged(VALUE arr, long i, int fallback = 0) {
+    VALUE v = aref_or_nil(arr, i);
+    int n;
+    if (FIXNUM_P(v)) {
+        n = FIX2INT(v);
+    } else if (v == Qtrue) {
+        n = 1;
+    } else if (v == Qfalse || v == Qnil) {
+        n = fallback;
+    } else {
+        n = NUM2INT(v);
+    }
+    // Mirror Ruby's `(n << 1) | 1` in-memory Fixnum layout.
+    return (n << 1) | 1;
+}
+
 // ----------------------------------------------------------------
 //  HM7::Native.apply_opacity(bitmap, opacity) -> nil
 //
@@ -216,15 +240,19 @@ RB_METHOD(hm7NativeComputeM7) {
     if (!lightline) return INT2FIX(0);
 
     hm7::ComputeM7Params cp = {};
-    cp.cosAngle = aref_int(params_v, 0);
-    cp.sinAngle = aref_int(params_v, 1);
+    // Trig + slope + correction params: the Windows plugin read
+    // these as the raw tagged Fixnum bit pattern (no `>> 1`), so
+    // their effective value in the pixel math was ~2n. We mirror
+    // that by passing `(n << 1) | 1` for these 6 fields.
+    cp.cosAngle = aref_int_raw_tagged(params_v, 0);
+    cp.sinAngle = aref_int_raw_tagged(params_v, 1);
     cp.altitude = aref_int(params_v, 2);
     cp.pivot = aref_int(params_v, 3);
-    cp.slope = aref_int(params_v, 4);
-    cp.correction = aref_int(params_v, 5);
+    cp.slope = aref_int_raw_tagged(params_v, 4);
+    cp.correction = aref_int_raw_tagged(params_v, 5);
     cp.heightLimit = aref_int(params_v, 6);
-    cp.cosTheta = aref_int(params_v, 7);
-    cp.sinTheta = aref_int(params_v, 8);
+    cp.cosTheta = aref_int_raw_tagged(params_v, 7);
+    cp.sinTheta = aref_int_raw_tagged(params_v, 8);
     cp.distProj = aref_int(params_v, 9);
     cp.zoom = aref_int(params_v, 10);
     // xMin/xMax/yMin/yMax/lessCut are not passed by Insurgence's
@@ -564,8 +592,14 @@ RB_METHOD(hm7NativeRenderHM7) {
 
     hm7::RenderVars rv = {};
     rv.height_limit = aref_int(vars_v, 0);
-    rv.display_x = aref_int(vars_v, 1);
-    rv.display_y = aref_int(vars_v, 2);
+    // `display_x` / `display_y` are the 6-bit fractional-pixel
+    // sub-tile offsets. The Windows plugin reads them as raw
+    // tagged Fixnums (no `>> 1`, see MGC_Hmode7_1_4_4.cpp:863-
+    // 864) and adds the result directly to xs/ys. The effective
+    // value used in the pixel math is ~2n. Pre-double here so
+    // the port's sampling lands at the same place.
+    rv.display_x = aref_int_raw_tagged(vars_v, 1);
+    rv.display_y = aref_int_raw_tagged(vars_v, 2);
     rv.filter = aref_int(vars_v, 3);
     rv.o_scr_y = aref_int(vars_v, 4);
 
