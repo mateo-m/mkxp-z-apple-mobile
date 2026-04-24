@@ -93,14 +93,46 @@ unless HM7::Native.const_defined?(:WALL_LAYER_MODE)
 end
 
 begin
+  # The shim MUST re-run every session, not just the first.
+  #
+  # Cross-session pollution background: mkxp-z keeps the Ruby VM
+  # alive between game sessions on iOS (a full VM teardown would
+  # cost several seconds of re-initialisation). When the user
+  # quits a game and starts a second session, `resetBetweenSessions`
+  # (binding-mri.cpp) removes game-defined top-level constants BUT
+  # keeps constants listed in `$__mkxp_base_consts`. The engine
+  # snapshots that list immediately after `mriBindingInit` runs for
+  # the first time, and `hmode7BindingInit` is part of that init,
+  # so `HM7` itself (created by `rb_define_module("HM7")`) ends up
+  # in the base-consts snapshot and is NOT wiped between sessions.
+  #
+  # That means on session 2:
+  #   1. `HM7` survives unchanged (our shim's session-1 overrides
+  #      still installed on it).
+  #   2. Insurgence's game scripts re-run, re-opening `module HM7`
+  #      and re-executing `def self.draw_map_tileset ...` etc. -
+  #      OVERWRITING our session-1 overrides with the original
+  #      Win32API-calling versions.
+  #   3. Our postload runs again.
+  #
+  # An idempotency guard like `next if respond_to?(:_mkxp_hm7_shim_installed)`
+  # used to live here - and was the direct cause of the
+  # "cinematic works on session 1, black screen + fog only on
+  # session 2" bug: the marker from session 1 caused the shim to
+  # skip install on session 2, leaving the just-re-evaluated
+  # Win32API paths active. The Win32API calls fall through to our
+  # no-op stubs, so every HM7 render call produced zero output,
+  # revealing only non-HM7 sprites (the fog overlay) on top of a
+  # black framebuffer.
+  #
+  # Ruby's `alias_method` and `def` are naturally idempotent
+  # (last-write-wins), so re-running the whole shim every session
+  # is correct and cheap. The inner `alias_method` calls below
+  # deliberately DO re-alias each session - that refreshes the
+  # `_mkxp_hm7_orig_*` aliases to point at the game's freshly
+  # re-evaluated originals, not at stale method objects captured
+  # by session 1's aliases.
   HM7.module_eval do
-    # Idempotency: if this shim runs twice (e.g. mriBindingReset
-    # between sessions), skip the second install.
-    next if respond_to?(:_mkxp_hm7_shim_installed)
-
-    def self._mkxp_hm7_shim_installed
-      true
-    end
 
     # ------------------------------------------------------------
     #  Overrides. Each corresponds to a `def self.xxx` in
@@ -186,56 +218,59 @@ begin
   # ----------------------------------------------------------------
   if defined?(HM7::Surface) && HM7::Surface.method_defined?(:get_data)
     HM7::Surface.class_eval do
-      unless method_defined?(:_mkxp_hm7_orig_get_data)
-        alias_method :_mkxp_hm7_orig_get_data, :get_data
-        def get_data
-          # Fallback handling. If we lack a usable bitmap, returning
-          # the original v1.2.1 6-element form would leak values
-          # into the native binding's 11-element positional slots
-          # (specifically `blend_type` at original[5] gets read as
-          # `inverse` in v1.4.4 layout, causing a horizontal mirror).
-          # Return `nil` instead; the native binding skips nil
-          # entries defensively in its surface unpacking loop.
-          return nil if bitmap.nil? || bitmap.disposed?
+      # Refresh the alias on every install so `_mkxp_hm7_orig_get_data`
+      # points at the CURRENT session's original (the game scripts
+      # re-evaluate `def get_data` each session, so session 1's alias
+      # captured an outdated method instance). `alias_method` with an
+      # existing target name just replaces the alias - no chaining.
+      alias_method :_mkxp_hm7_orig_get_data, :get_data
+      def get_data
+        # Fallback handling. If we lack a usable bitmap, returning
+        # the original v1.2.1 6-element form would leak values
+        # into the native binding's 11-element positional slots
+        # (specifically `blend_type` at original[5] gets read as
+        # `inverse` in v1.4.4 layout, causing a horizontal mirror).
+        # Return `nil` instead; the native binding skips nil
+        # entries defensively in its surface unpacking loop.
+        return nil if bitmap.nil? || bitmap.disposed?
 
-          half_w = bitmap.width >> 1
-          h = bitmap.height
+        half_w = bitmap.width >> 1
+        h = bitmap.height
 
-          # v1.4.4 plugin convention: `(screenX1, screenY1)` and
-          # `(screenX2, screenY2)` are two ANCHOR POINTS defining a
-          # tilt-line along which the sprite is drawn. They are
-          # NOT a bounding box:
-          #   - `sDx = screenX2 - screenX1` is the horizontal span.
-          #   - `sDy = screenY1 - screenY2` is the vertical slant.
-          #   - `sSlope = (sDy << 7) / sDx` is the skew factor.
-          #
-          # For a standard axis-aligned billboard sprite (the only
-          # kind Insurgence's v1.2.1 Surface produces), sDy must
-          # be 0 so the sprite renders vertically straight. That
-          # means screenY1 == screenY2, both set to the sprite's
-          # foot-y anchor.
-          #
-          # Sprite HEIGHT is not derived from (Y1, Y2); the plugin
-          # reads `sHeight` directly from the bitmap header and
-          # scales via `sFYt` based on mode-7 depth.
-          sx1 = screen_x - half_w
-          sx2 = screen_x + half_w
-          anchor_y = screen_y  # sprite's foot = anchor line
+        # v1.4.4 plugin convention: `(screenX1, screenY1)` and
+        # `(screenX2, screenY2)` are two ANCHOR POINTS defining a
+        # tilt-line along which the sprite is drawn. They are
+        # NOT a bounding box:
+        #   - `sDx = screenX2 - screenX1` is the horizontal span.
+        #   - `sDy = screenY1 - screenY2` is the vertical slant.
+        #   - `sSlope = (sDy << 7) / sDx` is the skew factor.
+        #
+        # For a standard axis-aligned billboard sprite (the only
+        # kind Insurgence's v1.2.1 Surface produces), sDy must
+        # be 0 so the sprite renders vertically straight. That
+        # means screenY1 == screenY2, both set to the sprite's
+        # foot-y anchor.
+        #
+        # Sprite HEIGHT is not derived from (Y1, Y2); the plugin
+        # reads `sHeight` directly from the bitmap header and
+        # scales via `sFYt` based on mode-7 depth.
+        sx1 = screen_x - half_w
+        sx2 = screen_x + half_w
+        anchor_y = screen_y  # sprite's foot = anchor line
 
-          [
-            type,             # [0]
-            sx1,              # [1] screenX1 (left anchor x)
-            anchor_y,         # [2] screenY1 (anchor y, bottom/foot)
-            sx2,              # [3] screenX2 (right anchor x)
-            anchor_y,         # [4] screenY2 (same - no slant)
-            0,                # [5] inverse (no mirror)
-            bitmap,           # [6]
-            altitude,         # [7] dh
-            blend_type,       # [8] blend
-            bitmap.width,     # [9] dispWidth
-            0                 # [10] dispOffset
-          ]
-        end
+        [
+          type,             # [0]
+          sx1,              # [1] screenX1 (left anchor x)
+          anchor_y,         # [2] screenY1 (anchor y, bottom/foot)
+          sx2,              # [3] screenX2 (right anchor x)
+          anchor_y,         # [4] screenY2 (same - no slant)
+          0,                # [5] inverse (no mirror)
+          bitmap,           # [6]
+          altitude,         # [7] dh
+          blend_type,       # [8] blend
+          bitmap.width,     # [9] dispWidth
+          0                 # [10] dispOffset
+        ]
       end
     end
   end
@@ -274,18 +309,21 @@ begin
 
   if tilemap_has_init
     HM7::Tilemap.class_eval do
-      unless private_method_defined?(:_mkxp_hm7_orig_initialize)
-        alias_method :_mkxp_hm7_orig_initialize, :initialize
-        def initialize(*args, &blk)
-          _mkxp_hm7_orig_initialize(*args, &blk)
-          return unless @params.is_a?(Array) && @params.length > 10
-          s = @params[10]
-          return unless s.is_a?(Bitmap) && !s.disposed?
-          return if s.width >= @render.width * 2
-          fixed = Bitmap.new(@render.width * 2, @render.height)
-          @params[10] = fixed
-          s.dispose
-        end
+      # Refresh the alias on every install. Same rationale as
+      # HM7::Surface#get_data above: the game scripts re-evaluate
+      # `def initialize` each session, so `_mkxp_hm7_orig_initialize`
+      # needs to be re-pointed at the current session's original or
+      # we'd call into a stale method object captured at session 1.
+      alias_method :_mkxp_hm7_orig_initialize, :initialize
+      def initialize(*args, &blk)
+        _mkxp_hm7_orig_initialize(*args, &blk)
+        return unless @params.is_a?(Array) && @params.length > 10
+        s = @params[10]
+        return unless s.is_a?(Bitmap) && !s.disposed?
+        return if s.width >= @render.width * 2
+        fixed = Bitmap.new(@render.width * 2, @render.height)
+        @params[10] = fixed
+        s.dispose
       end
     end
   else
