@@ -103,6 +103,47 @@ begin
     end
   end
 
+  # ----------------------------------------------------------------
+  #  sScreenBitmap 2x-width fix.
+  #
+  # Insurgence's `HM7::Tilemap#initialize` (210-HM7_NEW_CLASSES.rb
+  # line 515) allocates `@params[10] = Bitmap.new(@render.width,
+  # @render.height)` - single-width. The original Windows plugin's
+  # `renderHM7` treats this buffer as 8 bytes per pixel (packed
+  # composition state: flag, blend, hbase_hi, hbase_lo, r, g, b, a)
+  # and reads up to `(xt << 3)` per column. With a 1x-width Bitmap
+  # that's an overread of 4 bytes/pixel, which on Windows happens
+  # to land inside the next heap block and produces garbage or SIGSEGV.
+  #
+  # Our port respects the 8-bytes-per-pixel assumption, but it also
+  # needs the Bitmap to actually *be* that large. Reallocate at
+  # 2x width after initialize runs. See design doc caveat §10.5
+  # in //hmode7-apple-mobile/docs/HMODE7_PORT_DESIGN.md.
+  #
+  # Guarded so older HM7 layouts (if anyone forks with a different
+  # @params structure) don't get silently corrupted.
+  # ----------------------------------------------------------------
+  if defined?(HM7::Tilemap) && HM7::Tilemap.method_defined?(:initialize)
+    HM7::Tilemap.class_eval do
+      unless method_defined?(:_mkxp_hm7_orig_initialize)
+        alias_method :_mkxp_hm7_orig_initialize, :initialize
+        def initialize(*args, &blk)
+          _mkxp_hm7_orig_initialize(*args, &blk)
+          # @params might not be set on all forks / map types.
+          return unless @params.is_a?(Array) && @params.length > 10
+          s = @params[10]
+          return unless s.is_a?(Bitmap) && !s.disposed?
+          # Already 2x? (Idempotency: if this shim reruns, or if a
+          # future HM7 version ships the fix, don't double it.)
+          return if s.width >= @render.width * 2
+          fixed = Bitmap.new(@render.width * 2, @render.height)
+          @params[10] = fixed
+          s.dispose
+        end
+      end
+    end
+  end
+
   # Optional: expose a global flag so game scripts / debug overlays
   # can detect whether the native renderer is active. No Insurgence
   # code checks this today, but forks might.
