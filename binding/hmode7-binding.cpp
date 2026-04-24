@@ -27,6 +27,8 @@
 
 #include "binding-util.h"
 #include "bitmap.h"
+
+#include <cstring>
 #include "table.h"
 
 #include <SDL_surface.h>
@@ -639,6 +641,15 @@ RB_METHOD(hm7NativeRenderHM7) {
         for (long i = 0; i < len; ++i) {
             VALUE s = RARRAY_AREF(surfaces_v, i);
             if (NIL_P(s) || !RB_TYPE_P(s, T_ARRAY)) continue;
+            // Defensive: reject anything that doesn't carry the
+            // full v1.4.4 11-element layout. The shim's nil-bitmap
+            // fallback returns nil (hit by NIL_P above), but an
+            // older HM7 engine or a differently-patched fork might
+            // push a 6-element v1.2.1 array here. Reading index
+            // [5] as `inverse` in that case would pick up
+            // `blend_type`, which would mirror the sprite
+            // horizontally when non-zero. Skip rather than risk it.
+            if (RARRAY_LEN(s) < 11) continue;
             hm7::RenderSurface &rs = surfaces[surface_count];
             rs.type = aref_int(s, 0);
             rs.screen_x1 = aref_int(s, 1);
@@ -653,6 +664,30 @@ RB_METHOD(hm7NativeRenderHM7) {
             rs.disp_offset = aref_int(s, 10);
             ++surface_count;
         }
+    }
+
+    // Clear the sprite-compositing scratch buffer at frame start.
+    // The renderer writes 8-byte-per-column records into
+    // `s_screen_bitmap` and expects them to be zero outside the
+    // regions it touches in the current frame. Prior writes normally
+    // get cleared by the wall loop / final overdraw passes as they
+    // move through each column, so within a single frame we should
+    // always end with a clean buffer. But *between* frames, any
+    // cells that the renderer wrote during frame N and did not
+    // read-and-clear (e.g. because the current `(yt, xt)` coverage
+    // didn't reach them, which can happen near the screen edges in
+    // extreme camera poses) would leak stale sprite data into
+    // frame N+1's ground-compose path, manifesting as phantom
+    // sprite pixels at positions the current frame's surfaces
+    // don't occupy.
+    //
+    // Cost: ~2.5 MiB memset for a 1280 x 480 bitmap, or <1 ms on
+    // modern ARM. Negligible compared to the render itself and
+    // eliminates a whole class of cross-frame correctness bugs.
+    if (rp.s_screen_bitmap) {
+        std::memset(rp.s_screen_bitmap->pixels, 0,
+                    static_cast<std::size_t>(rp.s_screen_bitmap->pitch) *
+                    rp.s_screen_bitmap->h);
     }
 
     int o_camera = hm7::render_hm7(rp, rv, surfaces, surface_count,
