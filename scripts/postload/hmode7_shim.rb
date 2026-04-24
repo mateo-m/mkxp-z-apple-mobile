@@ -227,18 +227,27 @@ begin
   # Guarded so older HM7 layouts (if anyone forks with a different
   # @params structure) don't get silently corrupted.
   # ----------------------------------------------------------------
-  if defined?(HM7::Tilemap) && HM7::Tilemap.method_defined?(:initialize)
+  # Important Ruby gotcha: `#initialize` is implicitly PRIVATE on every
+  # class, so `Class#method_defined?(:initialize)` returns false even
+  # when the class absolutely has one. Use `private_method_defined?`
+  # (which does NOT check public+private simultaneously the way a naive
+  # reader might expect from the name) OR the more robust
+  # `instance_method(:initialize)` lookup which throws NameError when
+  # the method truly doesn't exist, regardless of visibility.
+  tilemap_has_init =
+    defined?(HM7::Tilemap) &&
+    (HM7::Tilemap.method_defined?(:initialize) ||
+     HM7::Tilemap.private_method_defined?(:initialize))
+
+  if tilemap_has_init
     HM7::Tilemap.class_eval do
-      unless method_defined?(:_mkxp_hm7_orig_initialize)
+      unless private_method_defined?(:_mkxp_hm7_orig_initialize)
         alias_method :_mkxp_hm7_orig_initialize, :initialize
         def initialize(*args, &blk)
           _mkxp_hm7_orig_initialize(*args, &blk)
-          # @params might not be set on all forks / map types.
           return unless @params.is_a?(Array) && @params.length > 10
           s = @params[10]
           return unless s.is_a?(Bitmap) && !s.disposed?
-          # Already 2x? (Idempotency: if this shim reruns, or if a
-          # future HM7 version ships the fix, don't double it.)
           return if s.width >= @render.width * 2
           fixed = Bitmap.new(@render.width * 2, @render.height)
           @params[10] = fixed
@@ -246,6 +255,9 @@ begin
         end
       end
     end
+  else
+    MKXP.puts "[hm7-shim] WARNING: HM7::Tilemap#initialize patch skipped: " \
+              "HM7::Tilemap defined?=#{defined?(HM7::Tilemap).inspect}"
   end
 
   # Optional: expose a global flag so game scripts / debug overlays

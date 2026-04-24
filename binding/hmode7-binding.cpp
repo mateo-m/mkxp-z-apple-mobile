@@ -666,6 +666,26 @@ RB_METHOD(hm7NativeRenderHM7) {
         }
     }
 
+    // Runtime width check for s_screen_bitmap: the postload shim is
+    // supposed to reallocate @params[10] to 2x render width so the
+    // port can pack 8 bytes per column slot. If something prevents
+    // that reallocation, our port would write at slot stride 8 but
+    // the row pitch would be 4 bytes per pixel (not 8), shifting
+    // sprite writes by a half-row. Log once and loudly if we detect
+    // the mismatch. See SPRITE_REMAINING_BUGS.md hypothesis P1.
+    if (rp.s_screen_bitmap && rp.screen_bitmap) {
+        static int widthWarned = 0;
+        const int expected = rp.screen_bitmap->w * 2;
+        if (!widthWarned && rp.s_screen_bitmap->w != expected) {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                "s_screen width=%d expected=%d (shim failed?)",
+                rp.s_screen_bitmap->w, expected);
+            mkxp_debugLog("HM7-WARN", "hmode7-binding.cpp [C++]", buf);
+            widthWarned = 1;
+        }
+    }
+
     // Clear the sprite-compositing scratch buffer at frame start.
     // The renderer writes 8-byte-per-column records into
     // `s_screen_bitmap` and expects them to be zero outside the
