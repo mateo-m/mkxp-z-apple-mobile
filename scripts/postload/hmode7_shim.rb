@@ -46,6 +46,52 @@ return unless defined?(HM7)
 return unless defined?(HM7::Native)
 return unless HM7::Native.const_defined?(:AVAILABLE) && HM7::Native::AVAILABLE
 
+# ----------------------------------------------------------------
+#  Auto-detect the HM7 DLL era so the native renderer can pick the
+#  correct wall-layer-selection algorithm.
+#
+#  The critical split is V1.4: its changelog reads *"can now handle
+#  n layers (but the more layers, the more lag)"*. That is when the
+#  layer-handling code was rewritten from a hardcoded 3-layer loop
+#  (pre-V1.4 top-cumulative) to a generalised n-layer loop that
+#  ended up with the bottom-cumulative threshold in the public
+#  V1.4.4 source. See hmode7/docs/WALL_LAYER_MODE.md.
+#
+#  V1.3's changelog also mentions *"the DLL part is entirely
+#  rewritten"*, but that rewrite was for wall EVENTS (sprite walls
+#  attached to events via HM7::Surface) - a completely separate
+#  system from the tile-layer wall extrusion. So despite V1.3
+#  being a big rewrite, wall-layer selection most likely stayed
+#  pre-V1.4 style through V1.3.x. We prefer to err conservative:
+#  only flip to bottom-cumulative when we see V1.4-specific
+#  markers.
+#
+#  V1.4 markers the HM7 Ruby scripts expose:
+#    1. `HM7.apply_zoom` - a Ruby wrapper around the 9th DLL
+#       export `applyZoom`, added in V1.4. Most definitive signal
+#       because the underlying export only exists in V1.4+ DLLs.
+#    2. Anything else V1.4-specific the script might expose. We
+#       don't know of a second signal today, so we rely on (1).
+#
+#  Anything without these markers is treated as pre-V1.4
+#  (top-cumulative) - confirmed correct for Pokemon Insurgence
+#  1.2.7, assumed safe for V1.3.x as discussed above.
+# ----------------------------------------------------------------
+def self._mkxp_hm7_is_v14_or_newer
+  # V1.4's applyZoom Ruby wrapper. Most reliable signal.
+  return true if HM7.respond_to?(:apply_zoom)
+
+  false
+end
+
+detected_mode = _mkxp_hm7_is_v14_or_newer ? :bottom_cumulative : :top_cumulative
+
+unless HM7::Native.const_defined?(:WALL_LAYER_MODE)
+  HM7::Native.const_set(:WALL_LAYER_MODE, detected_mode)
+  MKXP.puts "[hm7-shim] WALL_LAYER_MODE autodetected: #{detected_mode} " \
+            "(#{detected_mode == :bottom_cumulative ? 'HM7.apply_zoom present = V1.4+' : 'HM7.apply_zoom absent = pre-V1.4'})"
+end
+
 begin
   HM7.module_eval do
     # Idempotency: if this shim runs twice (e.g. mriBindingReset
