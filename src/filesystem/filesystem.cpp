@@ -658,7 +658,38 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
 void FileSystem::openReadRaw(SDL_RWops &ops, const char *filename,
                              bool freeOnClose) {
 
-  PHYSFS_File *handle = PHYSFS_openRead(normalize(filename, 0, 0).c_str());
+  /* Try the exact-case query first. This preserves the previous
+   * behaviour for the overwhelming majority of calls (where the
+   * caller's filename case matches the archive / filesystem entry
+   * exactly) and also preserves disambiguation for the rare case
+   * of two archive entries differing only in case: the
+   * exact-match handle is what `PHYSFS_openRead` returns directly
+   * from the archive's entry hash, so a caller that wrote
+   * `Data/Readme.txt` still gets `Data/Readme.txt` even if
+   * `Data/README.txt` also exists. */
+  std::string normalized = normalize(filename, 0, 0);
+  PHYSFS_File *handle = PHYSFS_openRead(normalized.c_str());
+
+  /* If the exact case missed, fall back to a case-insensitive
+   * lookup via the path cache. `desensitize` lowercases the query
+   * and returns the original-case entry registered at path-cache
+   * build time, if any; otherwise returns its input unchanged, in
+   * which case the second PHYSFS_openRead simply repeats the
+   * first miss and we throw the same ENOENT the caller would have
+   * seen without this fix. No behavioural regression for games
+   * whose files resolve on the exact case.
+   *
+   * Concrete motivation: Pokemon Insurgence's `Game.rgssad`
+   * contains `Data/map003.rxdata` (lowercase m, 8, 10, ...) while
+   * the game's Ruby scripts request `Data/Map003.rxdata`. On
+   * Windows the call would hit because NTFS is case-insensitive.
+   * On iOS / case-sensitive hosts and through PhysFS's exact
+   * hashing, the exact match fails and we take this fallback. */
+  if (!handle) {
+    const char *resolved = desensitize(normalized.c_str());
+    if (resolved != normalized.c_str())
+      handle = PHYSFS_openRead(resolved);
+  }
 
   if (!handle)
     throw Exception(Exception::NoFileError, "%s", filename);
