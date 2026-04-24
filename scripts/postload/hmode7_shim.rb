@@ -104,6 +104,77 @@ begin
   end
 
   # ----------------------------------------------------------------
+  #  HM7::Surface#get_data v1.2.1 -> v1.4.4 adapter.
+  #
+  # Insurgence ships H-Mode7 v1.2.1 (2011-05-15, see
+  # 208-----_MGC___H-Mode7_----.rb). Its `Surface#get_data` returns
+  # a 6-element Array:
+  #
+  #   [type, screen_x, screen_y, bitmap, altitude, blend_type]
+  #
+  # Our port is based on v1.4.4, whose renderHM7 reads an 11-element
+  # Array:
+  #
+  #   [type, screenX1, screenY1, screenX2, screenY2, inverse,
+  #    bitmap, dh, blend, dispWidth, dispOffset]
+  #
+  # On Windows the v1.2.1 hash is still passed to the v1.4.4-expecting
+  # DLL, and the DLL reads past the end into heap garbage - which is
+  # what the reports describe as "works on Windows, mostly". On our
+  # port that over-read would be a crash or a TypeError inside the
+  # binding's NUM2INT, which is exactly what we hit first (Bitmap
+  # at [3] being coerced to Integer for screenX2).
+  #
+  # Fix: override Surface#get_data to return the 11-element v1.4.4
+  # form, synthesized from the v1.2.1 fields plus the sprite's
+  # bitmap geometry:
+  #   - screenX1 / screenX2 = screen_x +/- bitmap.width / 2
+  #   - screenY1 / screenY2 = screen_y - bitmap.height .. screen_y
+  #   - inverse    = 0   (no mirror; characters update their own sx/sy)
+  #   - dh         = altitude
+  #   - blend      = blend_type
+  #   - dispWidth  = bitmap.width
+  #   - dispOffset = 0
+  # This corresponds to the "centered-bottom-anchored sprite" that
+  # the HM7 character tooling builds.
+  # ----------------------------------------------------------------
+  if defined?(HM7::Surface) && HM7::Surface.method_defined?(:get_data)
+    HM7::Surface.class_eval do
+      unless method_defined?(:_mkxp_hm7_orig_get_data)
+        alias_method :_mkxp_hm7_orig_get_data, :get_data
+        def get_data
+          # Fall back to original if we somehow lack a bitmap (can
+          # happen for disposed / half-initialized surfaces). The
+          # port's binding rejects nil bitmaps and skips the entry.
+          return _mkxp_hm7_orig_get_data unless bitmap && !bitmap.disposed?
+
+          half_w = bitmap.width >> 1
+          h = bitmap.height
+
+          sx1 = screen_x - half_w
+          sx2 = screen_x + half_w
+          sy1 = screen_y - h
+          sy2 = screen_y
+
+          [
+            type,             # [0]
+            sx1,              # [1] screenX1
+            sy1,              # [2] screenY1
+            sx2,              # [3] screenX2
+            sy2,              # [4] screenY2
+            0,                # [5] inverse (no mirror)
+            bitmap,           # [6]
+            altitude,         # [7] dh
+            blend_type,       # [8] blend
+            bitmap.width,     # [9] dispWidth
+            0                 # [10] dispOffset
+          ]
+        end
+      end
+    end
+  end
+
+  # ----------------------------------------------------------------
   #  sScreenBitmap 2x-width fix.
   #
   # Insurgence's `HM7::Tilemap#initialize` (210-HM7_NEW_CLASSES.rb
