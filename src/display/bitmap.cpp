@@ -1931,6 +1931,72 @@ void Bitmap::replaceRaw(void *pixel_data, int size)
     p->onModified();
 }
 
+void Bitmap::uploadCPURect(int x, int y, int w, int h)
+{
+    guardDisposed();
+
+    /* Mega surfaces have no GPU texture; painting on them is valid
+     * but there's nothing to sync. Callers that hold a mega-surface
+     * handle directly use the CPU pixels for CPU blits only. */
+    if (p->megaSurface)
+        return;
+
+    /* Animated bitmaps multiplex multiple textures through
+     * getGLTypes(); we have no current use-case for CPU-painting
+     * into an animation frame's shadow, and the sync semantics are
+     * unclear. Bail loudly rather than silently write into the
+     * wrong frame. */
+    GUARD_ANIMATED;
+
+    /* The source of truth is the CPU shadow surface. If no caller
+     * has triggered its allocation yet (via getPixel / surface() /
+     * similar), there's nothing to upload. This should not happen
+     * in practice for the paint-then-commit use-case, because the
+     * caller must have already obtained the surface pointer to
+     * write into it. */
+    if (!p->surface)
+        return;
+
+    int bw = p->surface->w;
+    int bh = p->surface->h;
+
+    /* Clamp to the surface bounds. A caller who over-reports the
+     * dirty rect should not cause a GL error or an out-of-bounds
+     * pixel read, just a (slightly) larger upload than needed. */
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x >= bw || y >= bh || w <= 0 || h <= 0)
+        return;
+    if (x + w > bw) w = bw - x;
+    if (y + h > bh) h = bh - y;
+
+    if (hasHires()) {
+        Debug() << "GAME BUG: Game is calling uploadCPURect on low-res Bitmap; you may want to patch the game to improve graphics quality.";
+    }
+
+    TEX::bind(p->gl.tex);
+
+    /* Extract the sub-rect from the (row-aligned, full-width) CPU
+     * surface. `subRectImageUpload` handles both the GLES3 /
+     * GL_EXT_unpack_subimage fast path (pixel-store state) and the
+     * fallback path (SDL_BlitSurface into a tight scratch). The
+     * paired `subRectImageEnd` is MANDATORY: without it, the unpack
+     * row-length / skip state leaks into the next unrelated GL
+     * texture upload and corrupts it silently. */
+    GLMeta::subRectImageUpload(bw, x, y, x, y, w, h, p->surface, GL_RGBA);
+    GLMeta::subRectImageEnd();
+
+    taintArea(IntRect(x, y, w, h));
+
+    /* Preserve the shadow surface. This is the whole point of this
+     * method: the next frame's caller can paint directly into the
+     * same p->surface without the engine first doing a full-texture
+     * glReadPixels to re-materialize it. Contrast with replaceRaw,
+     * which calls onModified(true) and forces exactly that round-
+     * trip every frame. */
+    p->onModified(false);
+}
+
 void Bitmap::saveToFile(const char *filename)
 {
     guardDisposed();

@@ -97,6 +97,19 @@ public:
     
     bool getRaw(void *output, int output_size);
     void replaceRaw(void *pixel_data, int size);
+
+    /* Sub-rect CPU->GPU upload. Uploads the rectangle `[x, y, w, h)`
+     * from the bitmap's cached CPU shadow surface (the one returned
+     * by `surface()`) into the matching region of the GPU texture,
+     * without re-allocating the texture and without discarding the
+     * shadow. This is the fast path for callers that paint directly
+     * into the shadow surface every frame (e.g. the H-Mode7 software
+     * rasterizer) -- using it avoids the full-texture realloc and the
+     * next-frame `glReadPixels` round-trip that `replaceRaw` forces
+     * via `onModified(true)`. No-op for mega surfaces (they have no
+     * GPU texture) and for bitmaps without a CPU shadow yet. */
+    void uploadCPURect(int x, int y, int w, int h);
+
     void saveToFile(const char *filename);
 
 	void hueChange(int hue);

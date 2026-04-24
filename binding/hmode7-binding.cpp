@@ -93,11 +93,20 @@ SDL_Surface *bitmap_surface(VALUE v) {
     return b->surface();
 }
 
-// Push the Bitmap's shadow surface back to the GPU texture. Matches
-// mkxp-z's only public "I modified the CPU pixels" API; whole-bitmap
-// re-upload, which is fine for the H-Mode7 render targets since
-// they're all screen-sized or smaller and refreshed entirely each
-// frame. Future optimization: add Bitmap::uploadCPURect.
+// Push the Bitmap's shadow surface back to the GPU texture. Uses
+// the full-bitmap sub-rect path so the shadow survives the commit
+// and the next frame's paint can mutate it in place WITHOUT the
+// engine first re-allocating + re-filling it via a full-texture
+// glReadPixels round-trip. That round-trip is a GPU pipeline stall
+// on tile-based mobile GPUs (Apple A-series) and was the dominant
+// cost of the original whole-bitmap replaceRaw path used here.
+//
+// Note: we upload the full (width x height) rect rather than a
+// dirty-rect intersection because the HM7 kernels touch nearly
+// every pixel of their output surfaces every frame, so narrowing
+// is not worth the accounting overhead. If a future kernel is
+// added that only updates a small band, uploadCPURect supports
+// partial rects directly.
 void commit_bitmap(VALUE v) {
     if (NIL_P(v)) return;
     if (!RB_TYPE_P(v, T_DATA)) return;
@@ -105,7 +114,7 @@ void commit_bitmap(VALUE v) {
     if (!b || b->isDisposed()) return;
     SDL_Surface *surf = b->surface();
     if (!surf) return;
-    b->replaceRaw(surf->pixels, surf->w * surf->h * 4);
+    b->uploadCPURect(0, 0, surf->w, surf->h);
 }
 
 // Unwrap a Ruby Table into a raw int16_t* + dims. The Table stores
