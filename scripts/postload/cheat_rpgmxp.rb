@@ -251,14 +251,54 @@ class Scene_Cheat
   end
 end
 
-class Game_Player
-  alias :cheat_update :update unless self.method_defined?(:cheat_update)
-  def update
-    cheat_update
-    if Input.trigger?(Input::HOME) && $CHEATS
-      $scene = Scene_Cheat.new
+# Guard the Game_Player#update hook behind a runtime check that
+# `Game_Player` is actually a loaded game class with an `update`
+# method.
+#
+# Why this matters on iOS: the engine's postload phase runs right
+# before the last entry in the Scripts.rxdata array (the classic
+# placeholder "Main" in stock RMXP). For 99% of RMXP games that's
+# AFTER Game_Character / Game_Player / etc. have been evaluated,
+# so `Game_Player` is already a proper subclass of
+# `Game_Character` with an `update` method, and the alias+override
+# below works cleanly.
+#
+# But some games ship a tiny meta-loader as their Scripts.rxdata
+# (Pokemon Reborn's is 107 bytes and just `eval`s
+# `Scripts/Reborn/Bootstrap.rb` + `Scripts/ScriptLoader.rb` at
+# runtime, which THEN loops through an explicit SCRIPTS array to
+# load each .rb file). For those games, scriptCount == 1 and our
+# postload runs BEFORE any of the game's real scripts. Without
+# this guard the unguarded `class Game_Player` here creates
+# Game_Player as a bare subclass of Object. Then the `alias`
+# raises NameError (since `update` isn't defined on Object),
+# aborting the rest of this class body but leaving the
+# Object-rooted Game_Player constant in place. When the game's
+# own `Scripts/Game_Player.rb` later runs with
+# `class Game_Player < Game_Character`, Ruby detects
+# `superclass mismatch` and raises TypeError; Reborn's
+# ScriptLoader rescues + logs and proceeds, so the game keeps
+# running with a half-defined Game_Player that has no `moveto`
+# of its own. A later script (or the scene chain) then defines
+# `moveto` via a separate reopen; `super` in that moveto fails
+# because the superclass chain doesn't include Game_Character.
+#
+# Symptom: `Save Data/errorlog.txt` fills with
+# `NoMethodError: super: no superclass method 'moveto' for
+# #<Game_Player>` on every map load, and the game can't reach
+# its first map after pressing New Game.
+if defined?(Game_Player) && Game_Player.method_defined?(:update)
+  class Game_Player
+    alias :cheat_update :update unless self.method_defined?(:cheat_update)
+    def update
+      cheat_update
+      if Input.trigger?(Input::HOME) && $CHEATS
+        $scene = Scene_Cheat.new
+      end
     end
   end
+  MKXP.puts("[cheats] RPG Maker XP cheat menu ready")
+else
+  MKXP.puts("[cheats] RPG Maker XP cheat menu deferred: " \
+            "Game_Player not loaded at postload time")
 end
-
-MKXP.puts("[cheats] RPG Maker XP cheat menu ready")

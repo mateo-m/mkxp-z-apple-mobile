@@ -280,14 +280,20 @@ class Scene_Cheat
   end
 end
 
-class Game_Player
-  alias :cheat_update :update unless self.method_defined?(:cheat_update)
-  def update
-    cheat_update
-    if Input.trigger?(Input::HOME) && $CHEATS
-      $scene = Scene_Cheat.new
+# Same postload-before-scripts guard as cheat_rpgmxp.rb - see
+# that file's comment on why this matters for meta-loader games.
+if defined?(Game_Player) && Game_Player.method_defined?(:update)
+  class Game_Player
+    alias :cheat_update :update unless self.method_defined?(:cheat_update)
+    def update
+      cheat_update
+      if Input.trigger?(Input::HOME) && $CHEATS
+        $scene = Scene_Cheat.new
+      end
     end
   end
+  MKXP.puts("[cheats] RPG Maker VX cheat menu ready")
+else
+  MKXP.puts("[cheats] RPG Maker VX cheat menu deferred: " \
+            "Game_Player not loaded at postload time")
 end
-
-MKXP.puts("[cheats] RPG Maker VX cheat menu ready")
