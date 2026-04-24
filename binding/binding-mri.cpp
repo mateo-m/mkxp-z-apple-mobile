@@ -146,6 +146,7 @@ RB_METHOD(mkxpIsReallyLinuxHost);
 RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
+RB_METHOD(mkxpSyntaxTransformTarget);
 RB_METHOD(mkxpApplyOverrides);
 RB_METHOD(mkxpRpgVersion);
 RB_METHOD(mkxpRubyVersion);
@@ -405,6 +406,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
     _rb_define_module_function(mod, "ruby_version", mkxpRubyVersion);
+    _rb_define_module_function(mod, "syntax_transform_target", mkxpSyntaxTransformTarget);
     
     
     _rb_define_module_function(mod, "user_language", mkxpUserLanguage);
@@ -677,6 +679,42 @@ RB_METHOD(mkxpRubyVersion) {
     return rb_str_new_cstr(v.c_str());
 }
 
+/* System.syntax_transform_target - `[major, minor, teeny,
+   ec_active_at_1_8]` diagnostic. Exposes the raw values of the
+   three `mkxp_syntax_transform_target_ruby_version_*` globals
+   (UINT_MAX meaning "disabled") so Ruby-side probes can verify
+   whether the transform is actually reaching the runtime - we
+   hit a case with Infinite Fusion where `syntaxTransform: 0` in
+   mkxp.json appeared to set the target to disabled, yet
+   String#[] was still returning Integer-per-Ruby-1.8 semantics.
+   The fourth array element is what `mkxp_ec_is_syntax_transform_active(1, 8, -1)`
+   returns from the current frame - the same check the `String#[]`
+   patch uses to decide whether to swap in Ruby 1.8 behaviour. */
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+RB_METHOD(mkxpSyntaxTransformTarget) {
+    RB_UNUSED_PARAM;
+    extern unsigned int mkxp_syntax_transform_target_ruby_version_major,
+                        mkxp_syntax_transform_target_ruby_version_minor,
+                        mkxp_syntax_transform_target_ruby_version_teeny;
+    VALUE ary = rb_ary_new_capa(4);
+    rb_ary_push(ary, UINT2NUM(mkxp_syntax_transform_target_ruby_version_major));
+    rb_ary_push(ary, UINT2NUM(mkxp_syntax_transform_target_ruby_version_minor));
+    rb_ary_push(ary, UINT2NUM(mkxp_syntax_transform_target_ruby_version_teeny));
+    rb_ary_push(ary, mkxp_ec_is_syntax_transform_active(1, 8, (unsigned int)-1) ? Qtrue : Qfalse);
+    return ary;
+}
+#else
+RB_METHOD(mkxpSyntaxTransformTarget) {
+    RB_UNUSED_PARAM;
+    VALUE ary = rb_ary_new_capa(4);
+    rb_ary_push(ary, Qnil);
+    rb_ary_push(ary, Qnil);
+    rb_ary_push(ary, Qnil);
+    rb_ary_push(ary, Qfalse);
+    return ary;
+}
+#endif
+
 RB_METHOD(mkxpUserLanguage) {
     RB_UNUSED_PARAM;
     
@@ -820,36 +858,59 @@ RB_METHOD(mkxpSetDefaultFontFamily) {
  * the caller — breaking patterns like:
  *     while text[/regexp/]
  *       $~.pre_match   # => nil:NilClass (NoMethodError) if wrapped in Ruby
+ *
+ * Syntax-transform gate: the integer-byte branch ONLY fires when the
+ * syntax transform is targeting Ruby <= 1.8. Without this gate we'd
+ * break Ruby-3 source that does `name[idx].match?(...)` and expects
+ * a String (hit in Infinite Fusion's FusionSprites.rb:401 where
+ * `sprite_name[spriteName.length]` expects a 1-char String). The
+ * underlying `_mkxp_c_aref` alias points at the original `rb_str_aref_m`,
+ * which has its own transform-aware patch - so for the ungated default
+ * path we just delegate and let that patch do the right thing.
  */
 RB_METHOD(mkxpStringAref) {
     RB_UNUSED_PARAM;
 
-    /* Single Integer argument → return byte value (Ruby 1.8 semantics).
-       We call the saved alias _mkxp_c_getbyte to be safe against game
-       scripts that redefine getbyte (e.g. Pokemon Z's "Map - Klein"). */
-    if (argc == 1 && RB_INTEGER_TYPE_P(argv[0])) {
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+    /* Ruby 1.8 byte-return semantics only when the transform targets
+     * Ruby <= 1.8 AND the single argument is an Integer. We call the
+     * saved `_mkxp_c_getbyte` alias (not `rb_str_getbyte` directly)
+     * to tolerate games that rebind `getbyte` themselves (e.g. Pokemon
+     * Z's "Map - Klein"). */
+    if (mkxp_ec_is_syntax_transform_active(1, 8, (unsigned int)-1) &&
+        argc == 1 && RB_INTEGER_TYPE_P(argv[0])) {
         return rb_funcall(self, rb_intern("_mkxp_c_getbyte"), 1, argv[0]);
     }
+#endif
 
-    /* Everything else (Regexp, Range, String, [i,len], etc.) →
-       delegate to the original C implementation so $~ propagates. */
+    /* Everything else (Regexp, Range, String, [i,len], AND integer
+     * args when the transform is disabled) → delegate to the original
+     * `rb_str_aref_m` via the `_mkxp_c_aref` alias so $~ propagates
+     * and the upstream transform-gated patch handles any 1.8 fallback. */
     return rb_funcallv(self, rb_intern("_mkxp_c_aref"), argc, argv);
 }
 
 /* C-level String#[]= override for Ruby 1.8 byte-write compatibility.
  * Ruby 1.8: str[int] = int  set the byte at that index.
  * Ruby 3.x: str[int] = val  expects a String replacement.
+ *
+ * Same syntax-transform gate as mkxpStringAref above.
  */
 RB_METHOD(mkxpStringAset) {
     RB_UNUSED_PARAM;
 
-    /* str[int] = int  →  set byte (Ruby 1.8 semantics) */
-    if (argc == 2 && RB_INTEGER_TYPE_P(argv[0]) && RB_INTEGER_TYPE_P(argv[1])) {
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+    /* str[int] = int → set byte (Ruby 1.8 semantics), only when
+     * transform targets <= 1.8. Outside that target Ruby 3's normal
+     * `str[int] = String` semantics apply via the delegate below. */
+    if (mkxp_ec_is_syntax_transform_active(1, 8, (unsigned int)-1) &&
+        argc == 2 && RB_INTEGER_TYPE_P(argv[0]) && RB_INTEGER_TYPE_P(argv[1])) {
         unsigned char byte = (unsigned char)(NUM2INT(argv[1]) & 0xFF);
         VALUE replacement = rb_str_new((const char *)&byte, 1);
         VALUE args[2] = { argv[0], replacement };
         return rb_funcallv(self, rb_intern("_mkxp_c_aset"), 2, args);
     }
+#endif
 
     /* Everything else → original */
     return rb_funcallv(self, rb_intern("_mkxp_c_aset"), argc, argv);
