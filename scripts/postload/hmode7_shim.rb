@@ -151,17 +151,33 @@ begin
           half_w = bitmap.width >> 1
           h = bitmap.height
 
+          # v1.4.4 plugin convention: `(screenX1, screenY1)` and
+          # `(screenX2, screenY2)` are two ANCHOR POINTS defining a
+          # tilt-line along which the sprite is drawn. They are
+          # NOT a bounding box:
+          #   - `sDx = screenX2 - screenX1` is the horizontal span.
+          #   - `sDy = screenY1 - screenY2` is the vertical slant.
+          #   - `sSlope = (sDy << 7) / sDx` is the skew factor.
+          #
+          # For a standard axis-aligned billboard sprite (the only
+          # kind Insurgence's v1.2.1 Surface produces), sDy must
+          # be 0 so the sprite renders vertically straight. That
+          # means screenY1 == screenY2, both set to the sprite's
+          # foot-y anchor.
+          #
+          # Sprite HEIGHT is not derived from (Y1, Y2); the plugin
+          # reads `sHeight` directly from the bitmap header and
+          # scales via `sFYt` based on mode-7 depth.
           sx1 = screen_x - half_w
           sx2 = screen_x + half_w
-          sy1 = screen_y - h
-          sy2 = screen_y
+          anchor_y = screen_y  # sprite's foot = anchor line
 
           [
             type,             # [0]
-            sx1,              # [1] screenX1
-            sy1,              # [2] screenY1
-            sx2,              # [3] screenX2
-            sy2,              # [4] screenY2
+            sx1,              # [1] screenX1 (left anchor x)
+            anchor_y,         # [2] screenY1 (anchor y, bottom/foot)
+            sx2,              # [3] screenX2 (right anchor x)
+            anchor_y,         # [4] screenY2 (same - no slant)
             0,                # [5] inverse (no mirror)
             bitmap,           # [6]
             altitude,         # [7] dh

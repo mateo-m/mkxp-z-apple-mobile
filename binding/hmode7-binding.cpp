@@ -31,6 +31,13 @@
 
 #include <SDL_surface.h>
 #include <cstdint>
+#include <cstdio>
+
+// Mkxp-z's file-based debug log. Unlike `Debug() <<` (which goes to
+// std::cerr and is invisible on iOS), this routes into the per-game
+// Logs/ file.
+extern "C" void mkxp_debugLog(const char *tag, const char *source,
+                              const char *message);
 
 // Public C++ headers from //hmode7-apple-mobile. Expected on the
 // include path via the xcodegen integration (see project.yml).
@@ -53,16 +60,33 @@ namespace {
 // Returns nullptr on nil / Fixnum / disposed / non-Bitmap inputs so
 // callers can early-return. Forces lazy GPU->CPU sync via `getPixel`.
 //
+// mkxp-z has TWO CPU-side surface paths:
+//   1. Regular Bitmap  - `p->surface` is the shadow, allocated on
+//      first `getPixel` call, backed by a GL texture (up to the
+//      max texture size).
+//   2. "Mega surface" Bitmap - when the bitmap is larger than the
+//      GL max texture size (Insurgence's @textureset lands here
+//      for big maps: 160 x (tileCount*32) easily exceeds 4096px
+//      tall). These live entirely on the CPU in `p->megaSurface`;
+//      `p->surface` stays null.
+//
 // Insurgence's Ruby code passes `0` (Fixnum) as a placeholder in
 // some Array slots (see `auto_tilesets.push(0)` in
-// 210-HM7_NEW_CLASSES.rb:800). We must reject those without trying
-// to dereference a tagged Fixnum as a T_DATA struct, which would be
-// undefined behavior.
+// 210-HM7_NEW_CLASSES.rb:800). We reject those without trying to
+// dereference a tagged Fixnum as T_DATA (undefined behavior).
 SDL_Surface *bitmap_surface(VALUE v) {
     if (NIL_P(v)) return nullptr;
     if (!RB_TYPE_P(v, T_DATA)) return nullptr;
     Bitmap *b = getPrivateDataNoRaise<Bitmap>(v);
     if (!b || b->isDisposed()) return nullptr;
+    // Check for the mega-surface path first so we don't trigger a
+    // full-bitmap GL read-back on a gigantic texture just to find
+    // out `p->surface` is null.
+    if (SDL_Surface *mega = b->megaSurface()) {
+        return mega;
+    }
+    // Regular path: trigger lazy allocation of the shadow surface
+    // + GL->CPU sync on first access.
     b->getPixel(0, 0);
     return b->surface();
 }
