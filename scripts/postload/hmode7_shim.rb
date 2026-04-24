@@ -143,10 +143,27 @@ begin
       unless method_defined?(:_mkxp_hm7_orig_get_data)
         alias_method :_mkxp_hm7_orig_get_data, :get_data
         def get_data
-          # Fall back to original if we somehow lack a bitmap (can
-          # happen for disposed / half-initialized surfaces). The
-          # port's binding rejects nil bitmaps and skips the entry.
-          return _mkxp_hm7_orig_get_data unless bitmap && !bitmap.disposed?
+          # Fallback handling. If we lack a usable bitmap, returning
+          # the original v1.2.1 6-element form would leak values
+          # into the native binding's 11-element positional slots
+          # (specifically `blend_type` at original[5] gets read as
+          # `inverse` in v1.4.4 layout, causing a horizontal mirror).
+          # Return `nil` instead; the native binding skips nil
+          # entries defensively in its surface unpacking loop.
+          #
+          # See hmode7/docs/SPRITE_REMAINING_BUGS.md hypothesis P6
+          # for why this is suspected of causing the "sprite at
+          # wrong X position" symptom on rotation frames.
+          if bitmap.nil? || bitmap.disposed?
+            $mkxp_hm7_fallback_count ||= 0
+            $mkxp_hm7_fallback_count += 1
+            if ($mkxp_hm7_fallback_count % 60) == 1
+              char_info = character.respond_to?(:id) ? "event_id=#{character.id}" : "class=#{character.class}"
+              MKXP.puts "[hm7-shim] get_data fallback ##{$mkxp_hm7_fallback_count} " \
+                        "(#{char_info}) - skipping"
+            end
+            return nil
+          end
 
           half_w = bitmap.width >> 1
           h = bitmap.height
