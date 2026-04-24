@@ -150,20 +150,7 @@ begin
           # `inverse` in v1.4.4 layout, causing a horizontal mirror).
           # Return `nil` instead; the native binding skips nil
           # entries defensively in its surface unpacking loop.
-          #
-          # See hmode7/docs/SPRITE_REMAINING_BUGS.md hypothesis P6
-          # for why this is suspected of causing the "sprite at
-          # wrong X position" symptom on rotation frames.
-          if bitmap.nil? || bitmap.disposed?
-            $mkxp_hm7_fallback_count ||= 0
-            $mkxp_hm7_fallback_count += 1
-            if ($mkxp_hm7_fallback_count % 60) == 1
-              char_info = character.respond_to?(:id) ? "event_id=#{character.id}" : "class=#{character.class}"
-              MKXP.puts "[hm7-shim] get_data fallback ##{$mkxp_hm7_fallback_count} " \
-                        "(#{char_info}) - skipping"
-            end
-            return nil
-          end
+          return nil if bitmap.nil? || bitmap.disposed?
 
           half_w = bitmap.width >> 1
           h = bitmap.height

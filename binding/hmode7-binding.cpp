@@ -666,20 +666,24 @@ RB_METHOD(hm7NativeRenderHM7) {
         }
     }
 
-    // Runtime width check for s_screen_bitmap: the postload shim is
-    // supposed to reallocate @params[10] to 2x render width so the
-    // port can pack 8 bytes per column slot. If something prevents
-    // that reallocation, our port would write at slot stride 8 but
-    // the row pitch would be 4 bytes per pixel (not 8), shifting
-    // sprite writes by a half-row. Log once and loudly if we detect
-    // the mismatch. See SPRITE_REMAINING_BUGS.md hypothesis P1.
+    // Assert: s_screen_bitmap must be 2x render width because the
+    // renderer packs 8 bytes per column slot (flag, blend, hbase hi/
+    // lo, r, g, b, a) and a regular Bitmap's pitch is only 4 bytes
+    // per pixel. The postload shim reallocates @params[10] in
+    // `HM7::Tilemap#initialize` to accomplish this; if the shim
+    // failed to run (e.g. Ruby visibility / `method_defined?` quirk
+    // on `initialize`), sprite writes at `sXt >= render_w / 2`
+    // would wrap into adjacent rows and render sprites at bogus
+    // positions near the left edge. Log once and loudly if we
+    // detect the mismatch so the bug doesn't silently re-appear.
     if (rp.s_screen_bitmap && rp.screen_bitmap) {
         static int widthWarned = 0;
         const int expected = rp.screen_bitmap->w * 2;
         if (!widthWarned && rp.s_screen_bitmap->w != expected) {
             char buf[128];
             std::snprintf(buf, sizeof(buf),
-                "s_screen width=%d expected=%d (shim failed?)",
+                "s_screen width=%d expected=%d (shim failed to "
+                "reallocate; sprites will render at wrong positions)",
                 rp.s_screen_bitmap->w, expected);
             mkxp_debugLog("HM7-WARN", "hmode7-binding.cpp [C++]", buf);
             widthWarned = 1;
