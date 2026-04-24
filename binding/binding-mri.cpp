@@ -123,6 +123,8 @@ void fileIntBindingInit();
 
 void httpBindingInit();
 
+void hmode7BindingInit();
+
 RB_METHOD(mkxpDelta);
 RB_METHOD(mriPrint);
 RB_METHOD(mriP);
@@ -342,6 +344,12 @@ static void mriBindingInit() {
     fileIntBindingInit();
 
     httpBindingInit();
+
+    /* H-Mode7 native binding. Depends on bitmapBindingInit +
+     * tableBindingInit having run; registers the HM7::Native
+     * module that the postload shim forwards HM7.self.xxx
+     * method calls to. See binding/hmode7-binding.cpp. */
+    hmode7BindingInit();
     
     if (rgssVer >= 3) {
         _rb_define_module_function(rb_mKernel, "rgss_main", mriRgssMain);
@@ -1357,6 +1365,8 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_session_reset",
                     "nilclass_safe_stubs",
                     "pokemon_windowskin_fix",
+                    "hmode7_shim",
+                    "insurgence_diag",
                     nullptr
                 };
                 

@@ -1,0 +1,4 @@
+[submodule "hmode7"]
+	path = hmode7
+	url = git@github.com:mateo-m/hmode7-apple-mobile.git
+	branch = main
