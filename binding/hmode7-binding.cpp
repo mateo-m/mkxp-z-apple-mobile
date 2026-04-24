@@ -714,8 +714,31 @@ RB_METHOD(hm7NativeRenderHM7) {
                     rp.s_screen_bitmap->h);
     }
 
+    // Wall-layer-selection mode. Looked up on the module each call
+    // (cheap - module constant is essentially a hash probe) so a
+    // game's postload shim can set it before or even during play.
+    // Defaults to `:top_cumulative` if unset or invalid. See
+    // `WallLayerMode` in hm7_render.h for rationale.
+    hm7::WallLayerMode wall_mode = hm7::WallLayerMode::TopCumulative;
+    {
+        VALUE hm7_module = rb_const_get(rb_cObject, rb_intern("HM7"));
+        VALUE native_module = rb_const_get(hm7_module, rb_intern("Native"));
+        ID id_mode = rb_intern("WALL_LAYER_MODE");
+        if (rb_const_defined(native_module, id_mode)) {
+            VALUE v = rb_const_get(native_module, id_mode);
+            if (SYMBOL_P(v)) {
+                ID sym = SYM2ID(v);
+                if (sym == rb_intern("bottom_cumulative") ||
+                    sym == rb_intern("v1_4") ||
+                    sym == rb_intern("reference")) {
+                    wall_mode = hm7::WallLayerMode::BottomCumulative;
+                }
+            }
+        }
+    }
+
     int o_camera = hm7::render_hm7(rp, rv, surfaces, surface_count,
-                                   /*nb_layers=*/3);
+                                   /*nb_layers=*/3, wall_mode);
 
     // Commit all bitmaps the renderer wrote to.
     commit_bitmap(aref_or_nil(params_v, 0));   // screen_bitmap
@@ -754,4 +777,12 @@ void hmode7BindingInit() {
     // replaces the Win32API-based HM7.self.xxx methods with wrappers
     // that call this module.
     rb_define_const(mNative, "AVAILABLE", Qtrue);
+
+    // `HM7::Native::WALL_LAYER_MODE` is intentionally NOT defined
+    // here. The postload shim auto-detects the HM7 script's era
+    // (pre-V1.3 vs V1.3+/V1.4+) and assigns the constant based on
+    // that detection. If no shim runs at all, the binding falls
+    // back to `TopCumulative` at render time (the pre-V1.3
+    // behaviour that works for every currently-known caller -
+    // see WALL_LAYER_MODE.md).
 }
