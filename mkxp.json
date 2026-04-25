@@ -41,12 +41,19 @@
     // scripts, postload scripts, the `customScript` specified in mkxp.json, the
     // Ruby standard library, or scripts imported using `require` or
     // `require_relative`.
-    // 0: Disabled (use modern Ruby syntax for all Ruby scripts)
-    // 1: Custom (use the Ruby version specified by `syntaxTransformCustomVersionMajor`, `syntaxTransformCustomVersionMinor` and `syntaxTransformCustomVersionTeeny`)
-    // 2: Compatibility mode (equivalent to Ruby 1.9.2 if the RGSS version is 3, or Ruby 1.8.1 otherwise)
-    // (default: 0 if mkxp.json exists, 2 if mkxp.json does not exist)
+    // Accepted values:
+    //   "disabled" - use modern Ruby syntax for all Ruby scripts
+    //   "custom"   - use the Ruby version specified by
+    //                syntaxTransformCustomVersionMajor / Minor / Teeny
+    //   "legacy"   - compatibility mode, equivalent to Ruby 1.9.2 if
+    //                rgssVersion is 3, otherwise Ruby 1.8.1
+    // (default: "disabled" if mkxp.json exists, "legacy" if not)
     //
-    // "syntaxTransform": 0,
+    // For backward compatibility with older configs the legacy
+    // integer form is also accepted (0 = disabled, 1 = custom,
+    // 2 = legacy). New configs should use the string form.
+    //
+    // "syntaxTransform": "disabled",
 
 
     // When syntax transform is set to 1, these settings control the targeted

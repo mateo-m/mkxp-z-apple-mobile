@@ -22,6 +22,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include "app_bridge.h"
 #include "util/json5pp.hpp"
 
 #include <set>
@@ -32,7 +33,14 @@ struct Config {
     // Used for sending the JSON data to Ruby as System::CONFIG
     json5pp::value raw;
     
-    int syntaxTransform;
+    // Ruby syntax-transform mode. The on-disk schema accepts string
+    // values ("disabled", "custom", "legacy") for self-documenting
+    // configs; numeric values (0/1/2) remain accepted for backward
+    // compatibility with developer-shipped mkxp.json files. The
+    // value is normalized to the typed `MKXPSyntaxTransformMode`
+    // enum (declared in app_bridge.h since it crosses the C/Swift
+    // boundary too) so the engine never carries magic numbers.
+    MKXPSyntaxTransformMode syntaxTransform;
     int syntaxTransformCustomVersionMajor;
     int syntaxTransformCustomVersionMinor;
     int syntaxTransformCustomVersionTeeny;

@@ -281,22 +281,36 @@ static void initSyntaxTransform(Config &conf) {
   extern unsigned int mkxp_syntax_transform_target_ruby_version_major, mkxp_syntax_transform_target_ruby_version_minor, mkxp_syntax_transform_target_ruby_version_teeny;
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 
+  // Host-bridge override. The Empo iOS app sets this per-game so
+  // syntaxTransform doesn't have to live inside mkxp.json (which is
+  // meant to mirror the developer's engine-config layer; mixing
+  // host-managed keys in there bleeds into mkxp.original.json
+  // snapshots and the per-game-defaults UI). When the bridge is
+  // MKXP_SYNTAX_TRANSFORM_UNSET (the default), use whatever
+  // Config::read produced from mkxp.json so desktop / test-harness
+  // builds behave exactly as before.
+  MKXPSyntaxTransformMode hostMode = mkxp_getSyntaxTransformMode();
+  if (hostMode != MKXP_SYNTAX_TRANSFORM_UNSET)
+    conf.syntaxTransform = hostMode;
+
   char buf[128];
 
   switch (conf.syntaxTransform) {
+    case MKXP_SYNTAX_TRANSFORM_UNSET:        // unreachable post-override; treat as disabled
+    case MKXP_SYNTAX_TRANSFORM_DISABLED:
     default:
       conf.syntaxTransformCustomVersionMajor = INT_MAX;
       conf.syntaxTransformCustomVersionMinor = INT_MAX;
       conf.syntaxTransformCustomVersionTeeny = INT_MAX;
       snprintf(buf, sizeof(buf), "Disabled");
       break;
-    case 1:
+    case MKXP_SYNTAX_TRANSFORM_CUSTOM:
       conf.syntaxTransformCustomVersionMajor = std::max(0, conf.syntaxTransformCustomVersionMajor);
       conf.syntaxTransformCustomVersionMinor = std::max(0, conf.syntaxTransformCustomVersionMinor);
       conf.syntaxTransformCustomVersionTeeny = std::max(0, conf.syntaxTransformCustomVersionTeeny);
       snprintf(buf, sizeof(buf), "Ruby %u.%u.%u", conf.syntaxTransformCustomVersionMajor, conf.syntaxTransformCustomVersionMinor, conf.syntaxTransformCustomVersionTeeny);
       break;
-    case 2:
+    case MKXP_SYNTAX_TRANSFORM_LEGACY:
       conf.syntaxTransformCustomVersionMajor = 1;
       conf.syntaxTransformCustomVersionMinor = conf.rgssVersion >= 3 ? 9 : 8;
       conf.syntaxTransformCustomVersionTeeny = conf.rgssVersion >= 3 ? 2 : 1;
@@ -314,7 +328,7 @@ static void initSyntaxTransform(Config &conf) {
   // compiled against an unpatched Ruby runtime. The setting has no
   // effect; make it loud in the logs so the mismatch doesn't look
   // like a silent misconfiguration.
-  if (conf.syntaxTransform != 0)
+  if (conf.syntaxTransform != MKXP_SYNTAX_TRANSFORM_DISABLED)
     Debug() << "Syntax transform: requested" << buf << "but patches"
                " are not compiled in (MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES"
                " undefined); setting will be ignored.";
