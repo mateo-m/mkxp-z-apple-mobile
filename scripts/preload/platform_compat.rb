@@ -83,33 +83,41 @@ class Float
 end
 
 # --- Input::Controller state stubs ---
-# Some indie games (cited: Sometimes Always Monsters) probe
-# Input::Controller.states / first_state optimistically at startup
-# and crash with NoMethodError when the mkxp-z Input module doesn't
-# expose a matching surface. Provide an inert State whose every
-# method returns a sensible zero so probes succeed and the game
-# falls through to keyboard / touch input. Mirrors JoiPlay preload.rb.
-module Input
-  module Controller
-    class State
-      def left_trigger_value;   0 end
-      def right_trigger_value;  0 end
-      def thumb_left_x;  0 end
-      def thumb_left_y;  0 end
-      def thumb_right_x; 0 end
-      def thumb_right_y; 0 end
-      def thumb_left_dir4;  0 end
-      def thumb_left_dir8;  0 end
-      def thumb_right_dir4; 0 end
-      def thumb_right_dir8; 0 end
-      def press?(button);   false end
-      def trigger?(button); false end
-      def repeat?(button);  false end
-      def pressed_buttons;  [] end
-    end
+# Prevents NoMethodError crashes from games that probe gamepad
+# state via a pad API the iOS port doesn't expose. Cited offender
+# is Sometimes Always Monsters, which calls
+# `Input::Controller.first_state.thumb_left_x` (and friends) at
+# startup; without these stubs the script terminates before the
+# title screen. We are NOT implementing real gamepad support here
+# - every method returns a zero / false / [] sentinel so probes
+# succeed and the game falls through to keyboard / touch input.
+#
+# Guarded on `defined?(Input::Controller)` so a future engine-level
+# Controller binding (or a game that ships its own) isn't clobbered.
+# Source: JoiPlay mkxp/binding-mri/preload.rb:123-177.
+unless defined?(Input::Controller)
+  module Input
+    module Controller
+      class State
+        def left_trigger_value  = 0
+        def right_trigger_value = 0
+        def thumb_left_x  = 0
+        def thumb_left_y  = 0
+        def thumb_right_x = 0
+        def thumb_right_y = 0
+        def thumb_left_dir4  = 0
+        def thumb_left_dir8  = 0
+        def thumb_right_dir4 = 0
+        def thumb_right_dir8 = 0
+        def press?(_button)   = false
+        def trigger?(_button) = false
+        def repeat?(_button)  = false
+        def pressed_buttons   = []
+      end
 
-    def self.states;      [State.new] end
-    def self.first_state; State.new end
+      def self.states      = [State.new]
+      def self.first_state = State.new
+    end
   end
 end
 

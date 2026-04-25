@@ -71,6 +71,13 @@ static std::atomic<bool>  s_postloadEnabled{true};
 // for the enum and rationale.
 static std::atomic<int>   s_syntaxTransformMode{MKXP_SYNTAX_TRANSFORM_UNSET};
 
+// Per-game "force the on-screen ABC grid for PE text entry" toggle.
+// Default false = the iOS soft keyboard handles name entry. Empo
+// flips it on per-game when a Pokemon Essentials game's keyboard
+// scene needs the original ABC grid (custom keys not on the iOS
+// keyboard, etc.). Read by `pokemon_input.rb`.
+static std::atomic<bool>  s_useOnScreenKeyboard{false};
+
 // Debug: tint the area outside the game viewport.
 static std::atomic<bool>  s_showViewportBounds{false};
 static std::atomic<float> s_vpBoundsR{0};
@@ -291,6 +298,15 @@ void mkxp_resetBridgeState(void) {
     // Note: s_verticalAlignment and s_postloadEnabled are NOT reset here.
     // They are explicitly set by selectGame() before each session.
     s_sdlWindowID.store(0, std::memory_order_relaxed);
+    // Game-driven text-input intent (set by Ruby `Input.text_input=`).
+    // Not part of the per-game settings group above because Empo
+    // doesn't seed it - the game itself flips it on entry to a name
+    // entry / chat input UI. Force-reset between sessions in case
+    // the previous session was force-quit (OS kill, crash) while the
+    // intent was still true; without this clear, the next session
+    // would inherit the flag and the soft keyboard would auto-show
+    // before the game asked for it.
+    s_gameTextInputIntent.store(false, std::memory_order_relaxed);
     // Reset pause state so a stale pause doesn't block the next session.
     s_pauseRequested.store(false, std::memory_order_relaxed);
     s_paused.store(false, std::memory_order_relaxed);
@@ -701,6 +717,14 @@ void mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode) {
 
 MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
     return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
+}
+
+void mkxp_setUseOnScreenKeyboard(bool enabled) {
+    s_useOnScreenKeyboard.store(enabled, std::memory_order_release);
+}
+
+bool mkxp_getUseOnScreenKeyboard(void) {
+    return s_useOnScreenKeyboard.load(std::memory_order_acquire);
 }
 
 void mkxp_setShowViewportBounds(bool enabled) {
