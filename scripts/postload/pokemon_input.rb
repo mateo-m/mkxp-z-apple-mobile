@@ -22,24 +22,32 @@
 #      touch / gamepad events.
 
 if !$PokemonSystem.nil?
-  # Note: previously this postload force-disabled the Pokemon
-  # Essentials text-entry "use keyboard" path by setting
-  # `USEKEYBOARDTEXTENTRY = false` and
-  # `PokemonEntryScene::USEKEYBOARD = false`, on the grounds that
-  # iOS had no soft-keyboard bridge so the keyboard scene would
-  # accept no input and stall the game. With the
-  # `Input.text_input = true` -> SDL_StartTextInput -> UIKit
-  # UITextField -> `mkxp_pushTextInput` bridge wired up
-  # (app_bridge.cpp + KeyboardFieldRepresentable.swift), the soft
-  # keyboard now appears automatically and types characters into
-  # the in-game field via `Input.gets`. The default PE keyboard
-  # path therefore works correctly on iOS - we no longer need to
-  # force the on-screen ABC grid as a workaround.
-  #
-  # If a specific game's keyboard layout proves unworkable on iOS
-  # (e.g. requires keys not present on the iOS soft keyboard), we
-  # can re-add a per-game gate via mkxp.json or AppSettings rather
-  # than a global override.
+  # The default soft-keyboard path (Input.text_input -> UIKit
+  # UITextField -> mkxp_pushTextInput) works for IF / Reborn /
+  # Insurgence name entry, so this postload doesn't force the
+  # on-screen ABC grid by default. A per-game GameSettings toggle
+  # ("Use on-screen keyboard") routes through the
+  # `MKXP.use_on_screen_keyboard?` bridge for games whose keyboard
+  # scene needs the original ABC grid (custom keys, layout, etc.) -
+  # only those games get the historical force-disable, leaving the
+  # majority on the polished soft-keyboard path.
+  if defined?(MKXP) && MKXP.respond_to?(:use_on_screen_keyboard?) &&
+     MKXP.use_on_screen_keyboard?
+    # USEKEYBOARDTEXTENTRY lives at the top level in stock
+    # Essentials. Some fan games re-assign it from their own
+    # Settings script after our preload runs, so the override has
+    # to land in postload to win the last-write race. Wrap the
+    # constant assignment in `silence_warnings`-equivalent so we
+    # don't spam "already initialized constant" on every launch.
+    Object.send(:remove_const, :USEKEYBOARDTEXTENTRY) if defined?(USEKEYBOARDTEXTENTRY)
+    USEKEYBOARDTEXTENTRY = false
+    # Belt-and-braces for fan games dispatching on the class-scoped
+    # constant instead of the top-level one.
+    if defined?(PokemonEntryScene)
+      PokemonEntryScene.send(:remove_const, :USEKEYBOARD) if PokemonEntryScene.const_defined?(:USEKEYBOARD)
+      PokemonEntryScene.const_set(:USEKEYBOARD, false)
+    end
+  end
 
   module Input
     def self.update

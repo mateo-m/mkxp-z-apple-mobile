@@ -10,10 +10,10 @@
 #
 # Ports a curated subset of JoiPlay's `postload.rb`. Omitted items:
 # Zeus video player shim (we have our own movie dispatcher),
-# MGQP::make_thumbnail (touches Dir.mkdir on the game folder -
-# iOS sandbox unfriendly), HN_Light / Sprite_Dark reskins (too
-# game-specific), CSV parser override, string encoding helper -
-# none of them have been reported as blockers.
+# CSV parser override and CConv::s2u8 string-encoding helper
+# (very game-specific, no current reports), Game_Temp /
+# Scene_Map save-preview rewrites (the games we've tested take
+# the default path fine).
 
 # --- MapSaver (TH::Map_Saver) neutralization ---
 # Some games bind a hotkey to snapshot the current map or screen
@@ -49,6 +49,26 @@ module Cache
 
   def self.savefile_picture(filename)
     Bitmap.new(160, 120)
+  end
+end
+
+# --- MGQP DataManager.make_thumbnail no-op ---
+# Monster Girl Quest Paradox and games sharing its save plugin
+# call DataManager.make_thumbnail at boot. The stock body does
+# Dir.mkdir("Save") and scans Save/*.png for thumbnails, both of
+# which are unfriendly inside the iOS sandbox (write-permission
+# errors, hangs on large folders). Replace with a no-op that
+# initialises the @thumbnails / @current_thumbnail / @dummy_thumbnail
+# instance vars to harmless placeholders so the rest of the
+# save-screen pipeline keeps working. Gated on RGSS3 (rpg_version
+# 3) since that's where the plugin lives.
+if defined?(MKXP) && MKXP.respond_to?(:rpg_version) && MKXP.rpg_version > 2
+  module DataManager
+    def self.make_thumbnail
+      @thumbnails        = {}
+      @current_thumbnail = Bitmap.new(1, 1)
+      @dummy_thumbnail   = Bitmap.new(1, 1)
+    end
   end
 end
 
@@ -153,6 +173,36 @@ end
 begin
   class Window_ZiifSaveFile
     def draw_save_bitmap; end
+  end
+rescue StandardError
+end
+
+# --- HN_Light / Sprite_Dark inert shells ---
+# Hime's HN_Light dynamic-lighting plugin builds per-pixel light
+# textures via tktk_bitmap's native blend_blt, which we already
+# no-op above. Provide an empty Light class so any `HN_Light::Light.new`
+# call returns a harmless object with the attr_readers the plugin
+# expects, and stub Sprite_Dark with a real Sprite subclass so
+# `<<` / refresh / dispose calls forwarded by map scenes don't
+# explode. The result is "no lighting effect" rather than a crash.
+module HN_Light
+  class Light
+    attr_reader :bitmap, :cells, :width, :height, :ox, :oy
+    def initialize(light_type, s_zoom = 1); end
+    def dispose; end
+  end
+end
+
+begin
+  class Sprite_Dark < Sprite
+    def initialize(viewport = nil)
+      super(viewport)
+      @width  = Graphics.width
+      @height = Graphics.height
+      @light_cache = {}
+    end
+    def add_light(character); end
+    def refresh; end
   end
 rescue StandardError
 end
