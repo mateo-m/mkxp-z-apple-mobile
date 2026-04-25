@@ -130,6 +130,31 @@ void        mkxp_injectKeyEvent(int scancode, int pressed);
 typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 
+// Text-input bridge (UI <-> Engine)
+//
+// Games request text input via Ruby `Input.text_input = true`, which
+// triggers `SDL_StartTextInput()` inside EventThread. The callback
+// registered with `mkxp_setTextInputModeCallback` fires from the main
+// thread when that state changes; the iOS side uses it to auto-show
+// the system keyboard so the user can immediately type without having
+// to manually toggle the keyboard toolbar.
+//
+// `mkxp_pushTextInput(utf8)` is the inverse direction: the iOS soft
+// keyboard's UITextField delegate forwards typed UTF-8 strings here,
+// which are wrapped as SDL_TEXTINPUT events and end up in the engine's
+// `textInputBuffer`. Ruby reads them via `Input.gets`. Strings longer
+// than SDL's per-event limit (32 bytes including the trailing NUL) are
+// chunked at safe UTF-8 boundaries.
+//
+// `mkxp_isTextInputActive()` lets the UI side check whether to push
+// text events at all - when SDL text mode is OFF (e.g. user toggled
+// the keyboard toolbar manually for a non-text scene), pushing text
+// would silently fill the buffer with input nobody reads.
+typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
+void        mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata);
+void        mkxp_pushTextInput(const char *utf8);
+int         mkxp_isTextInputActive(void);
+
 // Engine state queries
 
 double      mkxp_getAverageFPS(void);
