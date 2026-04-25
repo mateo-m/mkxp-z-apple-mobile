@@ -894,23 +894,37 @@ RB_METHOD(mkxpStringAref) {
  * Ruby 1.8: str[int] = int  set the byte at that index.
  * Ruby 3.x: str[int] = val  expects a String replacement.
  *
- * Same syntax-transform gate as mkxpStringAref above.
+ * Asymmetry vs mkxpStringAref: the READ case (`str[i]`) is
+ * ambiguous - 1.8 code expects Integer, modern Ruby 3 code expects
+ * String, and the argument types are identical, so we have to gate
+ * on the syntax-transform target. The WRITE case (`str[i] = X`) is
+ * UNAMBIGUOUS: if `X` is Integer, the caller is unmistakably 1.8
+ * code (Ruby 3 code only ever does `str[i] = SomeString`). We
+ * therefore keep the byte-write branch unconditional when `argv[1]`
+ * is Integer - this preserves the legacy idiom used by our own
+ * preload scripts (`win32_wrap.rb:237: dst[i] = b` where `b` comes
+ * from `each_byte`) regardless of the per-game transform setting.
+ *
+ * Engine preload iseqs compile with `mkxp_syntax_transform_flag = 0`
+ * (no transform-aware parser hook), so an `ec_active(1,8)`-style
+ * gate would have returned FALSE inside our preloads on a modern-
+ * Ruby game and failed the byte-write with `TypeError: no implicit
+ * conversion of Integer into String` - the regression that hit
+ * Insurgence / Z / Uranium after the matched gate was applied to
+ * both aref and aset.
  */
 RB_METHOD(mkxpStringAset) {
     RB_UNUSED_PARAM;
 
-#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-    /* str[int] = int → set byte (Ruby 1.8 semantics), only when
-     * transform targets <= 1.8. Outside that target Ruby 3's normal
-     * `str[int] = String` semantics apply via the delegate below. */
-    if (mkxp_ec_is_syntax_transform_active(1, 8, (unsigned int)-1) &&
-        argc == 2 && RB_INTEGER_TYPE_P(argv[0]) && RB_INTEGER_TYPE_P(argv[1])) {
+    /* str[int] = int → set byte (Ruby 1.8 semantics). Always.
+     * Modern Ruby 3 code never reaches this branch because it
+     * passes a String as the value. */
+    if (argc == 2 && RB_INTEGER_TYPE_P(argv[0]) && RB_INTEGER_TYPE_P(argv[1])) {
         unsigned char byte = (unsigned char)(NUM2INT(argv[1]) & 0xFF);
         VALUE replacement = rb_str_new((const char *)&byte, 1);
         VALUE args[2] = { argv[0], replacement };
         return rb_funcallv(self, rb_intern("_mkxp_c_aset"), 2, args);
     }
-#endif
 
     /* Everything else → original */
     return rb_funcallv(self, rb_intern("_mkxp_c_aset"), argc, argv);
