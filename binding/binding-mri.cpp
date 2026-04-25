@@ -146,7 +146,7 @@ RB_METHOD(mkxpIsReallyLinuxHost);
 RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
-RB_METHOD(mkxpUseOnScreenKeyboard);
+RB_METHOD(mkxpUseInGameKeyboard);
 RB_METHOD(mkxpSyntaxTransformTarget);
 RB_METHOD(mkxpApplyOverrides);
 RB_METHOD(mkxpRpgVersion);
@@ -404,7 +404,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "is_really_windows?", mkxpIsReallyWindowsHost);
 
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
-    _rb_define_module_function(mod, "use_on_screen_keyboard?", mkxpUseOnScreenKeyboard);
+    _rb_define_module_function(mod, "use_in_game_keyboard?", mkxpUseInGameKeyboard);
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
     _rb_define_module_function(mod, "ruby_version", mkxpRubyVersion);
@@ -642,14 +642,14 @@ RB_METHOD(mkxpCheatsEnabled) {
     return rb_bool_new(mkxp_getCheatsEnabled());
 }
 
-/* MKXP.use_on_screen_keyboard? - true when the host requested that
-   Pokemon Essentials text-entry scenes use the original on-screen
-   ABC grid instead of the iOS soft keyboard. Read by
+/* MKXP.use_in_game_keyboard? - true when the host requested that
+   Pokemon Essentials text-entry scenes use the game's own
+   keyboard scene instead of the iOS soft keyboard. Read by
    `pokemon_input.rb` to decide whether to force-disable
    `USEKEYBOARDTEXTENTRY`. */
-RB_METHOD(mkxpUseOnScreenKeyboard) {
+RB_METHOD(mkxpUseInGameKeyboard) {
     RB_UNUSED_PARAM;
-    return rb_bool_new(mkxp_getUseOnScreenKeyboard());
+    return rb_bool_new(mkxp_getUseInGameKeyboard());
 }
 
 /* System.apply_overrides(str) - runs the JoiPlay-compatible
