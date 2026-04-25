@@ -130,6 +130,26 @@ void        mkxp_injectKeyEvent(int scancode, int pressed);
 typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 
+// Managed-config directory (UI -> Engine)
+//
+// Empo keeps all per-game state it generates (mkxp.json,
+// patches.json, save-state metadata, etc.) outside the game
+// folder so the game directory stays a faithful mirror of what
+// the user imported. The host UI calls
+// `mkxp_setManagedConfigDir` with an absolute path to the
+// per-game state directory before launching a session; engine
+// modules that previously loaded config from cwd (Config::read,
+// Patcher auto-discovery, ...) check this directory FIRST and
+// fall back to cwd only if the file isn't found there.
+//
+// Pass NULL or "" to clear the override (fall back to cwd-only
+// behaviour, matching desktop builds).
+//
+// Engine-side accessor: `mkxp_getManagedConfigDir()` returns
+// the current path (empty string if unset).
+void        mkxp_setManagedConfigDir(const char *path);
+const char *mkxp_getManagedConfigDir(void);
+
 // Text-input bridge (UI <-> Engine)
 //
 // Games request text input via Ruby `Input.text_input = true`, which
