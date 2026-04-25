@@ -22,23 +22,24 @@
 #      touch / gamepad events.
 
 if !$PokemonSystem.nil?
-  # Force the top-level constant off regardless of whatever the
-  # game's scripts set it to - see header comment. Must use the
-  # Object.const_set dance (rather than `USEKEYBOARDTEXTENTRY = false`)
-  # because a plain assignment at this scope raises "already
-  # initialized constant" warnings when the game has already defined
-  # it, and we want the silent override.
-  if Object.const_defined?(:USEKEYBOARDTEXTENTRY, false)
-    Object.send(:remove_const, :USEKEYBOARDTEXTENTRY)
-  end
-  Object.const_set(:USEKEYBOARDTEXTENTRY, false)
-
-  if defined?(PokemonEntryScene)
-    class PokemonEntryScene
-      remove_const(:USEKEYBOARD) if const_defined?(:USEKEYBOARD, false)
-      USEKEYBOARD = false
-    end
-  end
+  # Note: previously this postload force-disabled the Pokemon
+  # Essentials text-entry "use keyboard" path by setting
+  # `USEKEYBOARDTEXTENTRY = false` and
+  # `PokemonEntryScene::USEKEYBOARD = false`, on the grounds that
+  # iOS had no soft-keyboard bridge so the keyboard scene would
+  # accept no input and stall the game. With the
+  # `Input.text_input = true` -> SDL_StartTextInput -> UIKit
+  # UITextField -> `mkxp_pushTextInput` bridge wired up
+  # (app_bridge.cpp + KeyboardFieldRepresentable.swift), the soft
+  # keyboard now appears automatically and types characters into
+  # the in-game field via `Input.gets`. The default PE keyboard
+  # path therefore works correctly on iOS - we no longer need to
+  # force the on-screen ABC grid as a workaround.
+  #
+  # If a specific game's keyboard layout proves unworkable on iOS
+  # (e.g. requires keys not present on the iOS soft keyboard), we
+  # can re-add a per-game gate via mkxp.json or AppSettings rather
+  # than a global override.
 
   module Input
     def self.update

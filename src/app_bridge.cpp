@@ -8,6 +8,7 @@
 #include "eventthread.h"
 #include "config.h"
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <condition_variable>
 #include <string>
@@ -128,6 +129,20 @@ struct BridgeCallback {
 // Key event callback: engine -> UI notification for hardware key events.
 static BridgeCallback<mkxp_KeyEventCallback> s_keyEventCb;
 static bool s_keyWatcherInstalled = false;
+
+// Text-input mode change callback: engine -> UI notification when
+// SDL_StartTextInput / SDL_StopTextInput fires inside EventThread.
+static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
+
+// Game-side text-input intent. Set when the engine processes
+// REQUEST_TEXTMODE(1) (game called `Input.text_input = true`),
+// cleared on REQUEST_TEXTMODE(0). Distinct from
+// `SDL_IsTextInputActive()` because SDL's iOS backend auto-stops
+// text input on keyboard-hide notifications - which fire briefly
+// even when our own UITextField becomes first responder, leaving
+// SDL's state OFF while the game's Ruby loop still expects input.
+// `mkxp_isTextInputActive()` reads this flag instead of asking SDL.
+static std::atomic<bool> s_gameTextInputIntent{false};
 
 // Lifecycle callbacks: engine -> UI notifications for state changes.
 static BridgeCallback<mkxp_EngineTerminatedCallback> s_engineTerminatedCb;
@@ -405,6 +420,90 @@ void mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata) {
     if (!s_keyWatcherInstalled) {
         SDL_AddEventWatch(keyEventWatcherFn, NULL);
         s_keyWatcherInstalled = true;
+    }
+}
+
+// Text-input bridge
+
+void mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata) {
+    s_textInputModeCb.set(cb, userdata);
+}
+
+// Internal hook called by EventThread::process whenever
+// SDL_StartTextInput / SDL_StopTextInput is dispatched. Lives in
+// app_bridge so the BridgeCallback machinery (mutex + atomic gate)
+// stays internal to this translation unit. Also flips the
+// `s_gameTextInputIntent` flag the UI side queries via
+// `mkxp_isTextInputActive`.
+void mkxp_fireTextInputModeCallback(int active) {
+    s_gameTextInputIntent.store(active != 0, std::memory_order_release);
+    s_textInputModeCb.fire(active);
+}
+
+int mkxp_isTextInputActive(void) {
+    /* Game-side intent (the `Input.text_input = true` flag) rather
+     * than `SDL_IsTextInputActive()`. SDL's iOS backend
+     * (SDL_uikitviewcontroller.m `keyboardWillHide`) auto-calls
+     * SDL_StopTextInput when the keyboard transiently hides during
+     * appearance - even when OUR own UITextField is the one being
+     * presented. That leaves SDL's flag FALSE while the Ruby
+     * `Input.gets` loop is still polling for typed characters; if
+     * we gated text-event pushing on SDL's flag we'd drop every
+     * keystroke after the first hide flicker. */
+    return s_gameTextInputIntent.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+void mkxp_pushTextInput(const char *utf8) {
+    if (!utf8 || !*utf8) return;
+
+    // SDL_TEXTINPUT.text is `char[32]` including the trailing NUL,
+    // so the largest payload per event is 31 bytes. We split the
+    // input on UTF-8 character boundaries (never mid-codepoint) and
+    // emit one event per chunk.
+    //
+    // UTF-8 leading-byte detection: a byte is a continuation byte
+    // iff `(b & 0xC0) == 0x80`. We walk forward up to 31 bytes,
+    // then back off to the most recent leading byte so the chunk
+    // ends on a complete codepoint.
+    constexpr size_t kMaxChunk = 31;
+
+    if (s_sdlWindowID.load(std::memory_order_relaxed) == 0) {
+        SDL_Window *w = SDL_GetGrabbedWindow();
+        if (w) {
+            s_sdlWindowID.store(SDL_GetWindowID(w), std::memory_order_relaxed);
+        } else {
+            s_sdlWindowID.store(1, std::memory_order_relaxed);
+        }
+    }
+    Uint32 winID = s_sdlWindowID.load(std::memory_order_relaxed);
+
+    const char *p = utf8;
+    size_t remaining = std::strlen(utf8);
+    while (remaining > 0) {
+        size_t chunk = remaining > kMaxChunk ? kMaxChunk : remaining;
+
+        // If we're truncating mid-string, walk back to the last
+        // leading byte so we don't split a multi-byte codepoint.
+        if (chunk < remaining) {
+            while (chunk > 0 && (((unsigned char)p[chunk]) & 0xC0) == 0x80)
+                --chunk;
+            if (chunk == 0) {
+                // Pathological input (continuation bytes only); bail
+                // out rather than infinite-loop.
+                return;
+            }
+        }
+
+        SDL_Event event{};
+        event.type            = SDL_TEXTINPUT;
+        event.text.timestamp  = SDL_GetTicks();
+        event.text.windowID   = winID;
+        std::memcpy(event.text.text, p, chunk);
+        event.text.text[chunk] = '\0';
+        SDL_PushEvent(&event);
+
+        p         += chunk;
+        remaining -= chunk;
     }
 }
 

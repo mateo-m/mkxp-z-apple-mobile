@@ -21,6 +21,12 @@
 
 #include "eventthread.h"
 
+/* Engine -> UI bridge for SDL text-input mode changes. Defined in
+ * app_bridge.cpp inside an `extern "C"` block; declared here so we
+ * can call it from the REQUEST_TEXTMODE branch below without pulling
+ * in app_bridge.h's full surface. */
+extern "C" void mkxp_fireTextInputModeCallback(int active);
+
 #include <SDL_events.h>
 #include <SDL_messagebox.h>
 #include <SDL_timer.h>
@@ -519,6 +525,11 @@ void EventThread::process(RGSSThreadData &rtData)
                             lockText(true);
                             textInputBuffer.clear();
                             lockText(false);
+                            /* Notify the host UI (iOS) so it can
+                             * surface the soft keyboard automatically.
+                             * On desktop builds with no callback
+                             * installed this is a no-op. */
+                            mkxp_fireTextInputModeCallback(1);
                         }
                         else
                         {
@@ -526,6 +537,7 @@ void EventThread::process(RGSSThreadData &rtData)
                             lockText(true);
                             textInputBuffer.clear();
                             lockText(false);
+                            mkxp_fireTextInputModeCallback(0);
                         }
                         break;
                         
