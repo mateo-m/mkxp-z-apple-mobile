@@ -104,7 +104,11 @@ json::value readConfFile(const char *path, bool isBaseConf) {
     
     json::value ret(0);
     if (!mkxp_fs::fileExists(path)) {
-        return isBaseConf ? json::object({{"syntaxTransform", 2}}) : json::object({});
+        // Base config default = "legacy" (Ruby 1.8 compat) since
+        // most RPG Maker games use the historical syntax. iOS overrides
+        // per-game via the bridge regardless. See config.h.
+        return isBaseConf ? json::object({{"syntaxTransform", "legacy"}})
+                          : json::object({});
     }
     
     try {
@@ -137,7 +141,10 @@ Config::Config() {}
 
 void Config::read(int argc, char *argv[]) {
     auto optsJ = json::object({
-        {"syntaxTransform", 0},
+        // Default = "disabled" (no transform). Per-game override
+        // via mkxp.json string ("disabled" | "custom" | "legacy")
+        // or, on iOS, via mkxp_setSyntaxTransformMode() bridge.
+        {"syntaxTransform", "disabled"},
         {"syntaxTransformCustomVersionMajor", 1},
         {"syntaxTransformCustomVersionMinor", 0},
         {"syntaxTransformCustomVersionTeeny", 0},
@@ -280,7 +287,29 @@ try { exp } catch (...) {}
     SET_OPT_CUSTOMKEY(jit.maxCache, JITMaxCache, integer);
     SET_OPT_CUSTOMKEY(jit.minCalls, JITMinCalls, integer);
     SET_OPT_CUSTOMKEY(yjit.enabled, YJITEnable, boolean);
-    SET_OPT(syntaxTransform, integer);
+    // syntaxTransform: prefer the string form
+    // ("disabled" / "custom" / "legacy") for self-documenting
+    // configs. Fall back to integer (0/1/2) for backward
+    // compatibility with developer-shipped mkxp.json files that
+    // predate the string schema.
+    syntaxTransform = MKXP_SYNTAX_TRANSFORM_DISABLED;
+    GUARD({
+        const auto &v = opts["syntaxTransform"];
+        if (v.is_string()) {
+            const std::string &s = v.as_string();
+            if      (s == "disabled") syntaxTransform = MKXP_SYNTAX_TRANSFORM_DISABLED;
+            else if (s == "custom")   syntaxTransform = MKXP_SYNTAX_TRANSFORM_CUSTOM;
+            else if (s == "legacy")   syntaxTransform = MKXP_SYNTAX_TRANSFORM_LEGACY;
+            else Debug() << "Unknown syntaxTransform value:" << s.c_str()
+                         << "(expected disabled|custom|legacy); defaulting to disabled.";
+        } else if (v.is_integer()) {
+            int n = (int)v.as_integer();
+            if (n == 0 || n == 1 || n == 2)
+                syntaxTransform = (MKXPSyntaxTransformMode)n;
+            else Debug() << "Out-of-range integer syntaxTransform:" << n
+                         << "(expected 0/1/2); defaulting to disabled.";
+        }
+    });
     SET_OPT(syntaxTransformCustomVersionMajor, integer);
     SET_OPT(syntaxTransformCustomVersionMinor, integer);
     SET_OPT(syntaxTransformCustomVersionTeeny, integer);

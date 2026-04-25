@@ -64,6 +64,13 @@ static std::atomic<bool>  s_safeAreaInsetsChanged{false};
 static std::atomic<int>   s_verticalAlignment{1};  // 0=top, 1=top-center, 2=center
 static std::atomic<bool>  s_postloadEnabled{true};
 
+// Per-game syntax-transform mode. The host (Empo on iOS) sets this
+// before each session via mkxp_setSyntaxTransformMode to keep the
+// choice out of mkxp.json - it's an Empo / per-game concept, not
+// part of the developer's engine-config layer. See app_bridge.h
+// for the enum and rationale.
+static std::atomic<int>   s_syntaxTransformMode{MKXP_SYNTAX_TRANSFORM_UNSET};
+
 // Debug: tint the area outside the game viewport.
 static std::atomic<bool>  s_showViewportBounds{false};
 static std::atomic<float> s_vpBoundsR{0};
@@ -686,6 +693,14 @@ MKXPVerticalAlignment mkxp_getVerticalAlignment(void) {
 
 bool mkxp_getPostloadEnabled(void) {
     return s_postloadEnabled.load(std::memory_order_relaxed);
+}
+
+void mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode) {
+    s_syntaxTransformMode.store((int)mode, std::memory_order_release);
+}
+
+MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
+    return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
 }
 
 void mkxp_setShowViewportBounds(bool enabled) {

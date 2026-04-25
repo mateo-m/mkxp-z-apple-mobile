@@ -245,6 +245,30 @@ void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
 MKXPVerticalAlignment mkxp_getVerticalAlignment(void);
 bool        mkxp_getPostloadEnabled(void);
 
+// Per-game `syntaxTransform` override.
+//
+// The Empo iOS host calls this on every selectGame() so mkxp.json
+// stays free of host-managed keys (the developer's mkxp.json is
+// snapshotted at import as mkxp.original.json and merged into the
+// per-session mkxp.json without us writing syntaxTransform on top
+// of the developer's intent).
+//
+// `MKXP_SYNTAX_TRANSFORM_UNSET` is the default at startup so
+// desktop / test-harness builds that never call the setter keep
+// the legacy mkxp.json-driven path. Numeric values match
+// Config::syntaxTransform (0/1/2) since that's the engine's
+// existing on-disk schema; the typed enum only exists at this
+// boundary so callers don't sprinkle magic numbers around.
+typedef enum {
+    MKXP_SYNTAX_TRANSFORM_UNSET     = -1,
+    MKXP_SYNTAX_TRANSFORM_DISABLED  = 0,  // Ruby 3 strict
+    MKXP_SYNTAX_TRANSFORM_CUSTOM    = 1,  // syntaxTransformCustomVersion* from mkxp.json
+    MKXP_SYNTAX_TRANSFORM_LEGACY    = 2,  // Ruby 1.9 for RGSS3, Ruby 1.8 for RGSS<3
+} MKXPSyntaxTransformMode;
+
+void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode);
+MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
+
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);
 
