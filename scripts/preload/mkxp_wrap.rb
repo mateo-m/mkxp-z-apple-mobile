@@ -50,6 +50,13 @@ module MKXP
 			System::use_in_game_keyboard?
 		end
 
+		# Per-game state directory (`Documents/EmpoState/<id>/` on
+		# iOS). Engine postloads use this to write runtime-detection
+		# marker files that survive across sessions.
+		def managed_config_dir
+			System::managed_config_dir
+		end
+
 		# MKXP.rpg_version / ruby_version / power_state mirror
 		# JoiPlay's helper module so scripts written against it
 		# (notably PE fangames doing `if MKXP.rpg_version > 2`)
