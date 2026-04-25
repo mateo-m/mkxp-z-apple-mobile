@@ -25,8 +25,6 @@
 #include "binding-util.h"
 #include "binding-types.h"
 #include "exception.h"
-#include "app_bridge.h"
-#include <string>
 
 RB_METHOD(graphicsDelta) {
     RB_UNUSED_PARAM;
@@ -283,14 +281,6 @@ RB_METHOD(graphicsResizeScreen)
     int width, height;
     rb_get_args(argc, argv, "ii", &width, &height RB_ARG_END);
     
-    /* Session-2 viewport-regression diag: log every game-side
-     * `Graphics.resize_screen` so we can see what dimensions a
-     * given session is asking for. Mismatched sizes (or a
-     * skipped call on session 2) point at the cause. */
-    mkxp_debugLog("RESIZE", "graphics-binding.cpp [C++]",
-                  ("Graphics.resize_screen(" + std::to_string(width) +
-                   ", " + std::to_string(height) + ")").c_str());
-
     GFX_LOCK;
     shState->graphics().resizeScreen(width, height);
     GFX_UNLOCK;
