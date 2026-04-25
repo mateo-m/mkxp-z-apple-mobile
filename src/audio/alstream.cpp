@@ -287,7 +287,30 @@ void ALStream::stopStream()
 	 * seeing the term request */
 	AL::Source::stop(alSrc);
 
+	/* Also detach every queued buffer.
+	 *
+	 * On iOS the OpenAL backend (CoreAudio) keeps an output ring
+	 * that holds ~1-1.5 s of pre-decoded samples - calling
+	 * `alSourceStop` flips the source state to AL_STOPPED but does
+	 * NOT instantly silence the device, the leftover ring is
+	 * drained at full volume first. Pokemon Infinite Fusion's
+	 * cinematic-skip path (Movie#playInViewPort -> pbBGMStop ->
+	 * Audio.bgm_stop, immediately followed by GenOneStyle.new's
+	 * pbBGMPlay of a different track) makes this audible: the
+	 * tail of the cinematic music keeps replaying / underrun-
+	 * looping while the heavy title-screen init runs, instead
+	 * of cutting cleanly.
+	 *
+	 * `clearQueue` (alSourcei AL_BUFFER 0) is documented to detach
+	 * all queued buffers, valid only when the source is in INITIAL
+	 * or STOPPED state - which it is right above. After this the
+	 * source has no audio data attached and CoreAudio's ring
+	 * drains to silence within one mixing tick instead of one
+	 * decoded-buffer length. */
+	AL::Source::clearQueue(alSrc);
+
 	procFrames = 0;
+	lastBuf = AL::Buffer::ID(0);
 }
 
 void ALStream::startStream(double offset)
@@ -453,11 +476,6 @@ void ALStream::streamData()
 
 			AL::Source::queueBuffer(alSrc, buf);
 
-			/* In case of buffer underrun,
-			 * start playing again */
-			if (AL::Source::getState(alSrc) == AL_STOPPED)
-				AL::Source::play(alSrc);
-
 			/* If this was the last buffer before the data
 			 * source loop wrapped around again, mark it as
 			 * such so we can catch it and reset the processed
@@ -468,6 +486,32 @@ void ALStream::streamData()
 			if (status == ALDataSource::EndOfStream)
 				sourceExhausted.set();
 		}
+
+		/* Buffer-underrun recovery.
+		 *
+		 * If the streaming thread was starved long enough that
+		 * OpenAL ran through every queued buffer and went into
+		 * AL_STOPPED, calling `Source::play` here resumes from
+		 * wherever the queue currently starts. We must do this
+		 * AFTER the per-buffer unqueue+refill+queue pass above,
+		 * not inside it: calling play() while some old/processed
+		 * buffers are still queued (because the inner loop only
+		 * advanced one buffer at a time) makes OpenAL re-play
+		 * those processed buffers from the front of the queue
+		 * before reaching the freshly-queued ones - audible as
+		 * "the last 1-1.5 seconds of music loops while a heavy
+		 * scene transition runs".
+		 *
+		 * The starvation source is the syncPoint at the top of
+		 * this loop yielding to the RGSS thread; on iOS that
+		 * thread routinely hogs the CPU during scene swaps
+		 * (sprite re-allocation, marshal-loading saves, event
+		 * scripts) and the audio thread doesn't get to refill
+		 * until the swap completes, by which point AL has
+		 * exhausted its queue. */
+		if (!sourceExhausted &&
+		    AL::Source::getState(alSrc) == AL_STOPPED)
+			AL::Source::play(alSrc);
 
 		if (threadTermReq)
 			break;
