@@ -23,6 +23,25 @@
 #      touch / gamepad events.
 
 if !$PokemonSystem.nil?
+  # Persist a "this is PE" marker in the host-managed state dir.
+  # The host-side static detector (GameSettings.detectPokemonEssentials)
+  # can't see PE signatures inside rgssad-protected archives, so
+  # without this, GameSettings UI would default the In-game keyboard
+  # toggle OFF on every launch even though the game IS PE. The
+  # marker tips off the next launch's UI so the toggle defaults ON.
+  begin
+    if defined?(MKXP) && MKXP.respond_to?(:managed_config_dir)
+      managed = MKXP.managed_config_dir.to_s
+      if !managed.empty?
+        marker = "#{managed}/.pokemon_essentials_detected"
+        File.write(marker, "") unless File.exist?(marker)
+      end
+    end
+  rescue => e
+    MKXP.puts("[pokemon_input] failed to write PE marker: #{e}") rescue nil
+  end
+
+
   # Backspace shim for Pokemon Essentials' keyboard text-entry
   # scene. Older PE versions (Uranium / Insurgence era - PE 16-18)
   # implement `Window_TextEntry_Keyboard.update` around

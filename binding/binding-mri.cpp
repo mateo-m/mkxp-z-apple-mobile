@@ -147,6 +147,7 @@ RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
 RB_METHOD(mkxpUseInGameKeyboard);
+RB_METHOD(mkxpManagedConfigDir);
 RB_METHOD(mkxpSyntaxTransformTarget);
 RB_METHOD(mkxpApplyOverrides);
 RB_METHOD(mkxpRpgVersion);
@@ -405,6 +406,7 @@ static void mriBindingInit() {
 
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
     _rb_define_module_function(mod, "use_in_game_keyboard?", mkxpUseInGameKeyboard);
+    _rb_define_module_function(mod, "managed_config_dir", mkxpManagedConfigDir);
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
     _rb_define_module_function(mod, "ruby_version", mkxpRubyVersion);
@@ -650,6 +652,22 @@ RB_METHOD(mkxpCheatsEnabled) {
 RB_METHOD(mkxpUseInGameKeyboard) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getUseInGameKeyboard());
+}
+
+/* MKXP.managed_config_dir - host-managed per-game state directory
+   (Documents/EmpoState/<id>/ on iOS). Postload scripts use this
+   to drop runtime-detection marker files that survive across
+   sessions, e.g. `pokemon_input.rb` writes a
+   `.pokemon_essentials_detected` marker so the next launch's
+   GameSettings UI defaults the In-game keyboard toggle ON for
+   PE games whose scripts live inside an rgssad archive (where
+   filesystem-only detection from the host can't see PE
+   signatures). Empty string when the host hasn't configured the
+   bridge (desktop / non-iOS builds). */
+RB_METHOD(mkxpManagedConfigDir) {
+    RB_UNUSED_PARAM;
+    const char *dir = mkxp_getManagedConfigDir();
+    return rb_utf8_str_new_cstr(dir ? dir : "");
 }
 
 /* System.apply_overrides(str) - runs the JoiPlay-compatible
