@@ -11,9 +11,10 @@
 #   1. Top-level `USEKEYBOARDTEXTENTRY` forced to false. Stock
 #      Essentials `pbEnterText` branches on this constant to pick
 #      between `PokemonEntryScene` (desktop keyboard) and
-#      `PokemonEntryScene2` (on-screen ABC grid). Uranium and other
-#      fan games re-assign it from their Settings script after our
-#      preload runs, so the override has to land in postload to win.
+#      `PokemonEntryScene2` (the game's in-game keyboard scene).
+#      Uranium and other fan games re-assign it from their
+#      Settings script after our preload runs, so the override has
+#      to land in postload to win.
 #   2. `PokemonEntryScene::USEKEYBOARD` forced off as a belt-and-braces
 #      safety net for fan games that dispatch on the class-scoped
 #      constant instead of the top-level one.
@@ -22,30 +23,72 @@
 #      touch / gamepad events.
 
 if !$PokemonSystem.nil?
+  # Backspace shim for Pokemon Essentials' keyboard text-entry
+  # scene. Older PE versions (Uranium / Insurgence era - PE 16-18)
+  # implement `Window_TextEntry_Keyboard.update` around
+  # `Win32API.GetKeyboardState` polling tuned for hold-to-repeat
+  # hardware keyboards, and never call `self.delete` or
+  # `@helper.delete` on a single tap. With our iOS soft-keyboard
+  # bridge each backspace is a single 50ms scancode injection -
+  # `Input.triggerex?(:BACKSPACE)` correctly reports true on the
+  # right frame but PE's update flow doesn't act on it, so the
+  # name field never shrinks. PE 21 wired the trigger path
+  # directly; this preempt covers the older versions and is
+  # redundant-but-safe on PE 21.
+  if defined?(Window_TextEntry_Keyboard)
+    class Window_TextEntry_Keyboard
+      unless method_defined?(:_mkxp_pre_backspace_orig_update)
+        alias_method :_mkxp_pre_backspace_orig_update, :update
+        def update
+          if @helper && @helper.cursor > 0 &&
+             (Input.triggerex?(:BACKSPACE) rescue false)
+            # Delegate to the parent class's `delete` (defined on
+            # Window_TextEntry) which trims the helper's text and
+            # refreshes the rendered window. Skip the rest of
+            # PE's update for this frame so the GetKeyboardState
+            # poll doesn't immediately re-process the same key.
+            self.delete
+            return
+          end
+          _mkxp_pre_backspace_orig_update
+        end
+      end
+    end
+  end
+
   # The default soft-keyboard path (Input.text_input -> UIKit
   # UITextField -> mkxp_pushTextInput) works for IF / Reborn /
   # Insurgence name entry, so this postload doesn't force the
-  # on-screen ABC grid by default. A per-game GameSettings toggle
-  # ("Use on-screen keyboard") routes through the
-  # `MKXP.use_on_screen_keyboard?` bridge for games whose keyboard
-  # scene needs the original ABC grid (custom keys, layout, etc.) -
-  # only those games get the historical force-disable, leaving the
-  # majority on the polished soft-keyboard path.
-  if defined?(MKXP) && MKXP.respond_to?(:use_on_screen_keyboard?) &&
-     MKXP.use_on_screen_keyboard?
-    # USEKEYBOARDTEXTENTRY lives at the top level in stock
-    # Essentials. Some fan games re-assign it from their own
-    # Settings script after our preload runs, so the override has
-    # to land in postload to win the last-write race. Wrap the
-    # constant assignment in `silence_warnings`-equivalent so we
-    # don't spam "already initialized constant" on every launch.
-    Object.send(:remove_const, :USEKEYBOARDTEXTENTRY) if defined?(USEKEYBOARDTEXTENTRY)
-    USEKEYBOARDTEXTENTRY = false
-    # Belt-and-braces for fan games dispatching on the class-scoped
-    # constant instead of the top-level one.
-    if defined?(PokemonEntryScene)
-      PokemonEntryScene.send(:remove_const, :USEKEYBOARD) if PokemonEntryScene.const_defined?(:USEKEYBOARD)
-      PokemonEntryScene.const_set(:USEKEYBOARD, false)
+  # in-game keyboard scene by default. A per-game GameSettings
+  # toggle ("In-game keyboard") routes through the
+  # `MKXP.use_in_game_keyboard?` bridge for games whose keyboard
+  # scene needs custom keys / layout - only those games get the
+  # historical force-disable, leaving the majority on the polished
+  # soft-keyboard path.
+  #
+  # NOTE: this check happens once at postload time, so flipping
+  # the GameSettings toggle requires a game relaunch to take
+  # effect. The bridge value is set by AppState.selectGame BEFORE
+  # the engine starts running scripts, so once postload finishes
+  # `USEKEYBOARDTEXTENTRY` is locked for the session.
+  use_in_game = (defined?(MKXP) && MKXP.respond_to?(:use_in_game_keyboard?) &&
+                 MKXP.use_in_game_keyboard?)
+  if use_in_game
+    # PE v18 and earlier: top-level constant. PE v19+ moved most
+    # settings into a `Settings` module so the original constant
+    # name is `Settings::USEKEYBOARDTEXTENTRY`. Fan games sometimes
+    # also define a class-scoped `PokemonEntryScene::USEKEYBOARD`
+    # that takes precedence over the top-level name. Belt-and-
+    # braces all three: the right one for the game wins, the
+    # others are no-ops.
+    [
+      [Object,           :USEKEYBOARDTEXTENTRY],
+      [Object.const_defined?(:Settings) ? Settings : nil, :USEKEYBOARDTEXTENTRY],
+      [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD],
+    ].each do |scope, name|
+      next unless scope
+      scope.send(:remove_const, name) if scope.const_defined?(name, false)
+      scope.const_set(name, false)
     end
   end
 

@@ -269,21 +269,22 @@ typedef enum {
 void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode);
 MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 
-// Force the on-screen ABC grid for Pokemon Essentials text entry,
-// overriding the iOS soft-keyboard path.
+// Force the in-game keyboard scene for Pokemon Essentials text
+// entry, overriding the iOS soft-keyboard path.
 //
-// The default soft-keyboard path works for IF / Reborn / Insurgence
-// name entry, but a few games override the Essentials keyboard
-// scene to add custom keys (mark, theme, etc.) that aren't on the
-// iOS soft keyboard. Empo exposes a per-game toggle ("Use on-screen
-// keyboard") that, when enabled, makes `pokemon_input.rb` re-apply
-// the historical `USEKEYBOARDTEXTENTRY = false` +
-// `PokemonEntryScene::USEKEYBOARD = false` overrides so the game
-// uses its own ABC grid scene instead.
+// The default iOS soft-keyboard path works for IF / Reborn /
+// Insurgence name entry, but a few games override the Essentials
+// keyboard scene to add custom keys (mark, theme, etc.) that
+// aren't on the iOS soft keyboard. Empo exposes a per-game toggle
+// ("In-game keyboard") that, when enabled, makes
+// `pokemon_input.rb` re-apply the historical
+// `USEKEYBOARDTEXTENTRY = false` + `PokemonEntryScene::USEKEYBOARD
+// = false` overrides so the game uses its own keyboard scene
+// instead.
 //
 // Default = false (use the iOS soft keyboard).
-void mkxp_setUseOnScreenKeyboard(bool enabled);
-bool mkxp_getUseOnScreenKeyboard(void);
+void mkxp_setUseInGameKeyboard(bool enabled);
+bool mkxp_getUseInGameKeyboard(void);
 
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);

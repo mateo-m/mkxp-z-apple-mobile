@@ -1056,7 +1056,6 @@ struct InputPrivate
     
     void updateRaw()
     {
-        
         memcpy(rawStates, shState->eThread().keyStates, SDL_NUM_SCANCODES);
         
         for (int i = 0; i < SDL_NUM_SCANCODES; i++)

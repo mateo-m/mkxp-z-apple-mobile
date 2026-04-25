@@ -71,12 +71,12 @@ static std::atomic<bool>  s_postloadEnabled{true};
 // for the enum and rationale.
 static std::atomic<int>   s_syntaxTransformMode{MKXP_SYNTAX_TRANSFORM_UNSET};
 
-// Per-game "force the on-screen ABC grid for PE text entry" toggle.
-// Default false = the iOS soft keyboard handles name entry. Empo
-// flips it on per-game when a Pokemon Essentials game's keyboard
-// scene needs the original ABC grid (custom keys not on the iOS
-// keyboard, etc.). Read by `pokemon_input.rb`.
-static std::atomic<bool>  s_useOnScreenKeyboard{false};
+// Per-game "force the in-game keyboard scene for PE text entry"
+// toggle. Default false = the iOS soft keyboard handles name
+// entry. Empo flips it on per-game when a Pokemon Essentials
+// game's keyboard scene has custom keys not on the iOS keyboard.
+// Read by `pokemon_input.rb`.
+static std::atomic<bool>  s_useInGameKeyboard{false};
 
 // Debug: tint the area outside the game viewport.
 static std::atomic<bool>  s_showViewportBounds{false};
@@ -719,12 +719,12 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
     return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
 }
 
-void mkxp_setUseOnScreenKeyboard(bool enabled) {
-    s_useOnScreenKeyboard.store(enabled, std::memory_order_release);
+void mkxp_setUseInGameKeyboard(bool enabled) {
+    s_useInGameKeyboard.store(enabled, std::memory_order_release);
 }
 
-bool mkxp_getUseOnScreenKeyboard(void) {
-    return s_useOnScreenKeyboard.load(std::memory_order_acquire);
+bool mkxp_getUseInGameKeyboard(void) {
+    return s_useInGameKeyboard.load(std::memory_order_acquire);
 }
 
 void mkxp_setShowViewportBounds(bool enabled) {

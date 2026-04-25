@@ -40,6 +40,16 @@ module MKXP
 			System::cheats_enabled?
 		end
 
+		# Per-game in-game-keyboard toggle. The host (Empo) sets
+		# the bridge value at session start; `pokemon_input.rb`
+		# reads this to decide whether to force `USEKEYBOARDTEXTENTRY
+		# = false` and surface the game's own keyboard scene.
+		# Scripts calling this on engines without the binding hit
+		# `NoMethodError`, so callers should `respond_to?` first.
+		def use_in_game_keyboard?
+			System::use_in_game_keyboard?
+		end
+
 		# MKXP.rpg_version / ruby_version / power_state mirror
 		# JoiPlay's helper module so scripts written against it
 		# (notably PE fangames doing `if MKXP.rpg_version > 2`)
