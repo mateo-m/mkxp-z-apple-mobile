@@ -9,6 +9,7 @@
 
 #include "patcher.h"
 
+#include "app_bridge.h"
 #include "util/debugwriter.h"
 #include "util/json5pp.hpp"
 
@@ -18,10 +19,65 @@
 
 namespace json = json5pp;
 
+/* Helper: route patcher diagnostics through the iOS debug-log
+ * file (so they show up in the player's Debug Logs view) AND
+ * through std::cerr via Debug() for desktop builds. The cerr
+ * path is unhelpful on iOS because the SDL log redirector
+ * doesn't surface it in the user-visible log. */
+static void patcherLog(const std::string &msg)
+{
+    Debug() << msg.c_str();
+    mkxp_debugLog("PATCHER", "patcher.cpp [C++]", msg.c_str());
+}
+
 Patcher::Patcher(const std::vector<std::string> &patches)
 {
     for (const std::string &patch : patches)
         load(patch.c_str());
+
+    /* Auto-discovery fallback: if mkxp.json's `patches` list is
+     * empty, look for a `patches.json` in (a) the host-managed
+     * config directory (Empo: `Documents/EmpoState/<game-id>/`),
+     * then (b) the current working directory (game folder, the
+     * historical location used by JoiPlay-style desktop installs).
+     *
+     * The two-tier lookup lets Empo on iOS write its curated
+     * patches.json into a state directory parallel to the game
+     * folder so the imported game folder stays untouched, while
+     * still honoring user-dropped `patches.json` files in the
+     * game folder for power-user / desktop-mkxp usage. The
+     * managed-dir version takes priority since it represents
+     * the host's curated rule set; users who really want their
+     * own patches today can edit the file there. (User-override
+     * support without trampling the curated file is on the
+     * roadmap.) */
+    if (patches.empty()) {
+        std::string managedDir(mkxp_getManagedConfigDir());
+        if (!managedDir.empty()) {
+            std::string managed = managedDir + "/patches.json";
+            std::ifstream check(managed.c_str());
+            if (check.good()) {
+                check.close();
+                patcherLog("auto-discovered patches.json in managed dir " +
+                           managedDir);
+                load(managed.c_str());
+                return;
+            }
+        }
+
+        std::ifstream check("patches.json");
+        if (check.good()) {
+            check.close();
+            patcherLog("auto-discovered patches.json in game folder");
+            load("patches.json");
+        } else {
+            patcherLog("no explicit patches and no patches.json found "
+                       "in managed dir or cwd");
+        }
+    } else {
+        patcherLog("loaded " + std::to_string(patches.size()) +
+                   " explicit patch path(s) from mkxp.json");
+    }
 }
 
 void Patcher::load(const char *path)
@@ -29,7 +85,7 @@ void Patcher::load(const char *path)
     try {
         std::ifstream f(path);
         if (!f.is_open()) {
-            Debug() << "Patcher: could not open patch file" << path;
+            patcherLog(std::string("could not open patch file ") + path);
             return;
         }
 
@@ -37,13 +93,17 @@ void Patcher::load(const char *path)
         buf << f.rdbuf();
         json::value root = json::parse5(buf.str());
 
-        if (!root.is_object())
+        if (!root.is_object()) {
+            patcherLog(std::string(path) + ": top-level value is not an object");
             return;
+        }
 
         auto &rootObj = root.as_object();
         auto it = rootObj.find("rpgm");
-        if (it == rootObj.end() || !it->second.is_array())
+        if (it == rootObj.end() || !it->second.is_array()) {
+            patcherLog(std::string(path) + ": missing/invalid \"rpgm\" array");
             return;
+        }
 
         int count = 0;
         for (const auto &entry : it->second.as_array()) {
@@ -61,11 +121,12 @@ void Patcher::load(const char *path)
             count++;
         }
 
-        Debug() << "Patcher: loaded" << count << "patches from" << path;
+        patcherLog(std::string("loaded ") + std::to_string(count) +
+                   " patches from " + path);
     } catch (const std::exception &e) {
-        Debug() << "Patcher: failed to read" << path << ":" << e.what();
+        patcherLog(std::string("failed to read ") + path + ": " + e.what());
     } catch (...) {
-        Debug() << "Patcher: failed to read" << path;
+        patcherLog(std::string("failed to read ") + path);
     }
 }
 
@@ -96,13 +157,13 @@ void Patcher::apply(std::string &data) const
                 std::string before = data;
                 data = std::regex_replace(data, re, p.value);
                 if (data != before)
-                    Debug() << "Patcher: applied regex" << p.key;
+                    patcherLog(std::string("applied regex ") + p.key);
             } catch (const std::regex_error &e) {
-                Debug() << "Patcher: invalid regex in patch" << p.key
-                        << ":" << e.what();
+                patcherLog(std::string("invalid regex in patch ") + p.key +
+                           ": " + e.what());
             }
         } else if (replaceLiteralInPlace(data, p.key, p.value)) {
-            Debug() << "Patcher: applied literal" << p.key;
+            patcherLog(std::string("applied literal ") + p.key);
         }
     }
 }

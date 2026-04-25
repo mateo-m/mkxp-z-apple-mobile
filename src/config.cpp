@@ -21,6 +21,7 @@
 #include "util/util.h"
 
 #include "util/json5pp.hpp"
+#include "app_bridge.h"
 
 #include "util/iniconfig.h"
 #include "util/encoding.h"
@@ -241,7 +242,25 @@ try { exp } catch (...) {}
         }
     }
     
-    json::value baseConf = readConfFile(CONF_FILE, true);
+    /* Resolve the path to the base mkxp.json.
+     *
+     * Empo (iOS) keeps per-game state outside the game folder
+     * (`Documents/EmpoState/<game-id>/mkxp.json`) so the imported
+     * game directory stays a faithful mirror of what the user
+     * dropped in. The host UI sets that path via
+     * `mkxp_setManagedConfigDir` before each session. If a managed
+     * config file exists there, prefer it; otherwise fall back to
+     * the historic cwd-relative `mkxp.json` (desktop builds, raw
+     * mkxp-z usage, games imported before the EmpoState
+     * migration). */
+    std::string managedDir(mkxp_getManagedConfigDir());
+    std::string conf_path = CONF_FILE;
+    if (!managedDir.empty()) {
+        std::string managedConf = managedDir + "/" + CONF_FILE;
+        if (mkxp_fs::fileExists(managedConf.c_str()))
+            conf_path = managedConf;
+    }
+    json::value baseConf = readConfFile(conf_path.c_str(), true);
     copyObject(optsJ, baseConf);
     copyObject(opts["bindingNames"], baseConf.as_object()["bindingNames"], "bindingNames .");
     

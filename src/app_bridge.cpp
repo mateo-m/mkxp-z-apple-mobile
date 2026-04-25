@@ -134,6 +134,13 @@ static bool s_keyWatcherInstalled = false;
 // SDL_StartTextInput / SDL_StopTextInput fires inside EventThread.
 static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
 
+// Managed-config directory the host UI (Empo on iOS) sets before
+// launching a session. Engine modules look here first for files
+// they used to read from cwd (mkxp.json, patches.json, ...). Empty
+// string means "no override; use cwd as before".
+static std::mutex s_managedConfigMutex;
+static std::string s_managedConfigDir;
+
 // Game-side text-input intent. Set when the engine processes
 // REQUEST_TEXTMODE(1) (game called `Input.text_input = true`),
 // cleared on REQUEST_TEXTMODE(0). Distinct from
@@ -438,6 +445,23 @@ void mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata
 void mkxp_fireTextInputModeCallback(int active) {
     s_gameTextInputIntent.store(active != 0, std::memory_order_release);
     s_textInputModeCb.fire(active);
+}
+
+// Managed-config directory accessors.
+
+void mkxp_setManagedConfigDir(const char *path) {
+    std::lock_guard<std::mutex> lock(s_managedConfigMutex);
+    s_managedConfigDir = (path && *path) ? std::string(path) : std::string();
+}
+
+const char *mkxp_getManagedConfigDir(void) {
+    std::lock_guard<std::mutex> lock(s_managedConfigMutex);
+    /* Pointer remains valid as long as `s_managedConfigDir` isn't
+     * reassigned. Engine call sites are expected to copy the
+     * result into a std::string immediately if they need to keep
+     * it; we don't return a snapshot to avoid forcing every
+     * caller through an allocation. */
+    return s_managedConfigDir.c_str();
 }
 
 int mkxp_isTextInputActive(void) {

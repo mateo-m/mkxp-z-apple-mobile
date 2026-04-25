@@ -1440,7 +1440,6 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_session_reset",
                     "nilclass_safe_stubs",
                     "pokemon_windowskin_fix",
-                    "pokemon_region_fix",
                     "hmode7_shim",
                     nullptr
                 };
