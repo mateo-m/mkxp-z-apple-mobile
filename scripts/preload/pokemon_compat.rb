@@ -18,6 +18,30 @@
 # to win that race before `pbEnterText` ever runs.
 USEKEYBOARDTEXTENTRY = false unless defined?(USEKEYBOARDTEXTENTRY)
 
+# --- PokemonSystem#screensize backstop ---
+# Pre-define the class with a default `screensize` accessor so older
+# PE forks (Reborn pre-19, Insurgence pre-1.2, several mod packs)
+# that probe `$PokemonSystem.screensize` before the actual setter
+# has run get 1.0 instead of `NoMethodError`. Ruby's open-class
+# semantics mean the game's later `class PokemonSystem ... end`
+# block reopens this class without losing the accessor.
+#
+# `begin/rescue` defends against game forks that redefine
+# `PokemonSystem` with an explicit superclass (which would raise
+# `TypeError: superclass mismatch`); the catch leaves the game's
+# own definition winning and our patch silently absent for that
+# game (acceptable - it presumably handles screensize itself).
+begin
+  class PokemonSystem
+    attr_accessor :screensize unless instance_methods.include?(:screensize)
+    def screensize
+      @screensize ||= 1.0
+    end unless instance_methods(false).include?(:screensize)
+  end
+rescue TypeError
+  # superclass mismatch with a fork's own definition; bow out.
+end
+
 # --- Uranium hard-reset prevention ---
 # Pokemon Uranium checks $game_exists on startup and calls
 # system('Uranium') + exit to relaunch itself. On iOS, system() is
