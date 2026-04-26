@@ -221,11 +221,29 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant'
             @priorect[1] != yStart ||
             @priorect[2] != xEnd ||
             @priorect[3] != yEnd
-            @priorectautos = @prioautotiles.find_all { |tile|
-              x = tile[0]
-              y = tile[1]
-              next !(x < xStart || x > xEnd || y < yStart || y > yEnd)
-            }
+            # `@prioautotiles` shape varies across PE forks:
+            #   * Older PE: Array of [x, y, z] (or [x, y]) triples;
+            #     `find_all` yields each element as `tile`,
+            #     `tile[0]/tile[1]` are coordinates.
+            #   * Newer / modified PE (Pokemon Solar Eclipse): Hash
+            #     keyed by `[x, y]` arrays with truthy values;
+            #     `find_all` yields `[key, value]` pairs, so
+            #     `tile[0]` becomes the `[x, y]` array - and
+            #     `x < xStart` raises NoMethodError `<` on Array.
+            # Branch on the actual type so the postload survives both.
+            if @prioautotiles.is_a?(Hash)
+              @priorectautos = @prioautotiles.keys.find_all { |key|
+                x = key[0]
+                y = key[1]
+                next !(x < xStart || x > xEnd || y < yStart || y > yEnd)
+              }
+            else
+              @priorectautos = @prioautotiles.find_all { |tile|
+                x = tile[0]
+                y = tile[1]
+                next !(x < xStart || x > xEnd || y < yStart || y > yEnd)
+              }
+            end
             @priorect = [xStart, yStart, xEnd, yEnd]
           end
           for tile in @priorectautos
