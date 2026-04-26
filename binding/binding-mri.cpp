@@ -128,6 +128,7 @@ void hmode7BindingInit();
 RB_METHOD(mkxpDelta);
 RB_METHOD(mriPrint);
 RB_METHOD(mriP);
+RB_METHOD(mkxpKernelPrint);
 RB_METHOD(mkxpDataDirectory);
 RB_METHOD(mkxpSetTitle);
 RB_METHOD(mkxpGetTitle);
@@ -363,7 +364,11 @@ static void mriBindingInit() {
         
         rb_define_global_const("RGSS_VERSION", mkxp_str_new_cstr("3.0.1"));
     } else {
-        _rb_define_module_function(rb_mKernel, "print", mriPrint);
+        // print -> debug log (NOT a dialog; see mkxpKernelPrint).
+        // p stays bound to mriP -> showMessageBox; that's a debug
+        // method games rarely use in production and a dialog is
+        // a reasonable surface for it.
+        _rb_define_module_function(rb_mKernel, "print", mkxpKernelPrint);
         _rb_define_module_function(rb_mKernel, "p", mriP);
         
         mkxp_define_alias_once(rb_singleton_class(rb_mKernel),
@@ -499,6 +504,45 @@ RB_METHOD_GUARD(mriPrint) {
     RB_UNUSED_PARAM;
     
     printP(argc, argv, "to_s", "");
+    
+    shState->checkShutdown();
+    shState->checkReset();
+    
+    return Qnil;
+}
+RB_METHOD_GUARD_END
+
+/* Kernel#print routed to the debug log instead of `showMessageBox`.
+ *
+ * mkxp historically bound `Kernel#print` to a Win32-style modal
+ * message box, which on iOS surfaces in the host as the same alert
+ * we use for engine errors ("Something went wrong"). Some games
+ * call `print` for benign informational notices (Pokemon Infinite
+ * Fusion's PokemonLoadScreen#copyKeybindings is the trigger we
+ * found, but the pattern is general) and the resulting alert
+ * forces the user to dismiss + restart the game even though
+ * nothing has gone wrong.
+ *
+ * Routing `print` to `mkxp_debugLog` matches Ruby's mainline
+ * convention (Kernel#print writes to stdout, no UI). Games that
+ * explicitly want a dialog can call `msgbox` instead, which
+ * stays bound to the original `mriPrint`/`showMessageBox` path.
+ *
+ * Same arg semantics as Ruby's Kernel#print: each arg is converted
+ * via `to_s`, joined without separator, no trailing newline.
+ */
+RB_METHOD_GUARD(mkxpKernelPrint) {
+    RB_UNUSED_PARAM;
+    
+    VALUE buf = rb_str_buf_new(128);
+    ID conv = rb_intern("to_s");
+    for (int i = 0; i < argc; ++i) {
+        VALUE str = rb_funcall2(argv[i], conv, 0, NULL);
+        rb_str_buf_append(buf, str);
+    }
+    
+    Debug() << RSTRING_PTR(buf);
+    mkxp_debugLog("SCRIPT", "Kernel.print [Ruby]", RSTRING_PTR(buf));
     
     shState->checkShutdown();
     shState->checkReset();
@@ -2028,7 +2072,8 @@ static void bindRgssVersionSpecifics(Config &conf) {
 
         rb_define_global_const("RGSS_VERSION", mkxp_str_new_cstr("3.0.1"));
     } else {
-        _rb_define_module_function(rb_mKernel, "print", mriPrint);
+        // See first-init block above for rationale.
+        _rb_define_module_function(rb_mKernel, "print", mkxpKernelPrint);
         _rb_define_module_function(rb_mKernel, "p", mriP);
     }
 
