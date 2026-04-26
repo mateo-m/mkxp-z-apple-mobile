@@ -17,6 +17,41 @@ require 'zlib'
 # path is what actually works here, so we set the flag.
 $joiplay = true
 
+# Suppress Ruby's $DEBUG global. Some plugins gate verbose error
+# dialogs / extra print output on `$DEBUG`; without an explicit
+# `false` the engine inherits whatever Ruby's startup defaulted to,
+# which on some MRI builds is a truthy state (-d on the cmdline,
+# RUBYOPT=-d, etc.). JoiPlay sets this in its preload for the same
+# reason. Pinned here so plugins reading it during script load see
+# the expected `false`.
+$DEBUG = false
+
+# Plugin-probe constants. Old Yanfly-era plugins look at
+# `Graphics::PlaneSpeedUp`; without an explicit definition our
+# engine's `const_missing` returns `IOS::NullStub`, which is
+# always-truthy and silently flips the plugin's optimization path
+# the wrong way. Match JoiPlay's default: define the constant as
+# `false` so the plugin's "no plane speedup" branch is taken.
+unless defined?(Graphics::PlaneSpeedUp)
+  module Graphics
+    PlaneSpeedUp = false
+  end
+end
+
+# Top-level no-op for `set_loop_points(intro_pos, loop_end)`. Some
+# custom audio-loop plugins call this from map transitions /
+# bgm_play overrides; on JoiPlay's default builds this exists as
+# a Kernel-level no-op (preload.rb:119-120). Without it our
+# `IOS::NullStub` const_missing path doesn't catch it (it's a
+# method call, not a constant ref) and the script raises
+# `NoMethodError: undefined method 'set_loop_points'`. The two-arg
+# stub mirrors JoiPlay; arity is permissive via `*args` to
+# accommodate plugins that pass additional metadata.
+module Kernel
+  def set_loop_points(*args); end
+  module_function :set_loop_points
+end
+
 # --- Process spawning neutralization ---
 # fork()/exec() are forbidden on iOS and cause immediate SIGKILL.
 # Neutralize all process-spawning methods at the engine level.
