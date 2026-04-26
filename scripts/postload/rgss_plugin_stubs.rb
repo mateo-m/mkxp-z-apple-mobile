@@ -81,6 +81,26 @@ class Bitmap
   end
 end
 
+# Bitmap#draw_text / text_size aliases for plugins that wrap text
+# rendering by aliasing the original under `_draw_text` / `_text_size`
+# names (Insurgence's font-replacer, Hime's text-pre-process scripts,
+# others). Without the alias their bypass falls through to a
+# `NoMethodError`, which they typically rescue silently and end up
+# rendering nothing. JoiPlay sets these aliases in postload.rb:
+# match the convention so the bypass paths survive.
+#
+# Idempotent: skip if the alias already exists (some games install
+# their own `_draw_text` either before or after our postload, and
+# re-aliasing would capture our wrapper as the "original").
+class Bitmap
+  unless method_defined?(:_draw_text) || private_method_defined?(:_draw_text)
+    alias_method :_draw_text, :draw_text
+  end
+  unless method_defined?(:_text_size) || private_method_defined?(:_text_size)
+    alias_method :_text_size, :text_size
+  end
+end
+
 # Vitamin Plus save-screen screenshot toggles. Turning both off
 # makes the plugin skip its screenshot path entirely.
 module Wora_NSS

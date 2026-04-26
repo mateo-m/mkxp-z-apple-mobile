@@ -64,6 +64,19 @@ if !$PokemonSystem.nil?
     def self.install; end
   end
 
+  # Top-level `autosave` no-op for PE19+ Autosave_Sapphire and
+  # similar plugins. The plugin's `def autosave` lives at the top
+  # level (`Kernel#autosave`); without our stub the call site
+  # raises `NoMethodError: undefined method 'autosave' for main`.
+  # Define on Kernel so it's reachable from every receiver. Variadic
+  # arity in case a plugin variant passes a save slot or filename.
+  unless Kernel.method_defined?(:autosave) || Kernel.private_method_defined?(:autosave)
+    module Kernel
+      def autosave(*args); end
+      module_function :autosave
+    end
+  end
+
   # GameJolt leaderboard / trophy API. Stub every documented entry
   # point; return sensible neutral values (nil, false, empty string,
   # empty array) so games branching on "is the player logged in"
