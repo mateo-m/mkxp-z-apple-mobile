@@ -38,9 +38,16 @@
 #include "keybindings.h"
 
 struct RGSSThreadData;
+// Forward-declared `ALCdevice` / `ALCcontext` so headers that
+// don't pull in <alc.h> can still pass them around. The struct
+// tag must match the real one declared in the OpenAL header.
+// `MKXPZ_ALCDEVICE` is set by the host (= `ALCdevice` for
+// OpenAL-Soft, = `ALCdevice_struct` for Apple's framework). The
+// context-side typedef matches OpenAL-Soft's
+// `typedef struct ALCcontext ALCcontext;`.
 typedef struct MKXPZ_ALCDEVICE ALCdevice;
-struct ALCcontext_struct;
-typedef struct ALCcontext_struct ALCcontext;
+struct ALCcontext;
+typedef struct ALCcontext ALCcontext;
 struct SDL_Window;
 union SDL_Event;
 
