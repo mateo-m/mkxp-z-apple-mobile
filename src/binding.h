@@ -67,25 +67,28 @@ struct ScriptBinding
  */
 #include "app_bridge.h"
 
+extern "C" ScriptBinding *mkxp_get_script_binding_18(void);
+extern "C" ScriptBinding *mkxp_get_script_binding_19(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
-/* 1.8 / 1.9 entry points reserved for upcoming
- * mkxp{18,19}-merged.o builds. */
 
 inline ScriptBinding *getActiveScriptBinding(void) {
     ScriptBinding *sb = nullptr;
     switch (mkxp_getActiveRubyVersion()) {
+    case MKXP_RUBY_18: sb = mkxp_get_script_binding_18(); break;
+    case MKXP_RUBY_19: sb = mkxp_get_script_binding_19(); break;
     case MKXP_RUBY_30: sb = mkxp_get_script_binding_30(); break;
-    /* MKXP_RUBY_18/19/31/UNSET land on 3.1 (the only fully-wired
-     * version today). Once 1.8/1.9 land, add cases for them and
-     * have UNSET fall to 3.1. */
+    /* UNSET / MKXP_RUBY_31 / unknown → 3.1 (default modern). */
     default:           sb = mkxp_get_script_binding_31(); break;
     }
-    /* Last-resort fallback if both merged.o entry points are
-     * stubs (returning nullptr). Shouldn't happen in production
-     * — at least one of 3.0 / 3.1 is always available — but the
-     * null-check keeps the dispatcher honest. */
+    /* Last-resort fallback if the chosen merged.o is a build-time
+     * stub (returning nullptr because that SDK didn't ship it).
+     * Order: prefer 3.1, then 3.0, then 1.9, then 1.8 — newest
+     * available wins so script-engine features stay maximal. */
     if (!sb) sb = mkxp_get_script_binding_31();
+    if (!sb) sb = mkxp_get_script_binding_30();
+    if (!sb) sb = mkxp_get_script_binding_19();
+    if (!sb) sb = mkxp_get_script_binding_18();
     return sb;
 }
 #else
