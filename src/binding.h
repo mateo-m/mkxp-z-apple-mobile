@@ -41,13 +41,18 @@ struct ScriptBinding
 	void (*reset) (void);
 };
 
-/* VTable defined in the binding source */
+/* VTable defined in the binding source. Currently exposed by the
+ * legacy direct-link path (binding/*.cpp compiled by Xcode +
+ * libruby.3.1 linked) which serves as the default Ruby 3.1 binding.
+ * Once 1.8 + 1.9 native builds land and the legacy path is
+ * dropped, this `extern` goes away — every binding lives inside a
+ * merged .o with its own private `scriptBinding`. */
 extern ScriptBinding *scriptBinding;
 
 #ifdef MKXPZ_BUILD_XCODE
 /* Multi-Ruby Phase D dispatch.
  *
- * The host's `mkxp_setRubyVersion()` selects which Ruby
+ * The host's `mkxp_setActiveRubyVersion()` selects which Ruby
  * interpreter + matching binding code runs for the active game.
  * Each Ruby version's binding+libruby is bundled in a per-version
  * merged .o (see ios/Dependencies/multiruby/wrapper.cpp + the
@@ -56,12 +61,9 @@ extern ScriptBinding *scriptBinding;
  * `_mkxp_get_script_binding_NN()` — returning a pointer to that
  * version's `ScriptBinding` vtable.
  *
- * `getActiveScriptBinding()` is the single dispatch point used by
- * main.cpp, sharedstate.cpp, and graphics.cpp wherever they used
- * to dereference the global `scriptBinding`. The default (UNSET
- * or 31) keeps using the legacy directly-linked Ruby 3.1 binding
- * via the global `scriptBinding` pointer; other versions go
- * through their merged.o entry point.
+ * Default fallback: the legacy global `scriptBinding` (Ruby 3.1
+ * via the direct-link path, including syntax-transform). PE
+ * fan-games rely on this until the 1.8/1.9 native builds land.
  *
  * NB: this header is included by both the Xcode-compiled engine
  * code (sharedstate.cpp, graphics.cpp, main.cpp) AND the per-Ruby
@@ -73,21 +75,13 @@ extern ScriptBinding *scriptBinding;
 extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
 /* 1.8 / 1.9 entry points reserved for upcoming
- * mkxp{18,19}-merged.o builds. Adding the corresponding
- * `extern "C"` declarations + cases here is the wiring step
- * once those merged .o files exist. */
+ * mkxp{18,19}-merged.o builds. */
 
 inline ScriptBinding *getActiveScriptBinding(void) {
     switch (mkxp_getActiveRubyVersion()) {
     case MKXP_RUBY_30: return mkxp_get_script_binding_30();
     case MKXP_RUBY_31: return mkxp_get_script_binding_31();
-    /* MKXP_RUBY_18/19 fall through to legacy default for now;
-     * extend as their merged .o files come online.
-     *
-     * Default (UNSET, plus any unhandled value) keeps using the
-     * legacy direct-link 3.1 binding via the global `scriptBinding`
-     * pointer. Once 3.1's merged.o is the only path, this default
-     * goes away — UNSET would then be a configuration error. */
+    /* MKXP_RUBY_18/19/UNSET fall through to legacy default. */
     default:           return scriptBinding;
     }
 }
