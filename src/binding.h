@@ -72,18 +72,26 @@ extern ScriptBinding *scriptBinding;
  */
 #include "app_bridge.h"
 
+/* Per-version entry points. Each is provided either by the real
+ * mkxpNN-merged.o (returning that version's hidden ScriptBinding*)
+ * or by an auto-generated stub from project.yml's pre-build phase
+ * (returning nullptr) when the merged .o hasn't been built yet
+ * for the active SDK. The runtime check below falls back to the
+ * legacy `scriptBinding` when nullptr. */
 extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
 /* 1.8 / 1.9 entry points reserved for upcoming
  * mkxp{18,19}-merged.o builds. */
 
 inline ScriptBinding *getActiveScriptBinding(void) {
+    ScriptBinding *sb = nullptr;
     switch (mkxp_getActiveRubyVersion()) {
-    case MKXP_RUBY_30: return mkxp_get_script_binding_30();
-    case MKXP_RUBY_31: return mkxp_get_script_binding_31();
+    case MKXP_RUBY_30: sb = mkxp_get_script_binding_30(); break;
+    case MKXP_RUBY_31: sb = mkxp_get_script_binding_31(); break;
     /* MKXP_RUBY_18/19/UNSET fall through to legacy default. */
-    default:           return scriptBinding;
+    default: break;
     }
+    return sb ? sb : scriptBinding;
 }
 #else
 inline ScriptBinding *getActiveScriptBinding(void) {
