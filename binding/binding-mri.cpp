@@ -140,6 +140,16 @@ void audioBindingInit();
 // `litergss` Make target). Called conditionally below when the
 // host has tagged the active game as a PSDK core; see CORES_PLAN.md.
 extern "C" void Init_LiteRGSS(void);
+
+// SFML iOS bootstrap shim. Provided by Empo's
+// ios/Empo/src/Core/LiteRGSSHost.mm. Calls
+// `+[SFAppDelegate setupForEmbeddedUse]` which our SFML patch
+// (ios/Dependencies/sfml/embedded_init.patch) adds. Has to run
+// on the main thread before any sf::RenderWindow / sf::Window
+// construction; otherwise SFML asserts on `[SFAppDelegate
+// getInstance]`. The call hops to the main thread internally if
+// invoked from the RGSS thread.
+extern "C" void litergss_host_setupSFML(void);
 #endif
 void graphicsBindingInit();
 
@@ -1515,6 +1525,14 @@ static void runRMXPScripts(BacktraceData &btData) {
      */
 #ifdef MKXPZ_BUILD_XCODE
     if (mkxp_getCoreKind() == MKXP_CORE_LITERGSS) {
+        // Order matters: SFML's UIApplicationDelegate has to be in
+        // place before any sf::RenderWindow is touched. LiteRGSS
+        // only constructs an sf::RenderWindow once Ruby code calls
+        // `LiteRGSS::DisplayWindow.new`, but its static initialisers
+        // run during Init_LiteRGSS — and those static inits include
+        // SFML state that consults [SFAppDelegate getInstance]
+        // indirectly. Running setupSFML first is the safe ordering.
+        litergss_host_setupSFML();
         Init_LiteRGSS();
         Debug() << "LiteRGSS classes registered (PSDK core)";
     }
