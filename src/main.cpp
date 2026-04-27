@@ -215,13 +215,32 @@ int rgssThreadFun(void *userdata) {
 
     mkxp_setGameReady();
 
+#ifdef MKXPZ_BUILD_XCODE
+    /* Multi-Ruby session log. Records which Ruby interpreter the
+     * dispatcher will use for this session, before any Ruby code
+     * runs. Useful for verifying that
+     * `mkxp_setActiveRubyVersion()` from the host side actually
+     * routes through to a per-version binding. */
+    {
+        const char *label = "3.1 (legacy direct-link)";
+        switch (mkxp_getActiveRubyVersion()) {
+        case MKXP_RUBY_18: label = "1.8 (NOT YET WIRED — falling back to legacy)"; break;
+        case MKXP_RUBY_19: label = "1.9 (NOT YET WIRED — falling back to legacy)"; break;
+        case MKXP_RUBY_30: label = "3.0 (mkxp30-merged.o)"; break;
+        case MKXP_RUBY_31: label = "3.1 (mkxp31-merged.o)"; break;
+        case MKXP_RUBY_UNSET: default: label = "3.1 (legacy, UNSET fallback)"; break;
+        }
+        mkxp_debugLog("RUBY", "main.cpp", label);
+    }
+#endif
+
     /* Run game scripts.
      *
      * Dispatch through `getActiveScriptBinding()` (binding.h)
      * instead of the global `scriptBinding` directly so multi-Ruby
      * Phase D (MULTI_RUBY_PLAN.md) can swap which Ruby interpreter
      * runs for this session based on the host's
-     * `mkxp_setRubyVersion()` setting. The default keeps using
+     * `mkxp_setActiveRubyVersion()` setting. The default keeps using
      * the legacy 3.1 binding via the global pointer; PSDK and
      * other 3.0-targeted games go through the per-version
      * `_mkxp_get_script_binding_30()` entry point exported by
