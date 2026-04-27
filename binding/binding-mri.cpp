@@ -442,8 +442,8 @@ static void mriBindingInit() {
     mkxp_define_alias_once(rb_cString, "_mkxp_c_aref",    "[]");
     mkxp_define_alias_once(rb_cString, "_mkxp_c_aset",    "[]=");
     mkxp_define_alias_once(rb_cString, "_mkxp_c_getbyte", "getbyte");
-    rb_define_method(rb_cString, "[]",  mkxpStringAref, -1);
-    rb_define_method(rb_cString, "[]=", mkxpStringAset, -1);
+    rb_define_method(rb_cString, "[]",  RUBY_METHOD_FUNC(mkxpStringAref), -1);
+    rb_define_method(rb_cString, "[]=", RUBY_METHOD_FUNC(mkxpStringAset), -1);
 #endif
     
     VALUE cmod = rb_define_module("CFG");
