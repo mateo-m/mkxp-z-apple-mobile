@@ -2128,11 +2128,24 @@ static void mriBindingExecute() {
         rb_ary_push(lpaths, mkxp_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
     }
     
-    std::string &customScript = conf.customScript;
-    if (!customScript.empty()) {
-        runCustomScript(customScript);
-    } else {
-        runRMXPScripts(btData);
+#ifdef MKXPZ_BUILD_XCODE
+    // PSDK / Pokemon SDK games boot through `Game.rb` at game root,
+    // not RGSS's Scripts.rxdata. Game.rb is a thin Ruby entry point
+    // that requires PSDK's runtime (`./psdk/...`) and then loads the
+    // game's Scripts.dat through PSDK's own loader. Skip the RGSS
+    // script-pack path entirely; runCustomScript reads + evals a
+    // single Ruby file, which is exactly what Game.rb expects.
+    if (mkxp_getCoreKind() == MKXP_CORE_LITERGSS) {
+        runCustomScript("Game.rb");
+    } else
+#endif
+    {
+        std::string &customScript = conf.customScript;
+        if (!customScript.empty()) {
+            runCustomScript(customScript);
+        } else {
+            runRMXPScripts(btData);
+        }
     }
     
 #if RAPI_FULL > 187
