@@ -399,7 +399,7 @@ RB_METHOD(hm7NativeDrawTextureset) {
 
     if (!NIL_P(texture_hash_v) && RB_TYPE_P(texture_hash_v, T_HASH)) {
         DrawTexturesetCtx ctx = { colormap, texture_auto };
-        rb_hash_foreach(texture_hash_v, hm7_draw_textureset_iter,
+        rb_hash_foreach(texture_hash_v, (int (*)(ANYARGS))hm7_draw_textureset_iter,
                         reinterpret_cast<VALUE>(&ctx));
     }
 
@@ -502,7 +502,7 @@ RB_METHOD(hm7NativeDrawMapTileset) {
     unwrap_autotile_bitmaps(auto_tilesets_v, 7, ctx.auto_heightsets);
 
     if (!NIL_P(tilemap_hash_v) && RB_TYPE_P(tilemap_hash_v, T_HASH)) {
-        rb_hash_foreach(tilemap_hash_v, hm7_draw_map_iter,
+        rb_hash_foreach(tilemap_hash_v, (int (*)(ANYARGS))hm7_draw_map_iter,
                         reinterpret_cast<VALUE>(&ctx));
     }
 
@@ -536,7 +536,7 @@ RB_METHOD(hm7NativeRefreshMapTileset) {
     // heightsets unused by refresh path
 
     if (!NIL_P(tilemap_hash_v) && RB_TYPE_P(tilemap_hash_v, T_HASH)) {
-        rb_hash_foreach(tilemap_hash_v, hm7_refresh_map_iter,
+        rb_hash_foreach(tilemap_hash_v, (int (*)(ANYARGS))hm7_refresh_map_iter,
                         reinterpret_cast<VALUE>(&ctx));
     }
 
