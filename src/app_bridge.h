@@ -269,6 +269,40 @@ typedef enum {
 void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode);
 MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 
+// Per-game Ruby interpreter version selection.
+//
+// Multi-Ruby (Phase D in MULTI_RUBY_PLAN.md): each Ruby version's
+// libruby + binding code is compiled separately and merged into a
+// single relocatable .o with hidden symbols. At engine boot the
+// host tells the engine which version to dispatch to; main.cpp
+// looks up the corresponding `_mkxp_get_script_binding_<NN>()`
+// entry point exported by the relevant merged .o.
+//
+// Replaces the syntax-transform-on-Ruby-3.1 hack: a vintage PE
+// game written in Ruby 1.8 grammar runs on actual Ruby 1.8.7's
+// parser + VM, not a 3.1 parser with patches. Also unblocks PSDK,
+// which targets Ruby 3.0.x and ships precompiled .yarb bytecode
+// that's strictly minor-version-locked.
+//
+// `MKXP_RUBY_UNSET` falls back to the build's default (currently
+// 3.1, the version present in the binary via the legacy direct
+// link). Once 3.1 also moves to the merged.o pattern, UNSET will
+// be a configuration error.
+//
+// Numeric values: MMmm where MM=major, mm=minor (so 3.0 -> 30,
+// 3.1 -> 31, 1.9 -> 19, 1.8 -> 18). Mirrors JoiPlay's library
+// filename convention (libmkxp30.so etc.).
+typedef enum {
+    MKXP_RUBY_UNSET = -1,
+    MKXP_RUBY_18    = 18,
+    MKXP_RUBY_19    = 19,
+    MKXP_RUBY_30    = 30,
+    MKXP_RUBY_31    = 31,
+} MKXPRubyVersion;
+
+void             mkxp_setActiveRubyVersion(MKXPRubyVersion version);
+MKXPRubyVersion  mkxp_getActiveRubyVersion(void);
+
 // Force the in-game keyboard scene for Pokemon Essentials text
 // entry, overriding the iOS soft-keyboard path.
 //

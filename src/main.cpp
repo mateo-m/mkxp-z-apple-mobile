@@ -215,8 +215,18 @@ int rgssThreadFun(void *userdata) {
 
     mkxp_setGameReady();
 
-    /* Run game scripts */
-    scriptBinding->execute();
+    /* Run game scripts.
+     *
+     * Dispatch through `getActiveScriptBinding()` (binding.h)
+     * instead of the global `scriptBinding` directly so multi-Ruby
+     * Phase D (MULTI_RUBY_PLAN.md) can swap which Ruby interpreter
+     * runs for this session based on the host's
+     * `mkxp_setRubyVersion()` setting. The default keeps using
+     * the legacy 3.1 binding via the global pointer; PSDK and
+     * other 3.0-targeted games go through the per-version
+     * `_mkxp_get_script_binding_30()` entry point exported by
+     * mkxp30-merged.o. */
+    getActiveScriptBinding()->execute();
 
     /* Detach disposables before destroying SharedState */
     shState->graphics().detachAllDisposables();

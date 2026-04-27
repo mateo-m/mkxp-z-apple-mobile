@@ -719,6 +719,21 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
     return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
 }
 
+// Per-game active Ruby version. See header for rationale.
+//
+// "Active" disambiguates from the older `mkxp_getRubyVersion()`
+// (returns a build-time string for DebugOverlayView). The two
+// names look almost identical; treat with care.
+static std::atomic<int> s_activeRubyVersion{MKXP_RUBY_UNSET};
+
+void mkxp_setActiveRubyVersion(MKXPRubyVersion version) {
+    s_activeRubyVersion.store((int)version, std::memory_order_release);
+}
+
+MKXPRubyVersion mkxp_getActiveRubyVersion(void) {
+    return (MKXPRubyVersion)s_activeRubyVersion.load(std::memory_order_acquire);
+}
+
 void mkxp_setUseInGameKeyboard(bool enabled) {
     s_useInGameKeyboard.store(enabled, std::memory_order_release);
 }
