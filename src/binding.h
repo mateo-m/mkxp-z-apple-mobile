@@ -41,43 +41,32 @@ struct ScriptBinding
 	void (*reset) (void);
 };
 
-/* VTable defined in the binding source. Currently exposed by the
- * legacy direct-link path (binding/*.cpp compiled by Xcode +
- * libruby.3.1 linked) which serves as the default Ruby 3.1 binding.
- * Once 1.8 + 1.9 native builds land and the legacy path is
- * dropped, this `extern` goes away — every binding lives inside a
- * merged .o with its own private `scriptBinding`. */
-extern ScriptBinding *scriptBinding;
-
 #ifdef MKXPZ_BUILD_XCODE
 /* Multi-Ruby Phase D dispatch.
  *
  * The host's `mkxp_setActiveRubyVersion()` selects which Ruby
  * interpreter + matching binding code runs for the active game.
- * Each Ruby version's binding+libruby is bundled in a per-version
- * merged .o (see ios/Dependencies/multiruby/wrapper.cpp + the
- * `mkxpNN-merged` make targets in ios/Dependencies/common.make).
+ * Each Ruby version's binding + libruby is bundled in a
+ * per-version merged .o (see ios/Dependencies/multiruby/wrapper.cpp +
+ * the `mkxpNN-merged` make targets in ios/Dependencies/common.make).
  * Each merged .o exports exactly one symbol —
  * `_mkxp_get_script_binding_NN()` — returning a pointer to that
  * version's `ScriptBinding` vtable.
  *
- * Default fallback: the legacy global `scriptBinding` (Ruby 3.1
- * via the direct-link path, including syntax-transform). PE
- * fan-games rely on this until the 1.8/1.9 native builds land.
+ * Default fallback: 3.1, since the legacy path used Ruby 3.1 with
+ * syntax-transform applied. UNSET / MKXP_RUBY_18 / MKXP_RUBY_19
+ * also fall through to 3.1 today (1.8 / 1.9 native builds aren't
+ * wired yet — see MULTI_RUBY_PLAN.md).
  *
- * NB: this header is included by both the Xcode-compiled engine
- * code (sharedstate.cpp, graphics.cpp, main.cpp) AND the per-Ruby
- * binding compile (binding-mri.cpp, etc., for the merged.o). The
- * inline implementation below works in both contexts.
+ * The merged .o files might not exist on a given SDK build (e.g.
+ * fresh device build that hasn't run `make mkxp-merged` for that
+ * SDK). The pre-build script in project.yml stubs out missing
+ * merged.o files with `mkxp_get_script_binding_NN()` returning
+ * nullptr; the runtime check here detects that and falls through
+ * to whichever binding does exist.
  */
 #include "app_bridge.h"
 
-/* Per-version entry points. Each is provided either by the real
- * mkxpNN-merged.o (returning that version's hidden ScriptBinding*)
- * or by an auto-generated stub from project.yml's pre-build phase
- * (returning nullptr) when the merged .o hasn't been built yet
- * for the active SDK. The runtime check below falls back to the
- * legacy `scriptBinding` when nullptr. */
 extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
 /* 1.8 / 1.9 entry points reserved for upcoming
@@ -87,13 +76,23 @@ inline ScriptBinding *getActiveScriptBinding(void) {
     ScriptBinding *sb = nullptr;
     switch (mkxp_getActiveRubyVersion()) {
     case MKXP_RUBY_30: sb = mkxp_get_script_binding_30(); break;
-    case MKXP_RUBY_31: sb = mkxp_get_script_binding_31(); break;
-    /* MKXP_RUBY_18/19/UNSET fall through to legacy default. */
-    default: break;
+    /* MKXP_RUBY_18/19/31/UNSET land on 3.1 (the only fully-wired
+     * version today). Once 1.8/1.9 land, add cases for them and
+     * have UNSET fall to 3.1. */
+    default:           sb = mkxp_get_script_binding_31(); break;
     }
-    return sb ? sb : scriptBinding;
+    /* Last-resort fallback if both merged.o entry points are
+     * stubs (returning nullptr). Shouldn't happen in production
+     * — at least one of 3.0 / 3.1 is always available — but the
+     * null-check keeps the dispatcher honest. */
+    if (!sb) sb = mkxp_get_script_binding_31();
+    return sb;
 }
 #else
+/* Non-iOS build: the legacy global `scriptBinding` is set by
+ * binding-mri.cpp's static initialiser, which is compiled directly
+ * into the executable on desktop builds. */
+extern ScriptBinding *scriptBinding;
 inline ScriptBinding *getActiveScriptBinding(void) {
     return scriptBinding;
 }
