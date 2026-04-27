@@ -132,6 +132,15 @@ void tilemapVXBindingInit();
 
 void inputBindingInit();
 void audioBindingInit();
+
+#ifdef MKXPZ_BUILD_XCODE
+// LiteRGSS Ruby-class registration entry point. Provided by
+// libLiteRGSS.a (vendored at //litergss2 as a git submodule, built
+// for iOS via ios/Dependencies/litergss2/CMakeLists.txt + the
+// `litergss` Make target). Called conditionally below when the
+// host has tagged the active game as a PSDK core; see CORES_PLAN.md.
+extern "C" void Init_LiteRGSS(void);
+#endif
 void graphicsBindingInit();
 
 void fileIntBindingInit();
@@ -1481,6 +1490,36 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
     
     
+    /* LiteRGSS class registration (PSDK / Pokemon SDK games only).
+     *
+     * Init_LiteRGSS is the C entry point of the statically-linked
+     * LiteRGSS.a archive (built from gitlab.com/pokemonsdk/litergss2,
+     * BSD per upstream creator). It registers `LiteRGSS::Bitmap`,
+     * `LiteRGSS::Sprite`, `LiteRGSS::DisplayWindow`, and the rest
+     * of the LiteRGSS class hierarchy with the Ruby VM. The PSDK
+     * game's Ruby scripts (loaded next) reference these classes
+     * by name; without this call they'd raise NameError on the
+     * very first `LiteRGSS::Sprite.new`.
+     *
+     * Gated on `mkxp_getCoreKind() == MKXP_CORE_LITERGSS` so:
+     *   - Vanilla RPG Maker games don't pay for ~25 unused Ruby
+     *     classes + a SFML init at engine boot.
+     *   - LiteRGSS's static initialisers (which include SFML
+     *     internals that may try to set up an OpenGL ES context
+     *     or grab a UIWindow) only run when we actually need
+     *     them.
+     *
+     * Only present on the iOS port (#ifdef MKXPZ_BUILD_XCODE)
+     * because the LiteRGSS static lib is iOS-only in our build
+     * pipeline. Desktop builds skip this entirely.
+     */
+#ifdef MKXPZ_BUILD_XCODE
+    if (mkxp_getCoreKind() == MKXP_CORE_LITERGSS) {
+        Init_LiteRGSS();
+        Debug() << "LiteRGSS classes registered (PSDK core)";
+    }
+#endif
+
     /* Execute engine-bundled preload scripts (platform compatibility layer) */
     {
         const char *enginePreloads[] = {

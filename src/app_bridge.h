@@ -243,6 +243,29 @@ typedef enum {
 void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode);
 MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 
+// Per-game engine-core selection.
+//
+// Empo's library tags each imported game with a `CoreKind`
+// (.mkxpRGSS for vanilla RPG Maker, .liteRGSS for Pokemon SDK).
+// The host calls `mkxp_setCoreKind` on every selectGame() before
+// the engine boots so the RGSS thread can branch on the value to
+// (a) call `Init_LiteRGSS()` to register PSDK's class hierarchy
+// only when the active game is PSDK, (b) skip mkxp-z's
+// RGSS-specific preload scripts that would conflict with PSDK's
+// own preload chain.
+//
+// `MKXP_CORE_UNSET` is the default at startup so desktop /
+// test-harness builds that never call the setter keep the
+// historical mkxp-z behaviour (RGSS).
+typedef enum {
+    MKXP_CORE_UNSET    = -1,
+    MKXP_CORE_MKXP_RGSS = 0,
+    MKXP_CORE_LITERGSS  = 1,
+} MKXPCoreKind;
+
+void          mkxp_setCoreKind(MKXPCoreKind kind);
+MKXPCoreKind  mkxp_getCoreKind(void);
+
 // Per-game Ruby interpreter version selection.
 //
 // Each Ruby version's libruby + binding is compiled separately and

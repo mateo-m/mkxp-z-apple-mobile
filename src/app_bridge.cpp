@@ -665,6 +665,17 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
     return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
 }
 
+// Per-game core kind. See header for rationale.
+static std::atomic<int> s_coreKind{MKXP_CORE_UNSET};
+
+void mkxp_setCoreKind(MKXPCoreKind kind) {
+    s_coreKind.store((int)kind, std::memory_order_release);
+}
+
+MKXPCoreKind mkxp_getCoreKind(void) {
+    return (MKXPCoreKind)s_coreKind.load(std::memory_order_acquire);
+}
+
 // Per-game active Ruby version. See header for rationale. "Active"
 // disambiguates from `mkxp_getRubyVersion()` which returns a string
 // for DebugOverlayView - the names look similar; treat with care.
