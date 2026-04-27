@@ -71,16 +71,23 @@ extern ScriptBinding *scriptBinding;
 #include "app_bridge.h"
 
 extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
-/* 1.8 / 1.9 / 3.1 entry points reserved for upcoming
- * mkxp{18,19,31}-merged.o builds. Adding the corresponding
+extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
+/* 1.8 / 1.9 entry points reserved for upcoming
+ * mkxp{18,19}-merged.o builds. Adding the corresponding
  * `extern "C"` declarations + cases here is the wiring step
  * once those merged .o files exist. */
 
 inline ScriptBinding *getActiveScriptBinding(void) {
     switch (mkxp_getActiveRubyVersion()) {
     case MKXP_RUBY_30: return mkxp_get_script_binding_30();
-    /* MKXP_RUBY_18/19/31 fall through to legacy default for now;
-     * extend as their merged .o files come online. */
+    case MKXP_RUBY_31: return mkxp_get_script_binding_31();
+    /* MKXP_RUBY_18/19 fall through to legacy default for now;
+     * extend as their merged .o files come online.
+     *
+     * Default (UNSET, plus any unhandled value) keeps using the
+     * legacy direct-link 3.1 binding via the global `scriptBinding`
+     * pointer. Once 3.1's merged.o is the only path, this default
+     * goes away — UNSET would then be a configuration error. */
     default:           return scriptBinding;
     }
 }
