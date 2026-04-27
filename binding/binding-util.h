@@ -25,7 +25,17 @@
 #include <ruby.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <ruby/version.h>
+/* Ruby 1.8 ships <version.h> flat (not <ruby/version.h>) AND
+ * <ruby.h> doesn't pull it in automatically. 1.9+ provides
+ * <ruby/version.h>. We use the build-recipe-injected
+ * MKXPZ_RUBY_VERSION token literal (1.8 / 1.9 / 3.0 / 3.1) to
+ * pick the right include without relying on any Ruby header
+ * having been parsed yet. */
+#if defined(MKXPZ_RUBY_VERSION_MAJOR) && MKXPZ_RUBY_VERSION_MAJOR == 1 && MKXPZ_RUBY_VERSION_MINOR == 8
+#  include <version.h>
+#else
+#  include <ruby/version.h>
+#endif
 
 #include "exception.h"
 
@@ -46,6 +56,77 @@
 #if RAPI_MAJOR == 1 && RAPI_MINOR == 8
 #undef RAPI_FULL
 #define RAPI_FULL 187
+#endif
+
+/* Ruby 1.9 compat shims: APIs added in Ruby 2.x that the binding
+ * uses inside `RAPI_FULL > 187` blocks. The block was written
+ * assuming "anything past 1.8 has the modern API", but 1.9 is
+ * stuck in the gap. Map them onto 1.9-available equivalents.
+ *
+ * - rb_funcallv(recv, mid, argc, argv): added in 2.1. The 1.9
+ *   equivalent is rb_funcall2 (older name; identical signature).
+ * - rb_utf8_str_new_cstr(s): added in 2.2. 1.9 has encoding-aware
+ *   strings but no UTF-8-flagged constructor; rb_str_new_cstr +
+ *   rb_enc_associate_index gets the same effect, but for our use
+ *   (config dirs, script source) plain rb_str_new_cstr is fine
+ *   since rb_eval_string/load handle encoding tagging via magic
+ *   comments in the script text itself.
+ * - rb_ary_new_capa(n): added in 2.0. 1.9 has the internal
+ *   rb_ary_new2 with the same semantics.
+ * - RB_INTEGER_TYPE_P(v): added in 2.4. 1.9-compatible test is
+ *   FIXNUM_P(v) || rb_obj_is_kind_of(v, rb_cInteger).
+ */
+#if RAPI_MAJOR == 1 && RAPI_MINOR == 9
+#  define rb_funcallv               rb_funcall2
+#  define rb_utf8_str_new_cstr      rb_str_new_cstr
+#  define rb_utf8_str_new           rb_str_new
+#  define rb_ary_new_capa           rb_ary_new2
+#  ifndef RARRAY_AREF
+#    define RARRAY_AREF(a, i)       (RARRAY_PTR(a)[(i)])
+#  endif
+#  define RB_INTEGER_TYPE_P(v)      (FIXNUM_P(v) || (TYPE(v) == T_BIGNUM))
+#endif
+
+/* Ruby 1.8 compat shims: 1.8 lacks even more of the modern API
+ * surface than 1.9. The binding has direct (non-RAPI-gated) uses
+ * of rb_utf8_str_new_cstr / rb_set_errinfo / rb_ary_new_capa /
+ * rb_str_new_cstr because those calls live in
+ * mkxp/syntax-transform helpers that were written for 1.9+. We
+ * map them onto 1.8 equivalents:
+ *
+ * - rb_str_new_cstr(s): added in 1.9. 1.8 has rb_str_new2 with
+ *   identical semantics.
+ * - rb_utf8_str_new_cstr / rb_utf8_str_new: 1.8 has no
+ *   per-encoding constructors; just use rb_str_new2 / rb_str_new.
+ * - rb_ary_new_capa(n) → rb_ary_new2 (same as 1.9 path).
+ * - rb_set_errinfo(v): added in 1.9. The 1.8 equivalent is
+ *   `rb_gv_set("$!", v)` (the global error-info variable).
+ * - RUBY_API_VERSION_{MAJOR,MINOR}: added in 1.9. Map onto the
+ *   binding's RAPI_* macros which are defined above.
+ */
+#if RAPI_MAJOR == 1 && RAPI_MINOR == 8
+#  define rb_str_new_cstr           rb_str_new2
+#  define rb_utf8_str_new_cstr      rb_str_new2
+#  define rb_utf8_str_new           rb_str_new
+#  define rb_ary_new_capa           rb_ary_new2
+#  define rb_set_errinfo(v)         rb_gv_set("$!", (v))
+#  ifndef RB_INTEGER_TYPE_P
+#    define RB_INTEGER_TYPE_P(v)    (FIXNUM_P(v) || (TYPE(v) == T_BIGNUM))
+#  endif
+#  ifndef RARRAY_AREF
+#    define RARRAY_AREF(a, i)       (RARRAY_PTR(a)[(i)])
+#  endif
+#  ifndef RB_TYPE_P
+#    define RB_TYPE_P(v, t)         (TYPE(v) == (t))
+#  endif
+#  ifndef RUBY_API_VERSION_MAJOR
+#    define RUBY_API_VERSION_MAJOR  RAPI_MAJOR
+#    define RUBY_API_VERSION_MINOR  RAPI_MINOR
+#    define RUBY_API_VERSION_TEENY  RAPI_TEENY
+#  endif
+   /* 1.8's ruby.h doesn't auto-include st.h, but rb_hash_foreach
+    * callbacks return ST_CONTINUE etc. Pull it in explicitly. */
+#  include <st.h>
 #endif
 
 enum RbException {
