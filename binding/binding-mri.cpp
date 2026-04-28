@@ -60,6 +60,26 @@ extern "C" {
 #include <ruby/encoding.h>
 #endif
 
+/* Ruby 1.8 / 1.9 statically-linked extension init function.
+ *
+ * Init_ext() lives in our hand-rolled extinit.c (see
+ * ios/Dependencies/ruby{18,19}/extinit.c) and calls ruby_init_ext()
+ * for each bundled extension (zlib, stringio, etc), which both runs
+ * the extension's Init_X and registers it with Ruby's `loaded`
+ * features list so subsequent `require 'X'` is a no-op.
+ *
+ * Without this call, the extensions never initialize and game
+ * scripts that reference Zlib::Inflate (or StringIO, etc.) fail
+ * with NameError "uninitialized constant Zlib".
+ *
+ * Ruby 3.0+ doesn't need this: its `ruby_setup`/`ruby_options`
+ * path calls Init_ext automatically. Ruby 1.8 / 1.9 only call it
+ * from `require_libraries`, which fires only when -r command-line
+ * options are present - we don't go through that path. */
+#if RAPI_FULL < 200
+extern "C" void Init_ext(void);
+#endif
+
 /* Ruby 1.8 statically-linked extension init functions */
 #if RAPI_FULL <= 187
 void Init_zlib(void);
@@ -2184,6 +2204,17 @@ static void mriBindingExecuteInitOnce(Config &conf) {
     }
 #else
     ruby_init();
+#endif
+
+    /* Ruby 1.8 / 1.9: explicitly initialize statically-linked
+     * extensions. Must run after ruby_init() (so Ruby's globals
+     * exist) but before any game script runs. See declaration
+     * above for full rationale.
+     *
+     * Ruby 3.0+ initializes extensions automatically via its
+     * setup path; this block is no-op-compiled out there. */
+#if RAPI_FULL < 200
+    Init_ext();
 #endif
 
     // Set the default encoding for regular expressions to UTF-8 when using syntax transform targeting Ruby <= 1.8
