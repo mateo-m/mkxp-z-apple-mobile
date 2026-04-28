@@ -3,7 +3,26 @@
 # Auto-loaded before game scripts to ensure compatibility.
 # Game-specific patches live in separate files (e.g. pokemon_compat.rb).
 
-require 'zlib'
+# DEBUG: marker BEFORE require so we can tell whether the script
+# even starts evaluating, vs failing at the require call.
+begin
+  System.puts "[platform_compat] preload TOP (Ruby #{RUBY_VERSION})" if defined?(System) && System.respond_to?(:puts)
+rescue => e
+  # System.puts itself missing? Fall back to stderr (which the engine
+  # captures into the session log).
+  STDERR.puts "[platform_compat] System.puts unavailable: #{e.class}: #{e.message}"
+end
+
+# Try the require under exception handling so a failure doesn't
+# abort the whole preload silently.
+begin
+  require 'zlib'
+  System.puts "[platform_compat] require 'zlib' OK ($LOADED_FEATURES has zlib? #{$LOADED_FEATURES.any? {|f| f.include?('zlib') }})" if defined?(System)
+rescue LoadError => e
+  System.puts "[platform_compat] require 'zlib' FAILED: #{e.message}" if defined?(System)
+rescue => e
+  System.puts "[platform_compat] require 'zlib' EXC: #{e.class}: #{e.message}" if defined?(System)
+end
 
 # --- JoiPlay-compat signal ---
 # Several Pokemon Essentials fangames (Reborn, Rejuvenation,
@@ -134,24 +153,24 @@ unless defined?(Input::Controller)
   module Input
     module Controller
       class State
-        def left_trigger_value  = 0
-        def right_trigger_value = 0
-        def thumb_left_x  = 0
-        def thumb_left_y  = 0
-        def thumb_right_x = 0
-        def thumb_right_y = 0
-        def thumb_left_dir4  = 0
-        def thumb_left_dir8  = 0
-        def thumb_right_dir4 = 0
-        def thumb_right_dir8 = 0
-        def press?(_button)   = false
-        def trigger?(_button) = false
-        def repeat?(_button)  = false
-        def pressed_buttons   = []
+        def left_trigger_value;  0; end
+        def right_trigger_value; 0; end
+        def thumb_left_x;  0; end
+        def thumb_left_y;  0; end
+        def thumb_right_x; 0; end
+        def thumb_right_y; 0; end
+        def thumb_left_dir4;  0; end
+        def thumb_left_dir8;  0; end
+        def thumb_right_dir4; 0; end
+        def thumb_right_dir8; 0; end
+        def press?(_button);   false; end
+        def trigger?(_button); false; end
+        def repeat?(_button);  false; end
+        def pressed_buttons;   []; end
       end
 
-      def self.states      = [State.new]
-      def self.first_state = State.new
+      def self.states;      [State.new]; end
+      def self.first_state; State.new;   end
     end
   end
 end
@@ -252,6 +271,7 @@ class << Dir
     _mkxp_orig_chdir(dir, &block)
   end
 end
+System.puts "[platform_compat] Dir.chdir patch applied (orig defined? #{Dir.respond_to?(:_mkxp_orig_chdir)})" if defined?(System) && System.respond_to?(:puts)
 
 # --- DL / DL::CFunc legacy fake module ---
 # Older Pokemon Essentials forks and a few community plugins use
