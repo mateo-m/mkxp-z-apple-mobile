@@ -1474,9 +1474,19 @@ static void runRMXPScripts(BacktraceData &btData) {
         };
         
         for (int p = 0; enginePreloads[p]; ++p) {
+            mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
+                          (std::string("loading ") + enginePreloads[p]).c_str());
             try {
                 std::string script = mkxp_fs::contentsOfAssetAsString(
                     (std::string("Preload/") + enginePreloads[p]).c_str(), "rb");
+                if (script.empty()) {
+                    mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
+                                  (std::string("EMPTY content for ") + enginePreloads[p]).c_str());
+                    continue;
+                }
+                mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
+                              (std::string(enginePreloads[p]) + " loaded "
+                               + std::to_string(script.size()) + " bytes").c_str());
                 VALUE scriptStr = rb_utf8_str_new_cstr(script.c_str());
                 VALUE fname = rb_utf8_str_new_cstr(enginePreloads[p]);
                 int state;
@@ -1488,6 +1498,12 @@ static void runRMXPScripts(BacktraceData &btData) {
                     VALUE exc = rb_gv_get("$!");
 #endif
                     if (exc != Qnil) {
+                        VALUE excClass = rb_class_name(rb_class_of(exc));
+                        VALUE excMsg = rb_funcall(exc, rb_intern("message"), 0);
+                        std::string detail = std::string("FAILED ") + enginePreloads[p]
+                                           + ": " + StringValueCStr(excClass)
+                                           + ": " + StringValueCStr(excMsg);
+                        mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]", detail.c_str());
                         Debug() << "Error in engine preload" << enginePreloads[p];
 #if RAPI_FULL > 187
                         rb_set_errinfo(Qnil);
@@ -1495,8 +1511,13 @@ static void runRMXPScripts(BacktraceData &btData) {
                         rb_set_errinfo(Qnil);
 #endif
                     }
+                } else {
+                    mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
+                                  (std::string("OK ") + enginePreloads[p]).c_str());
                 }
             } catch (...) {
+                mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
+                              (std::string("CXX EXC ") + enginePreloads[p]).c_str());
                 Debug() << "Failed to load engine preload:" << enginePreloads[p];
             }
         }
