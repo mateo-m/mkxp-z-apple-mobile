@@ -236,14 +236,19 @@ class Module
   end
 end
 
-# --- Dir.chdir nil-safety ---
-# Some games pass nil to Dir.chdir, which crashes Ruby.
+# --- Dir.chdir nil/empty-safety ---
+# Pokemon Essentials and some plugin scripts pass nil or "" to
+# Dir.chdir. nil crashes Ruby pre-2.0 outright; "" raises
+# Errno::ENOENT on every Ruby version. Both are no-ops in spirit
+# (the script wants "stay where you are") so we route them through
+# the no-arg form, which is safe and well-defined (returns to home
+# dir or no-op when called with a block on no-arg).
 class << Dir
   unless method_defined?(:_mkxp_orig_chdir)
     alias_method :_mkxp_orig_chdir, :chdir
   end
   def chdir(dir = nil, &block)
-    return _mkxp_orig_chdir(&block) if dir.nil?
+    return _mkxp_orig_chdir(&block) if dir.nil? || dir.empty?
     _mkxp_orig_chdir(dir, &block)
   end
 end
