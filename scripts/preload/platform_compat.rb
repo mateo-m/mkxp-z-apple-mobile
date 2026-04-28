@@ -371,17 +371,19 @@ module Kernel
   _orig_require = instance_method(:require)
 
   define_method(:require) do |path|
-    _orig_require.bind(self).call(path)
-  rescue LoadError => e
-    p = path.to_s
-    matched = _NETWORK_REQUIRE_PATHS.any? { |entry|
-      entry.end_with?("/") ? p.start_with?(entry) : p == entry
-    }
-    raise e unless matched
-    # Mark as loaded so future `require` calls short-circuit.
-    feature = p.end_with?(".rb") ? p : "#{p}.rb"
-    $LOADED_FEATURES << feature unless $LOADED_FEATURES.include?(feature)
-    false
+    begin
+      _orig_require.bind(self).call(path)
+    rescue LoadError => e
+      p = path.to_s
+      matched = _NETWORK_REQUIRE_PATHS.any? { |entry|
+        entry.end_with?("/") ? p.start_with?(entry) : p == entry
+      }
+      raise e unless matched
+      # Mark as loaded so future `require` calls short-circuit.
+      feature = p.end_with?(".rb") ? p : "#{p}.rb"
+      $LOADED_FEATURES << feature unless $LOADED_FEATURES.include?(feature)
+      false
+    end
   end
 end
 
