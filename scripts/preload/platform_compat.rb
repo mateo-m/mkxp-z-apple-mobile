@@ -387,48 +387,11 @@ module Kernel
   end
 end
 
-class BasicSocket
-  def self.do_not_reverse_lookup; false; end
-  def self.do_not_reverse_lookup=(*); end
-  def initialize(*); end
-  def close; end
-  def closed?; true; end
-  def read(*); ""; end
-  def write(*); 0; end
-  def puts(*); nil; end
-  def gets(*); nil; end
-  def send(*); 0; end
-  def recv(*); ""; end
-  def setsockopt(*); 0; end
-  def shutdown(*); 0; end
-  def addr; ["AF_INET", 0, "0.0.0.0", "0.0.0.0"]; end
-  def peeraddr; ["AF_INET", 0, "0.0.0.0", "0.0.0.0"]; end
-end
-
-class IPSocket < BasicSocket
-  def self.getaddress(*); "0.0.0.0"; end
-end
-
-class TCPSocket < IPSocket
-  def self.open(*); new; end
-  def self.new(*); super(); end
-end
-
-class UDPSocket < IPSocket
-  def bind(*); 0; end
-  def connect(*); 0; end
-end
-
-class TCPServer < TCPSocket
-  def accept; TCPSocket.new; end
-  def accept_nonblock; raise IO::WaitReadable; end
-  def listen(*); 0; end
-end
-
-class UNIXSocket < BasicSocket
-  def self.open(*); new; end
-end
-
-class UNIXServer < UNIXSocket
-  def accept; UNIXSocket.new; end
-end
+# --- Socket class stubs ---
+# Removed. Pokemon Essentials forks (Insurgence, Reborn) ship
+# their own Sockets script that defines TCPSocket / UDPSocket /
+# BasicSocket with their own class hierarchy. Pre-defining stubs
+# here causes "superclass mismatch" when the game later defines
+# the same class with a different parent. Games that genuinely
+# need network stubs (rare on iOS where we have no real socket
+# layer anyway) should ship their own.
