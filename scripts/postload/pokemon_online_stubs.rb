@@ -14,10 +14,13 @@
 # have run, to replace their method bodies with safe no-ops.
 #
 # Behaviour matches JoiPlay's pokefix.rb so any fan game that
-# works on JoiPlay should behave the same way here. Gated on
-# $PokemonSystem so this only runs for Pokemon Essentials games.
+# works on JoiPlay should behave the same way here. Gated on the
+# `PokemonSystem` *class* (not the `$PokemonSystem` instance,
+# which is only initialized later when `pbStartLoadScreen` runs -
+# the original gate was effectively always false at postload time
+# and the stubs never applied even for the games they target).
 
-if !$PokemonSystem.nil?
+if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # Runtime asset downloader used by Green Remix / Natural Green.
   # Replaced wholesale: report nothing-to-download, complete
   # immediately, and no-op every call site.
