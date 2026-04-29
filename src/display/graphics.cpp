@@ -537,6 +537,30 @@ struct GraphicsPrivate {
             winSize = Vec2i(drwW, drwH);
         }
 
+        // Diagnostic: log the resolution stack so we can confirm
+        // host-side `enableHires` / `framebufferScalingFactor`
+        // edits actually reach the engine. iOS testers often see
+        // "no visible difference" when bumping render scale; this
+        // line tells us whether scRes scaled or stayed at the
+        // RGSS default. Routes through mkxp_debugLog so it lands in
+        // the per-session log file Empo opens at game launch
+        // (Debug()'s std::cerr goes nowhere on iOS).
+        if (mkxp_debugLogEnabled()) {
+            char msg[256];
+            std::snprintf(msg, sizeof(msg),
+                          "scRes=%dx%d scResLores=%dx%d winSize=%dx%d "
+                          "backingScale=%.2f enableHires=%d "
+                          "framebufferScalingFactor=%.2f smoothScaling=%d",
+                          scRes.x, scRes.y,
+                          scResLores.x, scResLores.y,
+                          winSize.x, winSize.y,
+                          backingScaleFactor,
+                          rtData->config.enableHires ? 1 : 0,
+                          rtData->config.framebufferScalingFactor,
+                          rtData->config.smoothScaling);
+            mkxp_debugLog("INFO", "graphics-init", msg);
+        }
+
         if (integerScaleActive) {
             integerScaleFactor = Vec2i(0, 0);
             rebuildIntegerScaleBuffer();
