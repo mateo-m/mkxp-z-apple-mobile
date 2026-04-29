@@ -765,19 +765,22 @@ bool mkxp_isGLContextBroken(void) {
     return s_glContextBroken.load(std::memory_order_acquire);
 }
 
-// Runtime fast-forward toggle. Read by Graphics::FPSLimiter::delay()
-// each frame: when true, the limiter scales its target ticks-per-frame
-// down so the engine paces 4x as fast as the configured framerate.
-// Default 1x, capped at 4x for stability (audio/input timers don't
-// always cope with arbitrary multipliers).
-static std::atomic<bool> s_fastForwardActive{false};
+// Runtime fast-forward multiplier. Read by Graphics::FPSLimiter::delay()
+// each frame: when > 1, the limiter scales its target ticks-per-frame
+// down by that factor so the engine paces N times faster. Multiplier
+// of 1 (or 0) means no scaling. Range honored at the host: 2-9 maps
+// to the user's configured fast-forward speed; the host sets 1 to
+// disable when the runtime toggle is off. Capped implicitly at 9 by
+// the UI; deeper values can corrupt audio/input timers.
+static std::atomic<int> s_fastForwardMultiplier{1};
 
-void mkxp_setFastForwardActive(int active) {
-    s_fastForwardActive.store(active != 0, std::memory_order_release);
+void mkxp_setFastForwardMultiplier(int multiplier) {
+    s_fastForwardMultiplier.store(multiplier > 1 ? multiplier : 1,
+                                  std::memory_order_release);
 }
 
-int mkxp_isFastForwardActive(void) {
-    return s_fastForwardActive.load(std::memory_order_acquire) ? 1 : 0;
+int mkxp_getFastForwardMultiplier(void) {
+    return s_fastForwardMultiplier.load(std::memory_order_acquire);
 }
 
 void mkxp_setDebugLogPath(const char *path) {
