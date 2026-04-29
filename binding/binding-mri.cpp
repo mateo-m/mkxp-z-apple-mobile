@@ -1450,6 +1450,11 @@ static void runRMXPScripts(BacktraceData &btData) {
             "win32_wrap",
             "mkxp_wrap",
             "http_compat",
+            // Last in the list: takes its baseline snapshot AFTER
+            // every other preload has registered its constants and
+            // methods, so legitimate engine-side additions don't
+            // appear as "leaks" in subsequent diffs.
+            "session_audit",
             nullptr
         };
         

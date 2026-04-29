@@ -247,10 +247,29 @@ $__mkxp_reset_hooks ||= []
 unless $__mkxp_reset_hooks.any? { |h| h.respond_to?(:source_location) && h.source_location[0] == __FILE__ }
   $__mkxp_reset_hooks << lambda do
     # Pokemon Essentials / Pokemon fangames globals.
+    #
+    # Each `$Pokemon*` global commonly holds an instance whose
+    # class is defined in the previous game's scripts (PokemonTemp,
+    # PokemonSystem, ...). The engine's `resetBetweenSessions`
+    # step 1 removes those classes from `Object` but leaves the
+    # globals alone, so the next game sees a "ghost" object whose
+    # class no longer exists - calls to methods the next game's
+    # script expects then `NoMethodError` even when the Ruby method
+    # name is sensible (concrete failure: Pokemon Z -> Vinemon
+    # crashes on `$PokemonTemp.defaultBGM` because Pokemon Z's
+    # `PokemonTemp` is gone but the global still points at the
+    # PZ instance, which never had `defaultBGM`).
+    #
+    # The set below covers the globals seen in Pokemon Essentials
+    # forks. Add new entries as we hit them; the cost of nil-ing
+    # an undefined global is zero.
     $mouse = MkxpNullMouse.new
     $game_exists = nil      # Uranium hard-reset flag
     $PokemonSystem = nil
+    $PokemonTemp = nil
     $PokemonGlobal = nil
+    $PokemonBag = nil
+    $PokemonStorage = nil
     $Trainer = nil
   end
 end
