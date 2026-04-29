@@ -509,6 +509,17 @@ module Win32API_Impl
 			end
 		end
 
+		# Some scripts (Vinemon's `Scene_Movie3` for instance)
+		# request the unsuffixed `FindWindow` instead of the
+		# A/W-tagged form. Win32 itself routes the unsuffixed name to
+		# the ANSI variant via macro on Windows; our constant lookup
+		# is exact-match so we have to alias here, otherwise the
+		# script falls through to TOLERATE_ERRORS and gets back 0,
+		# breaking any later `hwnd == GetForegroundWindow.call` style
+		# comparison.
+		FindWindow = FindWindowA
+		FindWindowW = FindWindowA
+
 		class FindWindowEx
 			def call(args)
 				# FindWindowEx(parent, childAfter, className, windowName)
@@ -523,6 +534,7 @@ module Win32API_Impl
 
 		# Alias for FindWindowExA (same as FindWindowEx)
 		FindWindowExA = FindWindowEx
+		FindWindowExW = FindWindowEx
 
 		class GetForegroundWindow
 			def call(args)
@@ -553,7 +565,314 @@ module Win32API_Impl
 				return 1
 			end
 		end
+
+		# Win32 codepage IDs we map directly to Ruby Encoding
+		# objects. Anything not listed falls back to UTF-8 with
+		# replacement, which matches what Win32 does for
+		# unrepresentable characters and means the conversion
+		# always returns *something* the caller can parse.
+		CODEPAGE_TO_ENCODING = {
+			65001 => Encoding::UTF_8,
+			20127 => Encoding::US_ASCII,
+			1252  => Encoding::Windows_1252,
+			932   => Encoding::Windows_31J,  # Shift_JIS / CP932
+			949   => Encoding::CP949,
+			936   => Encoding::GBK,
+			950   => Encoding::Big5,
+			28591 => Encoding::ISO_8859_1,
+			28605 => Encoding::ISO_8859_15,
+		}.freeze
+
+		def self.codepage_to_encoding(cp)
+			CODEPAGE_TO_ENCODING[cp] || Encoding::UTF_8
+		end
+
+		# Take a String (assumed UTF-16LE bytes) and return either
+		# a count of meaningful 16-bit code units (when the caller
+		# passed -1 for `cchWideChar`, i.e. null-terminated) or the
+		# explicit count, capped at the byte size.
+		def self.wide_byte_slice(buf, cch)
+			return "" unless buf.is_a?(String)
+			if cch == -1
+				# Null-terminated: scan for first 16-bit zero unit.
+				idx = 0
+				while idx + 1 < buf.bytesize
+					break if buf.getbyte(idx) == 0 && buf.getbyte(idx + 1) == 0
+					idx += 2
+				end
+				buf.byteslice(0, idx)
+			else
+				cap = [cch * 2, buf.bytesize].min
+				cap = 0 if cap < 0
+				buf.byteslice(0, cap)
+			end
+		end
+
+		# Take a String and return either its full content (when
+		# `cbMultiByte == -1`, i.e. null-terminated) or the
+		# requested byte slice.
+		def self.byte_slice(buf, cb)
+			return "" unless buf.is_a?(String)
+			if cb == -1
+				idx = buf.index("\0".b)
+				idx ? buf.byteslice(0, idx) : buf.dup
+			else
+				cap = [cb, buf.bytesize].min
+				cap = 0 if cap < 0
+				buf.byteslice(0, cap)
+			end
+		end
+
+		# Convert UTF-16LE bytes to a single-byte/multi-byte encoding
+		# (typically UTF-8). Vinemon's `Zeus::Encode` round-trips
+		# every MCI command and result through this; without a real
+		# conversion the round-trip yields an empty string and the
+		# caller's `str.index("\0")` returns nil, raising TypeError
+		# on `str[0, nil]`.
+		class WideCharToMultiByte
+			def call(args)
+				codepage = args[0].to_i
+				_flags   = args[1]
+				src_buf  = args[2]
+				src_cch  = args[3].to_i
+				dst_buf  = args[4]
+				dst_size = args[5].to_i
+
+				wide = Win32API_Impl::Kernel32.wide_byte_slice(src_buf, src_cch)
+				target = Win32API_Impl::Kernel32.codepage_to_encoding(codepage)
+				converted = wide.force_encoding(Encoding::UTF_16LE)
+					.encode(target, invalid: :replace, undef: :replace)
+					.force_encoding(Encoding::ASCII_8BIT) rescue "".b
+
+				# Length query: caller passes nil/0 for dst to ask
+				# how big a buffer they need to allocate.
+				if dst_buf.nil? || !dst_buf.is_a?(String) || dst_size <= 0
+					return converted.bytesize
+				end
+
+				n = [converted.bytesize, dst_buf.bytesize, dst_size].min
+				n.times { |i| dst_buf.setbyte(i, converted.getbyte(i)) }
+				return n
+			end
+		end
+		WideCharToMultiByteA = WideCharToMultiByte
+
+		# Inverse direction. Used to convert command strings the
+		# script wants to pass to MCI etc. Less critical for our
+		# Vinemon path (we don't read the converted bytes), but
+		# implementing it round-trips Zeus::Encode correctly so any
+		# script that depends on it works.
+		class MultiByteToWideChar
+			def call(args)
+				codepage = args[0].to_i
+				_flags   = args[1]
+				src_buf  = args[2]
+				src_cb   = args[3].to_i
+				dst_buf  = args[4]
+				dst_cch  = args[5].to_i
+
+				narrow = Win32API_Impl::Kernel32.byte_slice(src_buf, src_cb)
+				source = Win32API_Impl::Kernel32.codepage_to_encoding(codepage)
+				converted = narrow.force_encoding(source)
+					.encode(Encoding::UTF_16LE, invalid: :replace, undef: :replace)
+					.force_encoding(Encoding::ASCII_8BIT) rescue "".b
+
+				if dst_buf.nil? || !dst_buf.is_a?(String) || dst_cch <= 0
+					# Length query: returns count of UTF-16 code
+					# units, not bytes.
+					return converted.bytesize / 2
+				end
+
+				wide_bytes = [converted.bytesize, dst_buf.bytesize, dst_cch * 2].min
+				wide_bytes.times { |i| dst_buf.setbyte(i, converted.getbyte(i)) }
+				return wide_bytes / 2
+			end
+		end
+		MultiByteToWideCharA = MultiByteToWideChar
 	end
+
+	# Cross-call state for the MCI/AVI playback shim. Vinemon Sauce
+	# Edition's title screen opens an AVI via Windows' MCI subsystem
+	# (`mciSendString "open ... type AVIVideo alias X"` followed by
+	# `play X notify`) and then sits in a Win32 message-pump loop
+	# waiting for `MM_MCINOTIFY` (0x3B9) - "MCI device done playing".
+	# Without a real MCI implementation the notification never lands
+	# and the loop spins forever, allocating message buffers each
+	# iteration (visible as 1 fps + steady memory growth in the
+	# debug overlay).
+	#
+	# We can't actually decode AVI here, but we can short-circuit
+	# the script's wait so it falls through to the title screen
+	# without playing the intro. The shim counts `mciSendString`
+	# calls; once the script has issued at least an open + play
+	# pair, the next `GetMessage` call returns a synthesized
+	# MM_MCINOTIFY message and the message-pump loop breaks.
+	#
+	# `mkxp_reset_session` runs between game sessions so a previous
+	# game's MCI activity doesn't leak into the next launch's first
+	# `GetMessage`.
+	module MciState
+		@@send_string_calls = 0
+		@@playback_done_pending = false
+
+		def self.observe_send_string
+			@@send_string_calls += 1
+			# 2 = open + play. The script enters its message pump
+			# right after the play command, so this is when we arm
+			# the fake notification.
+			@@playback_done_pending = true if @@send_string_calls >= 2
+		end
+
+		def self.consume_playback_done
+			result = @@playback_done_pending
+			@@playback_done_pending = false
+			result
+		end
+
+		def self.reset
+			@@send_string_calls = 0
+			@@playback_done_pending = false
+		end
+	end
+
+	module Winmm
+		# MciSendString shim. The script passes commands as
+		# UTF-16LE-encoded byte buffers (Vinemon's
+		# `Zeus::Encode.utf8_to_utf16`); we decode the relevant ones
+		# and write canned responses into the output buffer so the
+		# caller's mci_result parser produces values that exit its
+		# video-pump loops cleanly. Anything we don't recognize is a
+		# silent no-op (the caller treats `0` as success).
+		class MciSendStringW
+			# Map of command pattern → canned response text. Tested
+			# against Vinemon's Scene_Movie3.rb commands; extend as
+			# new MCI-using games hit unhandled cases.
+			RESPONSES = [
+				# `where X source` returns "x y w h" in pixels. We
+				# need non-zero w/h so the caller's
+				# `ratio = w / h.to_f` doesn't divide by zero.
+				[/^\s*where\s+\S+\s+source\b/i,           "0 0 320 240"],
+				# Length / position 0 + 0 makes the script's
+				# `break if position >= length` fire on the first
+				# iteration.
+				[/^\s*status\s+\S+\s+length\b/i,          "0"],
+				[/^\s*status\s+\S+\s+position\b/i,        "0"],
+				# Some scripts also check `mode == 'stopped'`.
+				[/^\s*status\s+\S+\s+mode\b/i,            "stopped"],
+				[/^\s*status\s+\S+\s+window\s+handle\b/i, "42"],
+			]
+
+			def call(args)
+				Win32API_Impl::MciState.observe_send_string
+
+				cmd = decode_utf16(args[0])
+				response = RESPONSES.find { |re, _| re.match?(cmd) }&.last
+				write_response(args[1], response) if response
+
+				# MCIERR_NOERROR. Real MCI returns specific error
+				# codes for failures; the caller paths we hit only
+				# distinguish `0 vs nonzero` and we want success.
+				return 0
+			end
+
+			private
+
+			def decode_utf16(buf)
+				return "" unless buf.is_a?(String) && !buf.empty?
+				bytes = buf.dup.force_encoding(Encoding::ASCII_8BIT)
+				utf8 = bytes.force_encoding(Encoding::UTF_16LE)
+					.encode(Encoding::UTF_8, invalid: :replace, undef: :replace) rescue ""
+				utf8.split("\0", 2).first || ""
+			end
+
+			def write_response(buf, text)
+				return unless buf.is_a?(String) && buf.bytesize >= 2
+				utf16 = "#{text}\0".encode(Encoding::UTF_16LE)
+					.force_encoding(Encoding::ASCII_8BIT)
+				limit = [utf16.bytesize, buf.bytesize].min
+				limit.times { |i| buf.setbyte(i, utf16.getbyte(i)) }
+				# Null-pad the remaining buffer so callers don't
+				# trip over stale UTF-16 codepoints from a previous
+				# response.
+				(limit...buf.bytesize).each { |i| buf.setbyte(i, 0) }
+			end
+		end
+		MciSendStringA = MciSendStringW
+		MciSendString  = MciSendStringW
+	end
+
+	# Extend User32 with the GetMessage shim. Defined inside this
+	# `module User32` block so it sits alongside the existing
+	# Keybd_event / GetKeyState / etc. stubs above.
+	module User32
+		# Pokemon-Essentials-derived games typically don't enter a
+		# Win32 message loop at all - the engine's own event thread
+		# handles input. The exception is scripts that use MCI for
+		# media playback and need to pump messages until
+		# MM_MCINOTIFY arrives. We fake that one notification when
+		# `MciState.consume_playback_done` is set; otherwise we
+		# return 0 (the standard "WM_QUIT received" return that
+		# breaks while-GetMessage idioms cleanly).
+		class GetMessage
+			MM_MCINOTIFY            = 0x3B9
+			MCI_NOTIFY_SUCCESSFUL   = 0x1
+
+			def call(args)
+				if Win32API_Impl::MciState.consume_playback_done
+					# Win32 MSG struct, 32-bit ABI (RGSS-era):
+					#   hwnd    (4 bytes, offset 0)
+					#   message (4 bytes, offset 4)
+					#   wParam  (4 bytes, offset 8)
+					#   lParam  (4 bytes, offset 12)
+					#   time    (4 bytes, offset 16)
+					#   pt.x    (4 bytes, offset 20)
+					#   pt.y    (4 bytes, offset 24)
+					# wParam = MCI_NOTIFY_SUCCESSFUL signals the
+					# script that playback completed without error.
+					msg = [0, MM_MCINOTIFY, MCI_NOTIFY_SUCCESSFUL,
+					       0, 0, 0, 0].pack('L7')
+					memcpy_string(args[0], msg)
+					return 1
+				end
+				return 0
+			end
+		end
+		GetMessageA = GetMessage
+		GetMessageW = GetMessage
+	end
+end
+
+
+# Reset MCI shim state between game sessions so a previous game's
+# play counters don't leak into the next launch.
+#
+# Match the pattern in `pokemon_compat.rb`: idempotency-guarded
+# lambda keyed off `source_location[0]`. A bare `<<` of a fresh
+# `proc` every preload would let the hook array grow unboundedly
+# (preload re-runs every session).
+#
+# CRITICAL: gate constant access via `Object.const_defined?` rather
+# than naked `Win32API_Impl::MciState`. The engine's
+# `resetBetweenSessions` runs the hooks AFTER it removes our
+# preload-defined constants from Object - including
+# `Win32API_Impl` *and* `IOS`. A bare `Win32API_Impl::...` would
+# trigger our `Module#const_missing` shim, which evaluates
+# `::IOS::ERROR_SUFFIX_RE` to classify the missing name; with
+# `IOS` also removed, that nested constant lookup re-enters the
+# same `const_missing`, recursing until the C stack overflows
+# (SIGSEGV before Ruby's stack-overflow detection or any `rescue`
+# can catch). `const_defined?` checks the constant table directly
+# without invoking `const_missing`, sidestepping the loop.
+$__mkxp_reset_hooks ||= []
+unless $__mkxp_reset_hooks.any? { |h|
+  h.respond_to?(:source_location) && h.source_location && h.source_location[0] == __FILE__
+}
+  $__mkxp_reset_hooks << lambda do
+    if Object.const_defined?(:Win32API_Impl) &&
+       Win32API_Impl.const_defined?(:MciState)
+      Win32API_Impl::MciState.reset
+    end
+  end
 end
 
 def kappatalize(s)
@@ -642,4 +961,16 @@ class Win32API
 			raise RuntimeError, "[Win32API] [#{@dll}:#{@func}] #{args.to_s}"
 		end
 	end
+end
+
+
+# Keep `Win32API` and `Win32API_Impl` across between-session resets;
+# rationale and pattern documented in `platform_compat.rb`. Without
+# this, `Win32API_Impl` would be removed at step 1 of every reset,
+# leaving `$__mkxp_reset_hooks` lambdas (and any other reset-time
+# const lookup) one bare `Win32API_Impl::...` away from triggering
+# the `const_missing` recursion.
+$__mkxp_preload_keep_consts ||= []
+[:Win32API, :Win32API_Impl].each do |c|
+  $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
