@@ -39,7 +39,13 @@ class NilClass
   def angle;  0; end
   def arg;    0; end
   def ceil(*);  0; end
-  def coerce(*); []; end
+  # Numeric#* / Numeric#+ etc. ask for `other.coerce(self)` and
+  # expect `[promoted_other, promoted_self]`. Returning `[]` (the
+  # old stub) raised `coerce must return [x, y]` and crashed any
+  # `5 * nil` style arithmetic. Treat nil as zero in mixed math:
+  # the operand stays as it is and we promote ourselves to `0`
+  # (which auto-promotes to `0.0` against a Float operand).
+  def coerce(other); [other, 0]; end
   def conj;   0; end
   def conjugate; 0; end
   def denominator; 0; end
@@ -161,6 +167,18 @@ class NilClass
   def valid_encoding?; true; end
   def to_str;     ""; end
   def to_ary;     []; end
+
+  # Pokemon Essentials-flavored accessors that scripts call on
+  # `$PokemonTemp` and other globals before checking for nil. The
+  # canonical example is Vinemon's `308_Jukebox` doing
+  # `Audio.bgm_stop if !$PokemonTemp.defaultBGM` without guarding
+  # the receiver - we'd rather treat a missing $PokemonTemp as
+  # "no override" than crash the script. Same idea as the String
+  # / Numeric stubs above: enumerate the exact names games use,
+  # don't reach for a wildcard `method_missing` (which would mask
+  # real bugs across unrelated scripts).
+  def defaultBGM;     nil; end
+  def defaultBGS;     nil; end
 end
 
 MKXP.puts("[nil-stubs] NilClass safe-stubs installed") if defined?(MKXP)
