@@ -458,6 +458,12 @@ struct GraphicsPrivate {
     int frameRate;
     int frameCount;
     int brightness;
+
+    // Counts swapGLBuffer calls since the last fast-forward enable.
+    // Used to gate which frames actually present (and thus pace via
+    // vsync) when the runtime multiplier is > 1 - one swap every N
+    // calls, so Ruby logic ticks Nx per visible frame.
+    unsigned int presentSkipCounter = 0;
     
     double last_update;
     
@@ -831,9 +837,9 @@ struct GraphicsPrivate {
     void swapGLBuffer() {
         fpsLimiter.delay();
         graphicsGL_SwapWindow(threadData->window);
-        
+
         ++frameCount;
-        
+
         threadData->ethread->notifyFrame();
 
         if (mkxp_isGLContextBroken()) {
@@ -1128,7 +1134,36 @@ void Graphics::update(bool checkForShutdown) {
             p->fpsLimiter.resetFrameAdjust();
         }
     }
-    
+
+    // Runtime fast-forward (host bridge): when the multiplier is > 1
+    // we drop the composite + swap path for N-1 of every N
+    // Graphics.update calls. The Ruby script's update tick still
+    // runs each call (because update() returns after the early-out
+    // below), so logic advances Nx per visible frame while the
+    // screen refreshes at the display's native rate.
+    //
+    // This is the vsync-mode counterpart of the FPSLimiter::delay
+    // multiplier path. With syncToRefreshrate=true (iOS default) the
+    // limiter is `disabled`, so the divisor inside delay() never
+    // runs and pacing comes from eglSwapBuffers' Metal drawable
+    // wait. Skipping redrawScreen entirely here releases the Ruby
+    // thread without hitting that wait.
+    {
+        int multiplier = mkxp_getFastForwardMultiplier();
+        if (multiplier > 1) {
+            bool render = (p->presentSkipCounter % multiplier) == 0;
+            p->presentSkipCounter++;
+            if (!render) {
+                ++p->frameCount;
+                p->threadData->ethread->notifyFrame();
+                IOS_CHECK_PAUSE();
+                return;
+            }
+        } else {
+            p->presentSkipCounter = 0;
+        }
+    }
+
     p->checkResize();
     p->redrawScreen();
 
