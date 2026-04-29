@@ -223,6 +223,23 @@ end
 
 class Module
   def const_missing(name)
+    # Defensive: during between-session reset, the engine's
+    # `resetBetweenSessions` step 1 removes all non-baseline
+    # `Object` constants - including `IOS` itself - before step 4
+    # fires the `$__mkxp_reset_hooks`. Any code path that triggers
+    # constant resolution during reset (a hook body referencing a
+    # preload-defined module, etc.) would otherwise re-enter this
+    # `const_missing` and try to look up `::IOS::ERROR_SUFFIX_RE`,
+    # which itself triggers `const_missing` for `IOS`, recursing
+    # until the C stack overflows (SIGSEGV before Ruby's
+    # stack-overflow detection or any `rescue` can catch).
+    #
+    # If `IOS` is absent we have no shim to offer; fall through to
+    # Ruby's default `super`, which raises a normal `NameError`
+    # the caller can `rescue` (or that propagates harmlessly out
+    # of the engine's per-hook `rb_protect` wrapper).
+    return super unless Object.const_defined?(:IOS)
+
     if name.to_s =~ ::IOS::ERROR_SUFFIX_RE
       key = [self, name]
       ::IOS::ErrorStubs[key] ||= begin
@@ -234,6 +251,24 @@ class Module
       ::IOS::NullStub
     end
   end
+end
+
+# Keep our infrastructure constants across between-session resets.
+# Without this, `resetBetweenSessions` step 1 removes them as
+# "non-baseline" (they're defined by us, not by the engine's
+# baseline `mriBindingInit`), and any code referencing them between
+# step 1 and the next preload re-evaluation hits the
+# `const_missing` recursion described above. Adding to
+# `$__mkxp_preload_keep_consts` is the engine's documented escape
+# hatch for "preload-defined constants that should survive reset".
+#
+# The constants here hold infrastructure (stub classes, namespace
+# tables); per-session state inside them - e.g. `MciState`'s
+# `@@send_string_calls` counter - is reset explicitly by entries
+# in `$__mkxp_reset_hooks`.
+$__mkxp_preload_keep_consts ||= []
+[:IOS, :DL].each do |c|
+  $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
 
 # --- Dir.chdir nil-safety ---
