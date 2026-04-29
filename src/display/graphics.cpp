@@ -356,7 +356,13 @@ struct FPSLimiter {
             return;
         
         int64_t tickDelta = SDL_GetPerformanceCounter() - lastTickCount;
-        int64_t toDelay = tpf - tickDelta;
+        // Runtime fast-forward (host bridge): scale target ticks-per-
+        // frame down 4x so the limiter releases the thread sooner.
+        // The frame-adjust accumulator (idealDiff) re-baselines each
+        // frame, so toggling fast-forward off mid-game settles back
+        // to normal pacing within a few frames.
+        int64_t effectiveTpf = mkxp_isFastForwardActive() ? (tpf / 4) : tpf;
+        int64_t toDelay = effectiveTpf - tickDelta;
         
         /* Compensate for the last delta
          * to the ideal timestep */
