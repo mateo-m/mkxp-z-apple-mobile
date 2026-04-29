@@ -349,7 +349,16 @@ struct FPSLimiter {
         adj.resetFlag = false;
     }
     
-    void setDesiredFPS(uint16_t value) { tpf = tickFreq / value; }
+    void setDesiredFPS(uint16_t value) {
+        tpf = tickFreq / value;
+        if (mkxp_debugLogEnabled()) {
+            char msg[80];
+            std::snprintf(msg, sizeof(msg),
+                          "FPSLimiter::setDesiredFPS(%u) -> tpf=%lld",
+                          (unsigned)value, (long long)tpf);
+            mkxp_debugLog("INFO", "fps-limiter", msg);
+        }
+    }
     
     void delay() {
         if (disabled)
@@ -546,18 +555,20 @@ struct GraphicsPrivate {
         // the per-session log file Empo opens at game launch
         // (Debug()'s std::cerr goes nowhere on iOS).
         if (mkxp_debugLogEnabled()) {
-            char msg[256];
+            char msg[320];
             std::snprintf(msg, sizeof(msg),
                           "scRes=%dx%d scResLores=%dx%d winSize=%dx%d "
                           "backingScale=%.2f enableHires=%d "
-                          "framebufferScalingFactor=%.2f smoothScaling=%d",
+                          "framebufferScalingFactor=%.2f smoothScaling=%d "
+                          "fastForwardMultiplier=%d",
                           scRes.x, scRes.y,
                           scResLores.x, scResLores.y,
                           winSize.x, winSize.y,
                           backingScaleFactor,
                           rtData->config.enableHires ? 1 : 0,
                           rtData->config.framebufferScalingFactor,
-                          rtData->config.smoothScaling);
+                          rtData->config.smoothScaling,
+                          mkxp_getFastForwardMultiplier());
             mkxp_debugLog("INFO", "graphics-init", msg);
         }
 

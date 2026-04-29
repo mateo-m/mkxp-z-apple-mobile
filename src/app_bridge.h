@@ -367,6 +367,25 @@ bool        mkxp_isGLContextBroken(void);
 void        mkxp_setFastForwardMultiplier(int multiplier);
 int         mkxp_getFastForwardMultiplier(void);
 
+// Reset all per-session host-bridge state to engine defaults. The
+// host calls this once before each new game launch so values from
+// the previous session (fast-forward multiplier, cheats flag, etc.)
+// don't leak across processes.
+//
+// "Per-session" state is the bridge fields whose values are
+// game-specific and stored in process-static atomics here. The
+// host calls a single reset entry point (this function) instead
+// of tracking each one individually, so a new bridge added in
+// app_bridge.cpp naturally surfaces the reset call alongside its
+// static declaration via the body of `mkxp_resetSessionState`.
+//
+// Globally-persistent state - the viewport-bounds debug overlay,
+// its color, and any other setting that's app-wide rather than
+// per-game - is intentionally NOT touched. Those are owned by the
+// host's app-level Settings UI and persisted across sessions
+// regardless of which game is running.
+void        mkxp_resetSessionState(void);
+
 // Debug logging
 
 // Set log file path for this session (NULL/"" to disable).
