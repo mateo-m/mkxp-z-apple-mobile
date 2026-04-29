@@ -359,6 +359,14 @@ void        mkxp_signalFrameRendered(void);
 void        mkxp_setGLContextBroken(void);
 bool        mkxp_isGLContextBroken(void);
 
+// Runtime fast-forward toggle. When active (non-zero), the engine's
+// FPS limiter scales its target ticks-per-frame down so the game
+// paces 4x as fast as the configured framerate. Toggleable live from
+// the host UI (e.g. JoiPlay-style fast-forward button) without
+// restarting the game.
+void        mkxp_setFastForwardActive(int active);
+int         mkxp_isFastForwardActive(void);
+
 // Debug logging
 
 // Set log file path for this session (NULL/"" to disable).

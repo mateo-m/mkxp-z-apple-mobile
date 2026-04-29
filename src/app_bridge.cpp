@@ -765,6 +765,21 @@ bool mkxp_isGLContextBroken(void) {
     return s_glContextBroken.load(std::memory_order_acquire);
 }
 
+// Runtime fast-forward toggle. Read by Graphics::FPSLimiter::delay()
+// each frame: when true, the limiter scales its target ticks-per-frame
+// down so the engine paces 4x as fast as the configured framerate.
+// Default 1x, capped at 4x for stability (audio/input timers don't
+// always cope with arbitrary multipliers).
+static std::atomic<bool> s_fastForwardActive{false};
+
+void mkxp_setFastForwardActive(int active) {
+    s_fastForwardActive.store(active != 0, std::memory_order_release);
+}
+
+int mkxp_isFastForwardActive(void) {
+    return s_fastForwardActive.load(std::memory_order_acquire) ? 1 : 0;
+}
+
 void mkxp_setDebugLogPath(const char *path) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);
     // Close previous file handle if open
