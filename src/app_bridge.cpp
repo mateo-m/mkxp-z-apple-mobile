@@ -780,6 +780,56 @@ bool mkxp_isGLContextBroken(void) {
     return s_glContextBroken.load(std::memory_order_acquire);
 }
 
+// Runtime fast-forward multiplier. Read by Graphics::FPSLimiter::delay()
+// each frame: when > 1, the limiter scales its target ticks-per-frame
+// down by that factor so the engine paces N times faster. Multiplier
+// of 1 (or 0) means no scaling. Range honored at the host: 2-9 maps
+// to the user's configured fast-forward speed; the host sets 1 to
+// disable when the runtime toggle is off. Capped implicitly at 9 by
+// the UI; deeper values can corrupt audio/input timers.
+static std::atomic<int> s_fastForwardMultiplier{1};
+
+void mkxp_setFastForwardMultiplier(int multiplier) {
+    int clamped = multiplier > 1 ? multiplier : 1;
+    s_fastForwardMultiplier.store(clamped, std::memory_order_release);
+    if (mkxp_debugLogEnabled()) {
+        char msg[64];
+        std::snprintf(msg, sizeof(msg),
+                      "fastForwardMultiplier set to %d (requested %d)",
+                      clamped, multiplier);
+        mkxp_debugLog("INFO", "fast-forward", msg);
+    }
+}
+
+int mkxp_getFastForwardMultiplier(void) {
+    return s_fastForwardMultiplier.load(std::memory_order_acquire);
+}
+
+// Per-session bridge state reset.
+//
+// Each entry below maps to one host-bridge static atomic earlier
+// in this file whose value is intrinsically per-game and would
+// otherwise carry across game launches (the host process keeps
+// running, only the RGSS thread tears down/re-spawns). When adding
+// a new per-session bridge, declare its reset here alongside the
+// existing block so the host doesn't have to track each bridge
+// separately - the audit and the reset live next to each other.
+//
+// Bridges whose state is intentionally global (viewport-bounds
+// debug overlay and color, owned by the host's app-level Settings
+// UI) are deliberately not touched here.
+//
+// Bridges already re-set unconditionally on every game launch by
+// their own setter call from the host (managed config dir, syntax
+// transform mode, in-game keyboard, vertical alignment + postload
+// via applyPerGameSettings, debug log path) don't need an entry
+// here either - their per-launch write is a more direct guarantee
+// than a "back to default" reset.
+void mkxp_resetSessionState(void) {
+    s_fastForwardMultiplier.store(1, std::memory_order_release);
+    s_cheatsEnabled.store(false, std::memory_order_release);
+}
+
 void mkxp_setDebugLogPath(const char *path) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);
     // Close previous file handle if open
