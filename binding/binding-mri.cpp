@@ -1470,6 +1470,11 @@ static void runRMXPScripts(BacktraceData &btData) {
             "win32_wrap",
             "mkxp_wrap",
             "http_compat",
+            // Last in the list: takes its baseline snapshot AFTER
+            // every other preload has registered its constants and
+            // methods, so legitimate engine-side additions don't
+            // appear as "leaks" in subsequent diffs.
+            "session_audit",
             nullptr
         };
         
@@ -1560,6 +1565,8 @@ static void runRMXPScripts(BacktraceData &btData) {
                 };
                 
                 for (int p = 0; enginePostloads[p]; ++p) {
+                    mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
+                                  (std::string("loading ") + enginePostloads[p]).c_str());
                     try {
                         std::string pscript = mkxp_fs::contentsOfAssetAsString(
                             (std::string("Postload/") + enginePostloads[p]).c_str(), "rb");
@@ -1574,6 +1581,12 @@ static void runRMXPScripts(BacktraceData &btData) {
                             VALUE pexc = rb_gv_get("$!");
 #endif
                             if (pexc != Qnil) {
+                                VALUE excClass = rb_class_name(rb_class_of(pexc));
+                                VALUE excMsg = rb_funcall(pexc, rb_intern("message"), 0);
+                                std::string detail = std::string("FAILED ") + enginePostloads[p]
+                                                   + ": " + StringValueCStr(excClass)
+                                                   + ": " + StringValueCStr(excMsg);
+                                mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]", detail.c_str());
                                 Debug() << "Error in engine postload" << enginePostloads[p];
 #if RAPI_FULL > 187
                                 rb_set_errinfo(Qnil);
@@ -1581,8 +1594,13 @@ static void runRMXPScripts(BacktraceData &btData) {
                                 rb_set_errinfo(Qnil);
 #endif
                             }
+                        } else {
+                            mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
+                                          (std::string("OK ") + enginePostloads[p]).c_str());
                         }
                     } catch (...) {
+                        mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
+                                      (std::string("CXX EXC ") + enginePostloads[p]).c_str());
                         Debug() << "Failed to load engine postload:" << enginePostloads[p];
                     }
                 }

@@ -349,14 +349,31 @@ struct FPSLimiter {
         adj.resetFlag = false;
     }
     
-    void setDesiredFPS(uint16_t value) { tpf = tickFreq / value; }
+    void setDesiredFPS(uint16_t value) {
+        tpf = tickFreq / value;
+        if (mkxp_debugLogEnabled()) {
+            char msg[80];
+            std::snprintf(msg, sizeof(msg),
+                          "FPSLimiter::setDesiredFPS(%u) -> tpf=%lld",
+                          (unsigned)value, (long long)tpf);
+            mkxp_debugLog("INFO", "fps-limiter", msg);
+        }
+    }
     
     void delay() {
         if (disabled)
             return;
         
         int64_t tickDelta = SDL_GetPerformanceCounter() - lastTickCount;
-        int64_t toDelay = tpf - tickDelta;
+        // Runtime fast-forward (host bridge): scale target ticks-per-
+        // frame down by the multiplier so the limiter releases the
+        // thread sooner. Multiplier of 1 = no scaling. The frame-
+        // adjust accumulator (idealDiff) re-baselines each frame, so
+        // toggling fast-forward off mid-game settles back to normal
+        // pacing within a few frames.
+        int multiplier = mkxp_getFastForwardMultiplier();
+        int64_t effectiveTpf = multiplier > 1 ? (tpf / multiplier) : tpf;
+        int64_t toDelay = effectiveTpf - tickDelta;
         
         /* Compensate for the last delta
          * to the ideal timestep */
@@ -450,6 +467,12 @@ struct GraphicsPrivate {
     int frameRate;
     int frameCount;
     int brightness;
+
+    // Counts swapGLBuffer calls since the last fast-forward enable.
+    // Used to gate which frames actually present (and thus pace via
+    // vsync) when the runtime multiplier is > 1 - one swap every N
+    // calls, so Ruby logic ticks Nx per visible frame.
+    unsigned int presentSkipCounter = 0;
     
     double last_update;
     
@@ -521,6 +544,32 @@ struct GraphicsPrivate {
             }
             backingScaleFactor = (float)drwW / winW;
             winSize = Vec2i(drwW, drwH);
+        }
+
+        // Diagnostic: log the resolution stack so we can confirm
+        // host-side `enableHires` / `framebufferScalingFactor`
+        // edits actually reach the engine. iOS testers often see
+        // "no visible difference" when bumping render scale; this
+        // line tells us whether scRes scaled or stayed at the
+        // RGSS default. Routes through mkxp_debugLog so it lands in
+        // the per-session log file Empo opens at game launch
+        // (Debug()'s std::cerr goes nowhere on iOS).
+        if (mkxp_debugLogEnabled()) {
+            char msg[320];
+            std::snprintf(msg, sizeof(msg),
+                          "scRes=%dx%d scResLores=%dx%d winSize=%dx%d "
+                          "backingScale=%.2f enableHires=%d "
+                          "framebufferScalingFactor=%.2f smoothScaling=%d "
+                          "fastForwardMultiplier=%d",
+                          scRes.x, scRes.y,
+                          scResLores.x, scResLores.y,
+                          winSize.x, winSize.y,
+                          backingScaleFactor,
+                          rtData->config.enableHires ? 1 : 0,
+                          rtData->config.framebufferScalingFactor,
+                          rtData->config.smoothScaling,
+                          mkxp_getFastForwardMultiplier());
+            mkxp_debugLog("INFO", "graphics-init", msg);
         }
 
         if (integerScaleActive) {
@@ -823,9 +872,9 @@ struct GraphicsPrivate {
     void swapGLBuffer() {
         fpsLimiter.delay();
         graphicsGL_SwapWindow(threadData->window);
-        
+
         ++frameCount;
-        
+
         threadData->ethread->notifyFrame();
 
         if (mkxp_isGLContextBroken()) {
@@ -1120,7 +1169,36 @@ void Graphics::update(bool checkForShutdown) {
             p->fpsLimiter.resetFrameAdjust();
         }
     }
-    
+
+    // Runtime fast-forward (host bridge): when the multiplier is > 1
+    // we drop the composite + swap path for N-1 of every N
+    // Graphics.update calls. The Ruby script's update tick still
+    // runs each call (because update() returns after the early-out
+    // below), so logic advances Nx per visible frame while the
+    // screen refreshes at the display's native rate.
+    //
+    // This is the vsync-mode counterpart of the FPSLimiter::delay
+    // multiplier path. With syncToRefreshrate=true (iOS default) the
+    // limiter is `disabled`, so the divisor inside delay() never
+    // runs and pacing comes from eglSwapBuffers' Metal drawable
+    // wait. Skipping redrawScreen entirely here releases the Ruby
+    // thread without hitting that wait.
+    {
+        int multiplier = mkxp_getFastForwardMultiplier();
+        if (multiplier > 1) {
+            bool render = (p->presentSkipCounter % multiplier) == 0;
+            p->presentSkipCounter++;
+            if (!render) {
+                ++p->frameCount;
+                p->threadData->ethread->notifyFrame();
+                IOS_CHECK_PAUSE();
+                return;
+            }
+        } else {
+            p->presentSkipCounter = 0;
+        }
+    }
+
     p->checkResize();
     p->redrawScreen();
 

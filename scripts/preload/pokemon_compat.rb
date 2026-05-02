@@ -50,22 +50,128 @@ end
 # at the bottom of this file handles subsequent sessions.
 $game_exists = nil
 
-# --- Uranium FmodEx override suppression ---
-# Pokemon Uranium's "F-mod main script" redefines Audio.bgm_play /
-# Audio.bgs_play / Audio.me_play to route through ::FmodEx, which on iOS
-# resolves to IOS::NullStub and drops audio on the floor. The override
-# block is guarded by `unless @bgm_play` on the Audio module - it only
-# runs the first time the script is evaluated, so pre-setting @bgm_play
-# to a truthy value defeats it.
+# --- FmodEx routing to native Audio ---
+# Pokemon fan games (Uranium, Vinemon Sauce Edition, others) ship
+# scripts that load `RGSS FmodEx.dll` and redefine `Audio.bgm_play`
+# / `Audio.bgs_play` / `Audio.me_play` to dispatch through
+# `::FmodEx`. On iOS the DLL can't be loaded, so without
+# intervention `::FmodEx` resolves to `IOS::NullStub` (via our
+# `const_missing` hook) and every audio call lands in
+# `method_missing` and drops the sound on the floor.
 #
-# Force @bgm_play to true every preload (not just when undefined). The
-# engine's resetBetweenSessions() nilifies all ivars on engine-owned
-# modules between sessions, including @bgm_play. An `instance_variable_defined?`
-# guard would see the ivar still exists (nil counts as defined in Ruby)
-# and skip the set, leaving Uranium's `unless @bgm_play` to fire again
-# on session 2+ and drop audio on the floor.
+# Strategy: define a real `::FmodEx` module here that satisfies the
+# game scripts' API surface (init / bgm_play / bgs_play / me_play /
+# se_play / fade / stop, plus the playback handle's
+# `set_position` / `get_position` / `set_loop_points`) by
+# forwarding to the engine's native `Audio` module. Snapshotting
+# the native methods now (preload runs before any game script
+# touches `Audio`) means later script overrides that route
+# through `::FmodEx` end up calling back into the engine's native
+# OpenAL-Soft path - audio plays.
+#
+# Replaces the older Uranium-specific `@bgm_play = true` hack
+# (which short-circuited Uranium's `unless @bgm_play` block but
+# didn't help games like Vinemon whose audio override has no
+# similar guard). One mechanism, fewer game-specific scopes.
 if defined?(Audio) && Audio.is_a?(Module)
-  Audio.instance_variable_set(:@bgm_play, true)
+  # Snapshot native Audio methods before any game script can
+  # rebind them. Stored as module instance variables on Audio so
+  # we can fetch them back even if the engine's
+  # `resetBetweenSessions()` clears Ruby-side ivars - module
+  # constants survive the reset.
+  Audio.instance_eval do
+    @__mkxp_native_bgm_play  = method(:bgm_play)  if respond_to?(:bgm_play)
+    @__mkxp_native_bgm_fade  = method(:bgm_fade)  if respond_to?(:bgm_fade)
+    @__mkxp_native_bgm_stop  = method(:bgm_stop)  if respond_to?(:bgm_stop)
+    @__mkxp_native_bgs_play  = method(:bgs_play)  if respond_to?(:bgs_play)
+    @__mkxp_native_bgs_fade  = method(:bgs_fade)  if respond_to?(:bgs_fade)
+    @__mkxp_native_bgs_stop  = method(:bgs_stop)  if respond_to?(:bgs_stop)
+    @__mkxp_native_me_play   = method(:me_play)   if respond_to?(:me_play)
+    @__mkxp_native_me_fade   = method(:me_fade)   if respond_to?(:me_fade)
+    @__mkxp_native_me_stop   = method(:me_stop)   if respond_to?(:me_stop)
+    @__mkxp_native_se_play   = method(:se_play)   if respond_to?(:se_play)
+    @__mkxp_native_se_stop   = method(:se_stop)   if respond_to?(:se_stop)
+  end
+
+  # Helper: best-effort call of the saved native method. If the
+  # snapshot is missing (engine didn't expose that method, or
+  # session-reset cleared it), silently no-op so the game keeps
+  # running rather than raising.
+  def Audio.__mkxp_native_call(ivar, *args)
+    m = instance_variable_get(ivar)
+    m.call(*args) if m
+  end
+end
+
+# Playback handle returned by `FmodEx.bgm_play` / etc. The actual
+# native audio is fire-and-forget on the Audio module (no real
+# handle), so this is mostly a duck-typed shell that satisfies the
+# small set of methods game scripts call on the returned value.
+# Position queries fall through to the matching native getter
+# where one exists; loop-point setters are no-ops (most games
+# don't depend on Ruby-level loop tables - mkxp-z honors Ogg
+# `LOOPSTART`/`LOOPLENGTH` tags via its native loader).
+class FmodExHandle
+  def initialize(kind); @kind = kind; end
+  def set_position(_pos); end
+  def get_position
+    Audio.respond_to?(:bgm_position) ? (Audio.bgm_position rescue 0) : 0
+  end
+  def set_loop_points(*); end
+  def stop
+    case @kind
+    when :bgm then Audio.__mkxp_native_call(:@__mkxp_native_bgm_stop)
+    when :bgs then Audio.__mkxp_native_call(:@__mkxp_native_bgs_stop)
+    when :me  then Audio.__mkxp_native_call(:@__mkxp_native_me_stop)
+    when :se  then Audio.__mkxp_native_call(:@__mkxp_native_se_stop)
+    end
+  end
+end
+
+module FmodEx
+  module_function
+
+  # No-op init handshake. Some scripts call `FmodEx.init(channels)`
+  # to set up a software channel pool; we ignore it because the
+  # underlying engine handles channel allocation itself.
+  def init(*); end
+
+  # BGM
+  def bgm_play(filename, volume = 100, pitch = 100, position = 0)
+    # Game scripts pass either a bare basename ("Audio/BGM/foo")
+    # or a full path. mkxp-z's Audio.bgm_play accepts both. Our
+    # 4-arg native form takes a position (microseconds) where
+    # supported; fall back to 3-arg if the engine doesn't accept
+    # it (older RGSS1 builds).
+    Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch, position) rescue
+      Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch)
+    FmodExHandle.new(:bgm)
+  end
+  def bgm_fade(ms);   Audio.__mkxp_native_call(:@__mkxp_native_bgm_fade, ms); end
+  def bgm_stop;       Audio.__mkxp_native_call(:@__mkxp_native_bgm_stop); end
+
+  # BGS
+  def bgs_play(filename, volume = 100, pitch = 100)
+    Audio.__mkxp_native_call(:@__mkxp_native_bgs_play, filename, volume, pitch)
+    FmodExHandle.new(:bgs)
+  end
+  def bgs_fade(ms);   Audio.__mkxp_native_call(:@__mkxp_native_bgs_fade, ms); end
+  def bgs_stop;       Audio.__mkxp_native_call(:@__mkxp_native_bgs_stop); end
+
+  # ME (music effect - one-shot, plays over BGM)
+  def me_play(filename, volume = 100, pitch = 100)
+    Audio.__mkxp_native_call(:@__mkxp_native_me_play, filename, volume, pitch)
+    FmodExHandle.new(:me)
+  end
+  def me_fade(ms);    Audio.__mkxp_native_call(:@__mkxp_native_me_fade, ms); end
+  def me_stop;        Audio.__mkxp_native_call(:@__mkxp_native_me_stop); end
+
+  # SE
+  def se_play(filename, volume = 100, pitch = 100)
+    Audio.__mkxp_native_call(:@__mkxp_native_se_play, filename, volume, pitch)
+    FmodExHandle.new(:se)
+  end
+  def se_stop;        Audio.__mkxp_native_call(:@__mkxp_native_se_stop); end
 end
 
 # --- Disposed RGSS object safety patches ---
@@ -125,20 +231,45 @@ end
 # a new game session's scripts run. Use this to scrub Pokemon-specific
 # state that would otherwise bleed from the previous session.
 #
-# MkxpNullMouse is added to $__mkxp_preload_keep_consts so the engine's
-# constant scrubber doesn't remove it (it's not in the session-1
-# baseline because it was defined after the baseline snapshot).
+# Preload-defined infrastructure constants kept across between-session
+# resets. Rationale documented in `platform_compat.rb`: without this
+# the engine's reset step 1 removes them, and any reset-time code
+# path that touches them (a hook lambda, a closure) walks into the
+# `Module#const_missing` recursion described there. Per-session
+# state inside FmodEx (or its handle) is reset through other means
+# - here we just keep the namespace alive.
 $__mkxp_preload_keep_consts ||= []
-$__mkxp_preload_keep_consts << :MkxpNullMouse unless $__mkxp_preload_keep_consts.include?(:MkxpNullMouse)
+[:MkxpNullMouse, :FmodEx, :FmodExHandle].each do |c|
+  $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
+end
 
 $__mkxp_reset_hooks ||= []
 unless $__mkxp_reset_hooks.any? { |h| h.respond_to?(:source_location) && h.source_location[0] == __FILE__ }
   $__mkxp_reset_hooks << lambda do
     # Pokemon Essentials / Pokemon fangames globals.
+    #
+    # Each `$Pokemon*` global commonly holds an instance whose
+    # class is defined in the previous game's scripts (PokemonTemp,
+    # PokemonSystem, ...). The engine's `resetBetweenSessions`
+    # step 1 removes those classes from `Object` but leaves the
+    # globals alone, so the next game sees a "ghost" object whose
+    # class no longer exists - calls to methods the next game's
+    # script expects then `NoMethodError` even when the Ruby method
+    # name is sensible (concrete failure: Pokemon Z -> Vinemon
+    # crashes on `$PokemonTemp.defaultBGM` because Pokemon Z's
+    # `PokemonTemp` is gone but the global still points at the
+    # PZ instance, which never had `defaultBGM`).
+    #
+    # The set below covers the globals seen in Pokemon Essentials
+    # forks. Add new entries as we hit them; the cost of nil-ing
+    # an undefined global is zero.
     $mouse = MkxpNullMouse.new
     $game_exists = nil      # Uranium hard-reset flag
     $PokemonSystem = nil
+    $PokemonTemp = nil
     $PokemonGlobal = nil
+    $PokemonBag = nil
+    $PokemonStorage = nil
     $Trainer = nil
   end
 end
