@@ -766,7 +766,15 @@ module Win32API_Impl
 				Win32API_Impl::MciState.observe_send_string
 
 				cmd = decode_utf16(args[0])
-				response = RESPONSES.find { |re, _| re.match?(cmd) }&.last
+				# Avoid Ruby 2.3+ syntax / methods: we also build for
+				# Ruby 1.9 native (RGSS3 multi-Ruby path).
+				#   `&.` (safe navigation)        — 2.3+
+				#   `Regexp#match?` (bool)        — 2.4+
+				# Use the traditional `re =~ cmd` form (returns Integer
+				# offset on match, nil on miss) which works on every
+				# Ruby version we target.
+				match = RESPONSES.find { |re, _| re =~ cmd }
+				response = match ? match.last : nil
 				write_response(args[1], response) if response
 
 				# MCIERR_NOERROR. Real MCI returns specific error

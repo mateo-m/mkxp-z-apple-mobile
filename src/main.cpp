@@ -224,8 +224,8 @@ int rgssThreadFun(void *userdata) {
     {
         const char *label = "3.1 (legacy direct-link)";
         switch (mkxp_getActiveRubyVersion()) {
-        case MKXP_RUBY_18: label = "1.8 (NOT YET WIRED — falling back to legacy)"; break;
-        case MKXP_RUBY_19: label = "1.9 (NOT YET WIRED — falling back to legacy)"; break;
+        case MKXP_RUBY_18: label = "1.8 (mkxp18-merged.o)"; break;
+        case MKXP_RUBY_19: label = "1.9 (mkxp19-merged.o)"; break;
         case MKXP_RUBY_30: label = "3.0 (mkxp30-merged.o)"; break;
         case MKXP_RUBY_31: label = "3.1 (mkxp31-merged.o)"; break;
         case MKXP_RUBY_UNSET: default: label = "3.1 (legacy, UNSET fallback)"; break;
