@@ -106,7 +106,14 @@ if !$PokemonSystem.nil?
       [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD],
     ].each do |scope, name|
       next unless scope
-      scope.send(:remove_const, name) if scope.const_defined?(name, false)
+      # `const_defined?(name, false)` 2-arg form (skip-inheritance)
+      # is Ruby 1.9+. On 1.8 the 1-arg form already only checks
+      # the receiver's own constant table, so we just always pass
+      # the inherit flag on 1.9+ and omit it on 1.8.
+      already = (RUBY_VERSION >= "1.9") ?
+                scope.const_defined?(name, false) :
+                scope.const_defined?(name)
+      scope.send(:remove_const, name) if already
       scope.const_set(name, false)
     end
   end

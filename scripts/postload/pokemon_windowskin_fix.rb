@@ -57,37 +57,41 @@
 #     post-call refcount is 1, we bump to 2, next dispose
 #     decrements to 1 instead of freeing. Bug fixed.
 
-Thread.new do
-  begin
-    60.times do
-      sleep 0.3
-      candidates = %w[
-        SpriteWindow_Base
-        SpriteWindow
-        SpriteWindow_Text
-        SpriteWindow_AdvancedTextPokemon
-      ]
-      target = nil
-      candidates.each do |name|
-        begin
-          klass = Object.const_get(name)
-          if klass.is_a?(Class) && klass.method_defined?(:setSkin)
-            target = klass
-            break
-          end
-        rescue NameError
-        end
+# Synchronous version: postloads run AFTER all game scripts have
+# evaluated (binding-mri.cpp triggers them at i == scriptCount-1
+# right before Main), so SpriteWindow_Base / SpriteWindow_Text /
+# etc. are guaranteed to be defined by the time we reach here.
+# The previous version wrapped this in Thread.new + sleep 0.3 ×
+# 60 to be defensive; on Ruby 1.8 native (mkxp18-merged.o) that
+# Thread spawn was hanging (green-threading interaction) and
+# defensive retry was unnecessary anyway. Plain inline is faster
+# and works on every Ruby version we target.
+begin
+  candidates = %w[
+    SpriteWindow_Base
+    SpriteWindow
+    SpriteWindow_Text
+    SpriteWindow_AdvancedTextPokemon
+  ]
+  target = nil
+  candidates.each do |name|
+    begin
+      klass = Object.const_get(name)
+      if klass.is_a?(Class) && klass.method_defined?(:setSkin)
+        target = klass
+        break
       end
-      next unless target
-      next if target.method_defined?(:_mkxp_orig_setSkin)
+    rescue NameError
+    end
+  end
 
-      # Two possible refcount APIs. Prefer RPG::Cache.retain(path)
-      # (mainline PE), fall back to BitmapWrapper#addRef (Uranium).
-      has_rpg_cache_retain = defined?(RPG::Cache) && RPG::Cache.respond_to?(:retain)
-      has_wrapper_addref = defined?(BitmapWrapper) && BitmapWrapper.method_defined?(:addRef)
+  if target && !target.method_defined?(:_mkxp_orig_setSkin)
+    # Two possible refcount APIs. Prefer RPG::Cache.retain(path)
+    # (mainline PE), fall back to BitmapWrapper#addRef (Uranium).
+    has_rpg_cache_retain = defined?(RPG::Cache) && RPG::Cache.respond_to?(:retain)
+    has_wrapper_addref = defined?(BitmapWrapper) && BitmapWrapper.method_defined?(:addRef)
 
-      next unless has_rpg_cache_retain || has_wrapper_addref
-
+    if has_rpg_cache_retain || has_wrapper_addref
       target.class_eval do
         alias_method :_mkxp_orig_setSkin, :setSkin
         define_method(:setSkin) do |skin|
@@ -113,9 +117,8 @@ Thread.new do
           end
         end
       end
-      break
     end
-  rescue
-    # Best-effort. Failure means engine default applies.
   end
+rescue
+  # Best-effort. Failure means engine default applies.
 end
