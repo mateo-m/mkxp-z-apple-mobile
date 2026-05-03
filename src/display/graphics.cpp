@@ -1112,8 +1112,29 @@ struct GraphicsPrivate {
 Graphics::Graphics(RGSSThreadData *data) {
     p = new GraphicsPrivate(data);
     if (data->config.syncToRefreshrate) {
+        // syncToRefreshrate caps DRAW timing at the GL layer
+        // (Metal/EGL waits for the display vsync before swap).
+        // Upstream mkxp-z used to ALSO disable the software FPS
+        // limiter here, on the theory that vsync alone provided
+        // pacing.
+        //
+        // That doesn't work for RGSS games. RGSS couples logic
+        // ticks to draw calls (each Graphics.update both advances
+        // game state and presents a frame), so capping draws at
+        // the display refresh also caps LOGIC ticks at that rate.
+        // A 40-fps RGSS1 game running on a 60Hz iOS device ticks
+        // logic 60 times/sec → game runs 1.5x too fast. On 120Hz
+        // ProMotion → 3x. On the iOS simulator (which doesn't
+        // enforce vsync at all) → unbounded.
+        //
+        // Keep the limiter active so it caps logic ticks at the
+        // game's `Graphics.frame_rate`. The GL-layer vsync still
+        // does its job (tear-free presentation) but no longer
+        // dictates game speed. Initial target is the display
+        // refresh - the game's first `Graphics.frame_rate = N`
+        // call updates it to the right value via setFrameRate.
         p->frameRate = data->refreshRate;
-        p->fpsLimiter.disabled = true;
+        p->fpsLimiter.setDesiredFPS(data->refreshRate);
     } else if (data->config.fixedFramerate > 0) {
         p->fpsLimiter.setDesiredFPS(data->config.fixedFramerate);
     } else if (data->config.fixedFramerate < 0) {
@@ -1339,13 +1360,18 @@ DEF_ATTR_SIMPLE(Graphics, FrameCount, int, p->frameCount)
 
 void Graphics::setFrameRate(int value) {
     p->frameRate = std::max(value, 1);
-    
-    if (p->threadData->config.syncToRefreshrate)
-        return;
-    
+
+    // fixedFramerate>0 means the user / mkxp.json explicitly
+    // pinned a target FPS; respect that and ignore the game's
+    // own request.
     if (p->threadData->config.fixedFramerate > 0)
         return;
-    
+
+    // Always update the software FPS limiter to match the game's
+    // requested rate, even when syncToRefreshrate is on (the
+    // limiter caps LOGIC ticks; vsync still handles tear-free
+    // DRAW presentation at the GL layer). See the rationale in
+    // the Graphics ctor.
     p->fpsLimiter.setDesiredFPS(p->frameRate);
     //shState->input().recalcRepeat((unsigned int)p->frameRate);
 }
