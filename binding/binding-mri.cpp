@@ -1814,6 +1814,24 @@ static void runRMXPScripts(BacktraceData &btData) {
                     const char *msgStr = StringValueCStr(msg);
                     shouldSkip = strstr(msgStr, ":Module") ||
                                  strstr(msgStr, ":Class");
+                } else if (rb_obj_is_kind_of(exc, rb_eTypeError)) {
+                    /* Skip "superclass mismatch for class X" errors.
+                     * Common pattern in community Pokemon Essentials
+                     * plugins: BW_Bag (Pokemon Uranium) tries to
+                     * redefine `Window_PokemonBag < Window_DrawableCommand`
+                     * when the original PE version had it as
+                     * `< SpriteWindow_Selectable`. The original class
+                     * hierarchy survives intact; the failed redefinition
+                     * just means the plugin's bonus features don't load,
+                     * which is the right degradation: the game's stock
+                     * bag UI still works.
+                     *
+                     * Other TypeErrors (real game logic bugs like
+                     * "can't convert Class to Integer") still fatal
+                     * out so we don't mask actual problems. */
+                    VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
+                    const char *msgStr = StringValueCStr(msg);
+                    shouldSkip = strstr(msgStr, "superclass mismatch") != NULL;
                 }
                 if (shouldSkip) {
                     VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
