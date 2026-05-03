@@ -350,21 +350,44 @@ int mkxp_getSupportedRGSSVersionMask(void) {
 }
 
 const char *mkxp_getRubyVersion(void) {
-    // The build system injects MKXPZ_RUBY_VERSION as a quoted string
-    // literal (e.g. "3.1" / "1.8") matching the linked Ruby runtime.
-    // If the define is missing the bridge returns "unknown" and logs
-    // once so the discrepancy is noticed in debug logs rather than
-    // silently misreporting a version.
+    // Returns the major.minor of the Ruby interpreter the active
+    // game is dispatched to, NOT the build-time MKXPZ_RUBY_VERSION
+    // define of the engine host. Multi-Ruby ships four Rubys in
+    // one binary and which one a game runs on is decided at
+    // runtime via mkxp_setActiveRubyVersion(); the engine host's
+    // build-time define is just whichever flags the host compile
+    // unit happened to pick (currently 3.1) and would mis-report
+    // the in-game debug overlay for any game routed to 1.8 / 1.9
+    // / 3.0.
+    switch (mkxp_getActiveRubyVersion()) {
+        case MKXP_RUBY_18: return "1.8";
+        case MKXP_RUBY_19: return "1.9";
+        case MKXP_RUBY_30: return "3.0";
+        case MKXP_RUBY_31: return "3.1";
+        case MKXP_RUBY_UNSET:
+        default:           break;
+    }
+
+    // Bridge wasn't told which version. Fall back to the build-
+    // time host define so desktop / test-harness builds that
+    // don't drive mkxp_setActiveRubyVersion still get a useful
+    // answer. The "(fallback)" suffix surfaces the discrepancy
+    // in the UI: a multi-Ruby iOS build that hits this path means
+    // the host forgot to call mkxp_setActiveRubyVersion before
+    // the engine started, and the displayed value is whichever
+    // Ruby flags the engine-host translation unit happened to
+    // compile under (currently 3.1) - not necessarily what's
+    // actually running.
 #if defined(MKXPZ_RUBY_VERSION)
-    return MKXPZ_RUBY_VERSION;
+    return MKXPZ_RUBY_VERSION " (fallback)";
 #else
     static std::atomic<bool> warned{false};
     bool expected = false;
     if (warned.compare_exchange_strong(expected, true)) {
         mkxp_debugLog("BRIDGE", "app_bridge.cpp [C++]",
-                      "MKXPZ_RUBY_VERSION is not defined; build system "
-                      "should inject it via GCC_PREPROCESSOR_DEFINITIONS. "
-                      "Reporting \"unknown\" to the UI.");
+                      "mkxp_setActiveRubyVersion not called and "
+                      "MKXPZ_RUBY_VERSION not defined; reporting "
+                      "\"unknown\" to the UI.");
     }
     return "unknown";
 #endif
