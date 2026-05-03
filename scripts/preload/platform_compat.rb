@@ -36,6 +36,77 @@ end
 # path is what actually works here, so we set the flag.
 $joiplay = true
 
+# --- Thread.critical / Thread.critical= no-op shims (Ruby 1.9+) ---
+# Ruby 1.8 had `Thread.critical` and `Thread.critical=` to disable
+# thread switching during a critical section; both were removed in
+# Ruby 1.9 when the GIL was replaced by per-thread locks. Vintage
+# RGSS / Pokemon Essentials code commonly wraps Marshal.load and
+# save-file I/O with `Thread.critical = true` ... `Thread.critical
+# = false`, expecting the methods to exist.
+#
+# On Ruby 1.9+ those calls now raise `NoMethodError: undefined
+# method 'critical' for class 'Thread'`. The error often surfaces
+# during quit / save flows where the in-game `pbExit` chain calls
+# `pbSave` which sets `Thread.critical = true`, and has historically
+# crashed the engine entirely (the `NoMethodError` propagates out of
+# the script-eval loop, the engine's iOS shutdown path then segfaults
+# because the Ruby VM is in an exception-pending state when
+# SharedState::finiInstance() runs).
+#
+# Restore both as no-ops on every Ruby version that's missing them.
+# The 1.8 cooperative-scheduling semantics don't apply under modern
+# Ruby anyway; calling code only cared that the methods existed.
+unless Thread.respond_to?(:critical)
+  def Thread.critical
+    false
+  end
+
+  def Thread.critical=(value)
+    value
+  end
+end
+
+# --- exit! / Process.exit! redirect to SystemExit ---
+# Ruby's `Kernel.exit!(status)` and `Process.exit!(status)` skip
+# `at_exit` handlers AND ALSO bypass the engine's SystemExit
+# rescue path entirely - they call `_exit(status)` directly,
+# which terminates the iOS process before mkxp-z can flush
+# graphics state, save the engine log, fire the
+# `mkxp_setEngineTerminated` callback, or do anything else.
+#
+# Pokemon Essentials' `pbExit` (and its many forks - Vanguard,
+# Reborn, etc.) commonly use `exit!` so the user's quit click
+# bypasses the game's "press any key to confirm" splash that
+# `at_exit` handlers would normally trigger. On desktop this is
+# a fine UX choice; on iOS it causes the app to vanish without
+# the engine even getting a chance to know the user quit.
+#
+# Redirect both to `Kernel.exit(status)` so the engine's
+# binding-mri.cpp script-eval loop catches the SystemExit, sets
+# `mkxp_setEngineExitedCleanly()`, fires the terminated callback,
+# and the iOS host shows the configured "game ended" UX. The
+# desktop semantics of "skip at_exit handlers" are not preserved
+# - we accept that trade because no shipping iOS PE-fork relies
+# on the at_exit-skipping behaviour for anything user-visible.
+module Kernel
+  def exit!(status = false)
+    exit(status)
+  end
+  module_function :exit!
+end
+
+module Process
+  class << self
+    if respond_to?(:exit!) && !method_defined?(:_mkxp_orig_exit_bang)
+      alias_method :_mkxp_orig_exit_bang, :exit!
+    end
+
+    def exit!(status = false)
+      Kernel.exit(status)
+    end
+  end
+end
+
 # Suppress Ruby's $DEBUG global. Some plugins gate verbose error
 # dialogs / extra print output on `$DEBUG`; without an explicit
 # `false` the engine inherits whatever Ruby's startup defaulted to,
