@@ -1468,6 +1468,20 @@ static void runRMXPScripts(BacktraceData &btData) {
             "platform_compat",
             "pokemon_compat",
             "win32_wrap",
+            // Encoding-aware methods that override win32_wrap stubs.
+            // Uses Encoding::*, force_encoding, unpack1 — all Ruby
+            // 1.9+ APIs. Ruby 1.8's parser refuses to compile the
+            // file. Multi-Ruby (mkxp18-merged) compiles binding-mri
+            // against Ruby 1.8 headers which makes RUBY_API_VERSION_*
+            // resolve to 1.8 here, so the encoding addon is skipped
+            // on the 1.8 path. RGSS1/RGSS2 games run with the
+            // ASCII-only Win32API stubs from win32_wrap.rb; they
+            // mostly only exercise window-size / fullscreen probes
+            // which work fine without UTF-16 conversion.
+#if RUBY_API_VERSION_MAJOR > 1 || \
+    (RUBY_API_VERSION_MAJOR == 1 && RUBY_API_VERSION_MINOR >= 9)
+            "win32_wrap_encoding",
+#endif
             "mkxp_wrap",
             "http_compat",
             // Last in the list: takes its baseline snapshot AFTER
@@ -1557,7 +1571,16 @@ static void runRMXPScripts(BacktraceData &btData) {
                     "pokemon_online_stubs",
                     "pokemon_tilemap_fix",
                     "pokemon_graphics_compat",
-                    "pokemon_session_reset",
+                    // pokemon_session_reset removed: it spawned
+                    // Thread.new to fix cross-session $ResizeInitialized
+                    // leak, but cross-session play is disabled
+                    // (QUIT_PATHS_DISABLED.md), so the leak it
+                    // worked around can't happen. Removing it also
+                    // eliminates the FIRST Thread.new call in any
+                    // PE game's boot path - critical on the Ruby 1.8
+                    // native dispatch (mkxp18-merged.o) where green-
+                    // threading stack-unwind is fragile on iOS arm64.
+                    // See MULTI_RUBY_INVESTIGATION.md.
                     "nilclass_safe_stubs",
                     "pokemon_windowskin_fix",
                     "hmode7_shim",
