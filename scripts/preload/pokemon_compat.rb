@@ -33,10 +33,19 @@ USEKEYBOARDTEXTENTRY = false unless defined?(USEKEYBOARDTEXTENTRY)
 # game (acceptable - it presumably handles screensize itself).
 begin
   class PokemonSystem
-    attr_accessor :screensize unless instance_methods.include?(:screensize)
+    # `instance_methods` returns Strings on Ruby 1.8 but Symbols
+    # on 1.9+, so `instance_methods.include?(:screensize)` is
+    # never true on 1.8 even when the method exists. Use
+    # `method_defined?` (Symbol-friendly on every version) for
+    # the "is anything already defined" guard. We unconditionally
+    # define both writer and reader-with-default; redefinition on
+    # subsequent loads is idempotent (last-write-wins) and a
+    # game's later `class PokemonSystem ... end` still overrides
+    # cleanly via Ruby's open-class semantics.
+    attr_accessor :screensize
     def screensize
       @screensize ||= 1.0
-    end unless instance_methods(false).include?(:screensize)
+    end
   end
 rescue TypeError
   # superclass mismatch with a fork's own definition; bow out.

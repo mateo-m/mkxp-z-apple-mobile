@@ -137,12 +137,22 @@ unless $__mkxp_session_audit_installed
       next unless Object.const_defined?(name)
       klass = Object.const_get(name)
       next unless klass.is_a?(Module)
+      # Use rocket-style hash literals so this file parses on
+      # Ruby 1.8 (where `key: value` shorthand is a syntax error).
+      # `&:to_sym` Symbol-to-Proc shorthand works on 1.8.7+, but
+      # we use an explicit block to stay compatible with bare 1.8
+      # builds. `instance_methods` returns Strings on 1.8 and
+      # Symbols on 1.9+; we normalize to Symbols for stable diffs.
+      # `class_variables` / `instance_variables` are left in their
+      # native type (Strings on 1.8, Symbols on 1.9+) because
+      # later cleanup calls `instance_variable_set(v, nil)` which
+      # on 1.8 requires the String form.
       state[:__classes__][name] = {
-        instance_methods:         (klass.instance_methods(false).map(&:to_sym).sort rescue []),
-        private_instance_methods: (klass.respond_to?(:private_instance_methods) ? (klass.private_instance_methods(false).map(&:to_sym).sort rescue []) : []),
-        singleton_methods:        (klass.singleton_methods(false).map(&:to_sym).sort rescue []),
-        class_variables:          (klass.class_variables.sort rescue []),
-        instance_variables:       (klass.instance_variables.sort rescue []),
+        :instance_methods         => (klass.instance_methods(false).map { |m| m.to_sym }.sort rescue []),
+        :private_instance_methods => (klass.respond_to?(:private_instance_methods) ? (klass.private_instance_methods(false).map { |m| m.to_sym }.sort rescue []) : []),
+        :singleton_methods        => (klass.singleton_methods(false).map { |m| m.to_sym }.sort rescue []),
+        :class_variables          => (klass.class_variables.sort rescue []),
+        :instance_variables       => (klass.instance_variables.sort rescue []),
       }
     end
     # Globals: record the *class name* of each non-nil global. A
