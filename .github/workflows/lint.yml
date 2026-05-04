@@ -42,10 +42,12 @@ jobs:
 
       - name: markdownlint
         run: |
-          # Drive markdownlint from git ls-files so we only scan
-          # tracked files. The hmode7/ submodule and src/ vendored
-          # upstream are already gitignored at the file-level here.
-          FILES=$(git ls-files '*.md')
+          # Drive markdownlint from git ls-files but exclude
+          # vendored upstream READMEs (theoraplay/, etc.) that we
+          # don't own and don't want to reformat.
+          FILES=$(git ls-files '*.md' \
+            ':!:src/theoraplay/' \
+            ':!:hmode7/')
           if [ -n "$FILES" ]; then
             echo "$FILES" | xargs markdownlint -c .markdownlint.json
           fi
