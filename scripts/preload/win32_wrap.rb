@@ -572,7 +572,7 @@ module Win32API_Impl
 
 		# Encoding-aware wide/narrow char conversion (codepage
 		# tables, WideCharToMultiByte, MultiByteToWideChar) is
-		# Ruby 1.9+ only — Encoding::*, force_encoding, byteslice,
+		# Ruby 1.9+ only; Encoding::*, force_encoding, byteslice,
 		# getbyte/setbyte, and kw-arg encode(invalid: :replace) are
 		# all 1.9-or-later. Lives in win32_wrap_encoding.rb, loaded
 		# conditionally from binding-mri.cpp's preload list when
@@ -595,7 +595,7 @@ module Win32API_Impl
 	# iteration (visible as 1 fps + steady memory growth in the
 	# debug overlay).
 	#
-	# We can't actually decode AVI here, but we can short-circuit
+	# Can't decode AVI here, but we can short-circuit
 	# the script's wait so it falls through to the title screen
 	# without playing the intro. The shim counts `mciSendString`
 	# calls; once the script has issued at least an open + play
@@ -662,8 +662,8 @@ module Win32API_Impl
 				cmd = decode_utf16(args[0])
 				# Avoid Ruby 2.3+ syntax / methods: we also build for
 				# Ruby 1.9 native (RGSS3 multi-Ruby path).
-				#   `&.` (safe navigation)        — 2.3+
-				#   `Regexp#match?` (bool)        — 2.4+
+				#   `&.` (safe navigation)       ; 2.3+
+				#   `Regexp#match?` (bool)       ; 2.4+
 				# Use the traditional `re =~ cmd` form (returns Integer
 				# offset on match, nil on miss) which works on every
 				# Ruby version we target.

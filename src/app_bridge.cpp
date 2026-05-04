@@ -35,15 +35,13 @@ static std::atomic<bool> s_pathSet{false};
 // Engine terminated flag: set by engine after full teardown.
 static std::atomic<bool> s_engineTerminated{false};
 static std::atomic<bool> s_terminateRequested{false};
-// Set when the current session ended because the Ruby VM raised
-// SystemExit (e.g. an "Exit to desktop" menu in the game called
-// Kernel.exit). The engine's main loop distinguishes this from a
-// crash so the Swift layer can return to the library silently
-// instead of showing the "game didn't exit cleanly" alert.
+// Set when the session ended because Ruby raised SystemExit
+// (e.g. the game's "Exit to desktop" menu). The Swift layer reads
+// this to skip the "didn't exit cleanly" alert and return silently.
 static std::atomic<bool> s_engineExitedCleanly{false};
-// Set when the RGSS thread failed to ack a termination request in time.
-// The UI reads this via mkxp_isEngineHung() and force-quits the app
-// because the single-reused-thread architecture cannot recover.
+// Set when the RGSS thread didn't ack a termination request in time.
+// `mkxp_isEngineHung()` makes the UI force-quit since the single
+// reused thread can't recover.
 static std::atomic<bool> s_engineHung{false};
 static std::atomic<bool> s_glContextBroken{false};
 
@@ -64,18 +62,15 @@ static std::atomic<bool>  s_safeAreaInsetsChanged{false};
 static std::atomic<int>   s_verticalAlignment{1};  // 0=top, 1=top-center, 2=center
 static std::atomic<bool>  s_postloadEnabled{true};
 
-// Per-game syntax-transform mode. The host (Empo on iOS) sets this
-// before each session via mkxp_setSyntaxTransformMode to keep the
-// choice out of mkxp.json - it's an Empo / per-game concept, not
-// part of the developer's engine-config layer. See app_bridge.h
-// for the enum and rationale.
+// Per-game syntax-transform mode. Empo sets this before each
+// session so the choice stays out of mkxp.json (it's a host concept,
+// not part of the developer's engine config). See app_bridge.h for
+// the enum.
 static std::atomic<int>   s_syntaxTransformMode{MKXP_SYNTAX_TRANSFORM_UNSET};
 
-// Per-game "force the in-game keyboard scene for PE text entry"
-// toggle. Default false = the iOS soft keyboard handles name
-// entry. Empo flips it on per-game when a Pokemon Essentials
-// game's keyboard scene has custom keys not on the iOS keyboard.
-// Read by `pokemon_input.rb`.
+// Per-game "force in-game keyboard scene" toggle. Default false
+// (iOS soft keyboard handles name entry). Read by `pokemon_input.rb`
+// when set to fall back to the game's own keyboard scene.
 static std::atomic<bool>  s_useInGameKeyboard{false};
 
 // Debug: tint the area outside the game viewport.
@@ -85,20 +80,17 @@ static std::atomic<float> s_vpBoundsG{0};
 static std::atomic<float> s_vpBoundsB{0};
 static std::atomic<float> s_vpBoundsA{1};
 
-// Cheat menu toggle. Polled by a Ruby bridge helper that keeps the
-// $CHEATS global in sync so the JoiPlay-ported cheat scripts pick
-// up UI toggles immediately.
+// Cheat menu toggle. Polled by a Ruby bridge helper that keeps
+// $CHEATS in sync so cheat scripts pick up UI toggles immediately.
 static std::atomic<bool>  s_cheatsEnabled{false};
 
 // Input bridge: cached SDL window ID for event injection.
 static std::atomic<uint32_t> s_sdlWindowID{0};
 
-// Generic holder for a callback + userdata pair. Prior code split these
-// across `std::atomic<Fn>` + bare `void *`: a setter wrote userdata
-// (non-atomic) then the pointer (release), and a reader could still
-// observe an old pointer with the new userdata, or the compiler could
-// reorder around the non-atomic write on teardown. Packing both into a
-// single shared_ptr makes set and fire see a consistent tuple.
+// Holder for a callback + userdata pair. The previous split between
+// `atomic<Fn>` and a bare `void *` could let a reader observe a torn
+// pair on teardown. Packing both into a shared_ptr keeps set and
+// fire on a consistent tuple.
 template <typename Fn>
 struct BridgeCallback {
     struct Slot {
@@ -148,10 +140,9 @@ static bool s_keyWatcherInstalled = false;
 // SDL_StartTextInput / SDL_StopTextInput fires inside EventThread.
 static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
 
-// Managed-config directory the host UI (Empo on iOS) sets before
-// launching a session. Engine modules look here first for files
-// they used to read from cwd (mkxp.json, patches.json, ...). Empty
-// string means "no override; use cwd as before".
+// Managed-config directory Empo sets before each session. Engine
+// modules look here first for files they used to read from cwd
+// (mkxp.json, patches.json). Empty = no override.
 static std::mutex s_managedConfigMutex;
 static std::string s_managedConfigDir;
 
@@ -200,7 +191,7 @@ extern "C" {
 void mkxp_setGameReady(void) {
     s_gameReady.store(true, std::memory_order_release);
     // Arm the frame-rendered signal so the UI knows when the first
-    // frame has actually been swapped to the screen.
+    // frame has been swapped to the screen.
     s_needsFrameRenderedSignal.store(true, std::memory_order_release);
 }
 
@@ -280,7 +271,7 @@ void mkxp_setEngineHung(void) {
 
 void mkxp_setEngineTerminated(void) {
     s_engineTerminated.store(true, std::memory_order_release);
-    // Clear pathSet so the next mkxp_waitForGamePath() actually blocks
+    // Clear pathSet so the next mkxp_waitForGamePath() blocks
     // until the Library UI provides a new game selection.
     s_pathSet.store(false, std::memory_order_release);
     s_engineTerminatedCb.fire();
@@ -298,14 +289,12 @@ void mkxp_resetBridgeState(void) {
     // Note: s_verticalAlignment and s_postloadEnabled are NOT reset here.
     // They are explicitly set by selectGame() before each session.
     s_sdlWindowID.store(0, std::memory_order_relaxed);
-    // Game-driven text-input intent (set by Ruby `Input.text_input=`).
-    // Not part of the per-game settings group above because Empo
-    // doesn't seed it - the game itself flips it on entry to a name
-    // entry / chat input UI. Force-reset between sessions in case
-    // the previous session was force-quit (OS kill, crash) while the
-    // intent was still true; without this clear, the next session
-    // would inherit the flag and the soft keyboard would auto-show
-    // before the game asked for it.
+    // Game-driven text-input intent (set by `Input.text_input=`).
+    // Empo doesn't seed it; the game flips it on entry to a name /
+    // chat input UI. Force-reset here in case the previous session
+    // was force-quit while intent was true, otherwise the next
+    // session would auto-show the soft keyboard before the game
+    // asked for it.
     s_gameTextInputIntent.store(false, std::memory_order_relaxed);
     // Reset pause state so a stale pause doesn't block the next session.
     s_pauseRequested.store(false, std::memory_order_relaxed);
@@ -337,11 +326,11 @@ int mkxp_getRGSSVersion(void) {
 }
 
 int mkxp_getSupportedRGSSVersionMask(void) {
-    // Ruby 1.8 reliably runs RGSS1 and RGSS2 (both use 1.8-era syntax).
-    // RGSS3 requires Ruby 1.9+ which in this build means Ruby 3.1 with
-    // the syntax-transform patches. MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-    // is defined by the build system only when the patched Ruby is
-    // linked; it stays undefined on unpatched builds.
+    // RGSS1 and RGSS2 run fine on any Ruby (1.8-era syntax). RGSS3
+    // needs Ruby 1.9+, which here means Ruby 3.1 with the
+    // syntax-transform patches. The build system defines
+    // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES only when patched Ruby is
+    // linked.
 #if defined(MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES)
     return (1 << 0) | (1 << 1) | (1 << 2);
 #else
@@ -350,15 +339,10 @@ int mkxp_getSupportedRGSSVersionMask(void) {
 }
 
 const char *mkxp_getRubyVersion(void) {
-    // Returns the major.minor of the Ruby interpreter the active
-    // game is dispatched to, NOT the build-time MKXPZ_RUBY_VERSION
-    // define of the engine host. Multi-Ruby ships four Rubys in
-    // one binary and which one a game runs on is decided at
-    // runtime via mkxp_setActiveRubyVersion(); the engine host's
-    // build-time define is just whichever flags the host compile
-    // unit happened to pick (currently 3.1) and would mis-report
-    // the in-game debug overlay for any game routed to 1.8 / 1.9
-    // / 3.0.
+    // Returns the major.minor of the Ruby actually dispatched for
+    // the active game, NOT the build-time MKXPZ_RUBY_VERSION of the
+    // engine host (which would mis-report any game routed to a
+    // Ruby other than the host TU's compile flags).
     switch (mkxp_getActiveRubyVersion()) {
         case MKXP_RUBY_18: return "1.8";
         case MKXP_RUBY_19: return "1.9";
@@ -368,16 +352,11 @@ const char *mkxp_getRubyVersion(void) {
         default:           break;
     }
 
-    // Bridge wasn't told which version. Fall back to the build-
-    // time host define so desktop / test-harness builds that
-    // don't drive mkxp_setActiveRubyVersion still get a useful
-    // answer. The "(fallback)" suffix surfaces the discrepancy
-    // in the UI: a multi-Ruby iOS build that hits this path means
-    // the host forgot to call mkxp_setActiveRubyVersion before
-    // the engine started, and the displayed value is whichever
-    // Ruby flags the engine-host translation unit happened to
-    // compile under (currently 3.1) - not necessarily what's
-    // actually running.
+    // No active version set. Fall back to the host build-time
+    // define so desktop / test-harness builds still get a useful
+    // answer. The "(fallback)" suffix surfaces the case in the UI:
+    // on multi-Ruby iOS, hitting this path means the host forgot
+    // to call mkxp_setActiveRubyVersion.
 #if defined(MKXPZ_RUBY_VERSION)
     return MKXPZ_RUBY_VERSION " (fallback)";
 #else
@@ -482,11 +461,10 @@ void mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata
     s_textInputModeCb.set(cb, userdata);
 }
 
-// Internal hook called by EventThread::process whenever
-// SDL_StartTextInput / SDL_StopTextInput is dispatched. Lives in
-// app_bridge so the BridgeCallback machinery (mutex + atomic gate)
-// stays internal to this translation unit. Also flips the
-// `s_gameTextInputIntent` flag the UI side queries via
+// Called by EventThread::process whenever SDL_StartTextInput /
+// SDL_StopTextInput is dispatched. Lives here so the BridgeCallback
+// machinery stays internal to this TU. Also flips the
+// `s_gameTextInputIntent` flag UI queries via
 // `mkxp_isTextInputActive`.
 void mkxp_fireTextInputModeCallback(int active) {
     s_gameTextInputIntent.store(active != 0, std::memory_order_release);
@@ -502,39 +480,28 @@ void mkxp_setManagedConfigDir(const char *path) {
 
 const char *mkxp_getManagedConfigDir(void) {
     std::lock_guard<std::mutex> lock(s_managedConfigMutex);
-    /* Pointer remains valid as long as `s_managedConfigDir` isn't
-     * reassigned. Engine call sites are expected to copy the
-     * result into a std::string immediately if they need to keep
-     * it; we don't return a snapshot to avoid forcing every
-     * caller through an allocation. */
+    /* Pointer is valid until s_managedConfigDir is reassigned;
+     * callers should copy into std::string if they need to keep it. */
     return s_managedConfigDir.c_str();
 }
 
 int mkxp_isTextInputActive(void) {
-    /* Game-side intent (the `Input.text_input = true` flag) rather
-     * than `SDL_IsTextInputActive()`. SDL's iOS backend
-     * (SDL_uikitviewcontroller.m `keyboardWillHide`) auto-calls
-     * SDL_StopTextInput when the keyboard transiently hides during
-     * appearance - even when OUR own UITextField is the one being
-     * presented. That leaves SDL's flag FALSE while the Ruby
-     * `Input.gets` loop is still polling for typed characters; if
-     * we gated text-event pushing on SDL's flag we'd drop every
-     * keystroke after the first hide flicker. */
+    /* Game-side intent (`Input.text_input = true`) rather than
+     * SDL's flag, which the iOS backend auto-clears on transient
+     * keyboard hides during presentation - even when WE'RE the one
+     * presenting. Gating on SDL's flag would drop every keystroke
+     * after the first hide flicker. */
     return s_gameTextInputIntent.load(std::memory_order_acquire) ? 1 : 0;
 }
 
 void mkxp_pushTextInput(const char *utf8) {
     if (!utf8 || !*utf8) return;
 
-    // SDL_TEXTINPUT.text is `char[32]` including the trailing NUL,
-    // so the largest payload per event is 31 bytes. We split the
+    // SDL_TEXTINPUT.text is char[32] (31 bytes payload + NUL). Split
     // input on UTF-8 character boundaries (never mid-codepoint) and
-    // emit one event per chunk.
-    //
-    // UTF-8 leading-byte detection: a byte is a continuation byte
-    // iff `(b & 0xC0) == 0x80`. We walk forward up to 31 bytes,
-    // then back off to the most recent leading byte so the chunk
-    // ends on a complete codepoint.
+    // emit one event per chunk. Continuation bytes have
+    // (b & 0xC0) == 0x80, so we walk forward 31 bytes then back off
+    // to the most recent leading byte.
     constexpr size_t kMaxChunk = 31;
 
     if (s_sdlWindowID.load(std::memory_order_relaxed) == 0) {
@@ -626,10 +593,9 @@ void mkxp_checkPause(void) {
         !s_paused.load(std::memory_order_acquire))
         return;
 
-    /* Pause every AL_PLAYING source.  We intentionally do NOT
-     * detach the OpenAL context — keeping it current avoids
-     * any audio blip that Apple's implementation produces when
-     * a context is restored via alcMakeContextCurrent(). */
+    /* Pause every AL_PLAYING source. We deliberately don't detach
+     * the OpenAL context; keeping it current avoids the audio blip
+     * Apple's implementation produces on alcMakeContextCurrent. */
     if (SharedState::instance)
         SharedState::instance->audio().pauseSources();
 
@@ -644,12 +610,12 @@ void mkxp_checkPause(void) {
     });
 
     if (!s_terminateRequested.load(std::memory_order_acquire)) {
-        /* Normal resume — un-pause the sources we paused. */
+        /* Normal resume; un-pause the sources we paused. */
         if (SharedState::instance)
             SharedState::instance->audio().resumeSources();
     }
-    /* On terminate the sources stay paused (silent) until
-     * SharedState::finiInstance() deletes them. */
+    /* On terminate, sources stay paused until SharedState::finiInstance()
+     * deletes them. */
 
     s_resumedCb.fire();
 }
@@ -668,14 +634,6 @@ void mkxp_setSnapshot(const unsigned char *data, int width, int height) {
     s_snapshotData.assign(data, data + size);
     s_snapshotWidth = width;
     s_snapshotHeight = height;
-}
-
-const unsigned char *mkxp_getSnapshotRGBA(int *width, int *height) {
-    std::lock_guard<std::mutex> lock(s_snapshotMutex);
-    if (s_snapshotData.empty()) return nullptr;
-    if (width) *width = s_snapshotWidth;
-    if (height) *height = s_snapshotHeight;
-    return s_snapshotData.data();
 }
 
 bool mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width, int *height) {
@@ -742,11 +700,9 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
     return (MKXPSyntaxTransformMode)s_syntaxTransformMode.load(std::memory_order_acquire);
 }
 
-// Per-game active Ruby version. See header for rationale.
-//
-// "Active" disambiguates from the older `mkxp_getRubyVersion()`
-// (returns a build-time string for DebugOverlayView). The two
-// names look almost identical; treat with care.
+// Per-game active Ruby version. See header for rationale. "Active"
+// disambiguates from `mkxp_getRubyVersion()` which returns a string
+// for DebugOverlayView - the names look similar; treat with care.
 static std::atomic<int> s_activeRubyVersion{MKXP_RUBY_UNSET};
 
 void mkxp_setActiveRubyVersion(MKXPRubyVersion version) {
@@ -803,13 +759,10 @@ bool mkxp_isGLContextBroken(void) {
     return s_glContextBroken.load(std::memory_order_acquire);
 }
 
-// Runtime fast-forward multiplier. Read by Graphics::FPSLimiter::delay()
-// each frame: when > 1, the limiter scales its target ticks-per-frame
-// down by that factor so the engine paces N times faster. Multiplier
-// of 1 (or 0) means no scaling. Range honored at the host: 2-9 maps
-// to the user's configured fast-forward speed; the host sets 1 to
-// disable when the runtime toggle is off. Capped implicitly at 9 by
-// the UI; deeper values can corrupt audio/input timers.
+// Runtime fast-forward multiplier. Read by
+// Graphics::FPSLimiter::delay() each frame; > 1 scales target
+// ticks-per-frame down so the engine paces N times faster. UI caps
+// at 9 (deeper values can corrupt audio/input timers).
 static std::atomic<int> s_fastForwardMultiplier{1};
 
 void mkxp_setFastForwardMultiplier(int multiplier) {
@@ -828,26 +781,18 @@ int mkxp_getFastForwardMultiplier(void) {
     return s_fastForwardMultiplier.load(std::memory_order_acquire);
 }
 
-// Per-session bridge state reset.
+// Per-session bridge state reset. Each entry maps to one of the
+// per-game atomics declared above that would otherwise carry across
+// game launches (the host process keeps running, only the RGSS
+// thread re-spawns). When adding a new per-session bridge, reset it
+// here alongside the existing block.
 //
-// Each entry below maps to one host-bridge static atomic earlier
-// in this file whose value is intrinsically per-game and would
-// otherwise carry across game launches (the host process keeps
-// running, only the RGSS thread tears down/re-spawns). When adding
-// a new per-session bridge, declare its reset here alongside the
-// existing block so the host doesn't have to track each bridge
-// separately - the audit and the reset live next to each other.
-//
-// Bridges whose state is intentionally global (viewport-bounds
-// debug overlay and color, owned by the host's app-level Settings
-// UI) are deliberately not touched here.
-//
-// Bridges already re-set unconditionally on every game launch by
-// their own setter call from the host (managed config dir, syntax
-// transform mode, in-game keyboard, vertical alignment + postload
-// via applyPerGameSettings, debug log path) don't need an entry
-// here either - their per-launch write is a more direct guarantee
-// than a "back to default" reset.
+// Globally-owned state (viewport bounds debug overlay + color) is
+// not reset here. Bridges already re-set on every launch by the
+// host (managed config dir, syntax transform mode, in-game keyboard,
+// per-game settings via applyPerGameSettings, debug log path) don't
+// need an entry either - the per-launch write is a stronger
+// guarantee than a "back to default" reset.
 void mkxp_resetSessionState(void) {
     s_fastForwardMultiplier.store(1, std::memory_order_release);
     s_cheatsEnabled.store(false, std::memory_order_release);
@@ -867,14 +812,12 @@ void mkxp_setDebugLogPath(const char *path) {
     }
 }
 
-// Fast-path check so callers in hot paths (resize handler, frame boundary)
-// can skip expensive formatting when logging is disabled.
+// Fast path so hot-path callers (resize handler, frame boundary)
+// skip formatting when logging is off.
 int mkxp_debugLogEnabled(void) {
-    // Reading s_debugLogFile without the mutex is safe enough here: the
-    // worst outcome is a dropped or duplicated log line if the file is
-    // being opened/closed on another thread at the same moment. For a
-    // debug log that's acceptable and avoids serializing the entire
-    // engine on every hot-path check.
+    // Reading s_debugLogFile lock-free is fine: the worst case is a
+    // dropped or duplicated log line if the file is opening/closing
+    // on another thread, which is acceptable for a debug log.
     return s_debugLogFile ? 1 : 0;
 }
 
@@ -882,19 +825,16 @@ void mkxp_debugLog(const char *tag, const char *source, const char *message) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);
     if (!s_debugLogFile) return;
     fprintf(s_debugLogFile, "[%s] (%s) %s\n", tag, source, message);
-    // Flush immediately: the RGSS thread's log writes otherwise sit in
-    // stdio's per-FILE buffer until the file closes on the next
-    // session's setDebugLogPath. If the engine stalls or the user
-    // dismisses an error alert and stays in the same session, those
-    // buffered lines are invisible - which made diagnosing the
-    // "Unable to load scripts" issue on-device impossible because
-    // the diagnostic lines never reached disk.
+    // Flush immediately: without it, RGSS thread writes sit in
+    // stdio's per-FILE buffer until the next session's
+    // setDebugLogPath closes the file, hiding diagnostics from any
+    // mid-session inspection.
     fflush(s_debugLogFile);
 }
 
 } // extern "C"
 
-// Internal helper — called by binding-mri.cpp, not part of the C bridge.
+// Internal helper; called by binding-mri.cpp, not part of the C bridge.
 // Returns empty string if logging is disabled.
 std::string mkxp_getDebugLogPath(void) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);
