@@ -17,13 +17,12 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
-          bundler-cache: false
-
-      - name: Install rubocop
-        run: gem install rubocop --no-document
+          # bundler-cache reads Gemfile.lock and caches gem installs
+          # across runs. Saves ~15s after first run.
+          bundler-cache: true
 
       - name: rubocop
-        run: rubocop --format github
+        run: bundle exec rubocop --format github
 
   markdown:
     name: Markdown (markdownlint)
