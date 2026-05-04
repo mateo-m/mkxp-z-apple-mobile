@@ -288,9 +288,8 @@ begin
   # to land inside the next heap block and produces garbage or SIGSEGV.
   #
   # Our port respects the 8-bytes-per-pixel assumption, but it also
-  # needs the Bitmap to actually *be* that large. Reallocate at
-  # 2x width after initialize runs. See design doc caveat §10.5
-  # in //hmode7-apple-mobile/docs/HMODE7_PORT_DESIGN.md.
+  # needs the Bitmap to be that large. Reallocate at 2x width after
+  # initialize runs.
   #
   # Guarded so older HM7 layouts (if anyone forks with a different
   # @params structure) don't get silently corrupted.
