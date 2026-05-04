@@ -82,6 +82,7 @@ begin
         break
       end
     rescue NameError
+      # Constant disappeared between defined? and const_get; skip.
     end
   end
 
@@ -94,31 +95,49 @@ begin
     if has_rpg_cache_retain || has_wrapper_addref
       target.class_eval do
         alias_method :_mkxp_orig_setSkin, :setSkin
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # The override walks "is a customskin set?" → "is its
+        # bitmap usable?" → "is the refcount already bumped?" → "what
+        # cache API is in scope?" - each condition must be checked
+        # independently and short-circuits cleanly.
         define_method(:setSkin) do |skin|
           _mkxp_orig_setSkin(skin)
           # No customskin loaded (e.g. empty / invalid skin path)
           # means nothing to retain.
           return unless @customskin
-          bmp = @customskin.bitmap rescue nil
+
+          bmp = begin
+            @customskin.bitmap
+          rescue StandardError
+            nil
+          end
           return unless bmp && !bmp.disposed?
 
           # Skip bumping if the game's own setSkin already
           # retained the new skin - avoids a double-retain leak
           # on games that have the mainline PE fix.
-          current_ref = bmp.respond_to?(:refcount) ? (bmp.refcount rescue nil) : nil
+          current_ref = if bmp.respond_to?(:refcount)
+                          begin
+                            bmp.refcount
+                          rescue StandardError
+                            nil
+                          end
+                        end
           return if current_ref && current_ref > 1
 
           if has_rpg_cache_retain
-            resolvedName = pbResolveBitmap(skin)
-            return if !resolvedName || resolvedName == ""
-            RPG::Cache.retain(resolvedName)
+            resolved_name = pbResolveBitmap(skin)
+            return if !resolved_name || resolved_name == ''
+
+            RPG::Cache.retain(resolved_name)
           elsif bmp.respond_to?(:addRef)
             bmp.addRef
           end
         end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       end
     end
   end
-rescue
+rescue StandardError
   # Best-effort. Failure means engine default applies.
 end

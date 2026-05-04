@@ -26,749 +26,761 @@
 # DLLs, so the constants reference later in the script will raise
 # NameError - which binding-mri.cpp's SKIPPED handler swallows for
 # LoadError/NoMethodError cases.
-module Kernel
-  def load_module(*args)
-    # No-op on iOS - Win32 DLL loading is not supported.
-    nil
+unless Kernel.respond_to?(:load_module)
+  module Kernel
+    def load_module(*_args)
+      # No-op on iOS - Win32 DLL loading is not supported.
+      nil
+    end
+    module_function :load_module
   end
-  module_function :load_module
-end unless Kernel.respond_to?(:load_module)
+end
 
 module Scancodes
-	SDL = { :UNKNOWN => 0x00,
-		:A => 0x04, :B => 0x05, :C => 0x06, :D => 0x07,
-		:E => 0x08, :F => 0x09, :G => 0x0A, :H => 0x0B,
-		:I => 0x0C, :J => 0x0D, :K => 0x0E, :L => 0x0F,
-		:M => 0x10, :N => 0x11, :O => 0x12, :P => 0x13,
-		:Q => 0x14, :R => 0x15, :S => 0x16, :T => 0x17,
-		:U => 0x18, :V => 0x19, :W => 0x1A, :X => 0x1B,
-		:Y => 0x1C, :Z => 0x1D, :N1 => 0x1E, :N2 => 0x1F,
-		:N3 => 0x20, :N4 => 0x21, :N5 => 0x22, :N6 => 0x23,
-		:N7 => 0x24, :N8 => 0x25, :N9 => 0x26, :N0 => 0x27,
-		:RETURN => 0x28, :ESCAPE => 0x29, :BACKSPACE => 0x2A, :TAB => 0x2B,
-		:SPACE => 0x2C, :MINUS => 0x2D, :EQUALS => 0x2E, :LEFTBRACKET => 0x2F,
-		:RIGHTBRACKET => 0x30, :BACKSLASH => 0x31, :NONUSHASH => 0x32, :SEMICOLON => 0x33,
-		:APOSTROPHE => 0x34, :GRAVE => 0x35, :COMMA => 0x36, :PERIOD => 0x37,
-		:SLASH => 0x38, :CAPSLOCK => 0x39, :F1 => 0x3A, :F2 => 0x3B,
-		:F3 => 0x3C, :F4 => 0x3D, :F5 => 0x3E, :F6 => 0x3F,
-		:F7 => 0x40, :F8 => 0x41, :F9 => 0x42, :F10 => 0x43,
-		:F11 => 0x44, :F12 => 0x45, :PRINTSCREEN => 0x46, :SCROLLLOCK => 0x47,
-		:PAUSE => 0x48, :INSERT => 0x49, :HOME => 0x4A, :PAGEUP => 0x4B,
-		:DELETE => 0x4C, :END => 0x4D, :PAGEDOWN => 0x4E, :RIGHT => 0x4F,
-		:LEFT => 0x50, :DOWN => 0x51, :UP => 0x52, :NUMLOCKCLEAR => 0x53,
-		:KP_DIVIDE => 0x54, :KP_MULTIPLY => 0x55, :KP_MINUS => 0x56, :KP_PLUS => 0x57,
-		:KP_ENTER => 0x58, :KP_1 => 0x59, :KP_2 => 0x5A, :KP_3 => 0x5B,
-		:KP_4 => 0x5C, :KP_5 => 0x5D, :KP_6 => 0x5E, :KP_7 => 0x5F,
-		:KP_8 => 0x60, :KP_9 => 0x61, :KP_0 => 0x62, :KP_PERIOD => 0x63,
-		:NONUSBACKSLASH => 0x64, :APPLICATION => 0x65, :POWER => 0x66, :KP_EQUALS => 0x67,
-		:F13 => 0x68, :F14 => 0x69, :F15 => 0x6A, :F16 => 0x6B,
-		:F17 => 0x6C, :F18 => 0x6D, :F19 => 0x6E, :F20 => 0x6F,
-		:F21 => 0x70, :F22 => 0x71, :F23 => 0x72, :F24 => 0x73,
-		:EXECUTE => 0x74, :HELP => 0x75, :MENU => 0x76, :SELECT => 0x77,
-		:STOP => 0x78, :AGAIN => 0x79, :UNDO => 0x7A, :CUT => 0x7B,
-		:COPY => 0x7C, :PASTE => 0x7D, :FIND => 0x7E, :MUTE => 0x7F,
-		:VOLUMEUP => 0x80, :VOLUMEDOWN => 0x81, :LOCKINGCAPSLOCK => 0x82, :LOCKINGNUMLOCK => 0x83,
-		:LOCKINGSCROLLLOCK => 0x84, :KP_COMMA => 0x85, :KP_EQUALSAS400 => 0x86, :INTERNATIONAL1 => 0x87,
-		:INTERNATIONAL2 => 0x88, :INTERNATIONAL3 => 0x89, :INTERNATIONAL4 => 0x8A, :INTERNATIONAL5 => 0x8B,
-		:INTERNATIONAL6 => 0x8C, :INTERNATIONAL7 => 0x8D, :INTERNATIONAL8 => 0x8E, :INTERNATIONAL9 => 0x8F,
-		:LANG1 => 0x90, :LANG2 => 0x91, :LANG3 => 0x92, :LANG4 => 0x93,
-		:LANG5 => 0x94, :LANG6 => 0x95, :LANG7 => 0x96, :LANG8 => 0x97,
-		:LANG9 => 0x98, :ALTERASE => 0x99, :SYSREQ => 0x9A, :CANCEL => 0x9B,
-		:CLEAR => 0x9C, :PRIOR => 0x9D, :RETURN2 => 0x9E, :SEPARATOR => 0x9F,
-		:OUT => 0xA0, :OPER => 0xA1, :CLEARAGAIN => 0xA2, :CRSEL => 0xA3,
-		:EXSEL => 0xA4, :KP_00 => 0xB0, :KP_000 => 0xB1, :THOUSANDSSEPARATOR => 0xB2,
-		:DECIMALSEPARATOR => 0xB3, :CURRENCYUNIT => 0xB4, :CURRENCYSUBUNIT => 0xB5, :KP_LEFTPAREN => 0xB6,
-		:KP_RIGHTPAREN => 0xB7, :KP_LEFTBRACE => 0xB8, :KP_RIGHTBRACE => 0xB9, :KP_TAB => 0xBA,
-		:KP_BACKSPACE => 0xBB, :KP_A => 0xBC, :KP_B => 0xBD, :KP_C => 0xBE,
-		:KP_D => 0xBF, :KP_E => 0xC0, :KP_F => 0xC1, :KP_XOR => 0xC2,
-		:KP_POWER => 0xC3, :KP_PERCENT => 0xC4, :KP_LESS => 0xC5, :KP_GREATER => 0xC6,
-		:KP_AMPERSAND => 0xC7, :KP_DBLAMPERSAND => 0xC8, :KP_VERTICALBAR => 0xC9, :KP_DBLVERTICALBAR => 0xCA,
-		:KP_COLON => 0xCB, :KP_HASH => 0xCC, :KP_SPACE => 0xCD, :KP_AT => 0xCE,
-		:KP_EXCLAM => 0xCF, :KP_MEMSTORE => 0xD0, :KP_MEMRECALL => 0xD1, :KP_MEMCLEAR => 0xD2,
-		:KP_MEMADD => 0xD3, :KP_MEMSUBTRACT => 0xD4, :KP_MEMMULTIPLY => 0xD5, :KP_MEMDIVIDE => 0xD6,
-		:KP_PLUSMINUS => 0xD7, :KP_CLEAR => 0xD8, :KP_CLEARENTRY => 0xD9, :KP_BINARY => 0xDA,
-		:KP_OCTAL => 0xDB, :KP_DECIMAL => 0xDC, :KP_HEXADECIMAL => 0xDD, :LCTRL => 0xE0,
-		:LSHIFT => 0xE1, :LALT => 0xE2, :LGUI => 0xE3, :RCTRL => 0xE4,
-		:RSHIFT => 0xE5, :RALT => 0xE6, :RGUI => 0xE7, :MODE => 0x101,
-		:AUDIONEXT => 0x102, :AUDIOPREV => 0x103, :AUDIOSTOP => 0x104, :AUDIOPLAY => 0x105,
-		:AUDIOMUTE => 0x106, :MEDIASELECT => 0x107, :WWW => 0x108, :MAIL => 0x109,
-		:CALCULATOR => 0x10A, :COMPUTER => 0x10B, :AC_SEARCH => 0x10C, :AC_HOME => 0x10D,
-		:AC_BACK => 0x10E, :AC_FORWARD => 0x10F, :AC_STOP => 0x110, :AC_REFRESH => 0x111,
-		:AC_BOOKMARKS => 0x112, :BRIGHTNESSDOWN => 0x113, :BRIGHTNESSUP => 0x114, :DISPLAYSWITCH => 0x115,
-		:KBDILLUMTOGGLE => 0x116, :KBDILLUMDOWN => 0x117, :KBDILLUMUP => 0x118, :EJECT => 0x119,
-		:SLEEP => 0x11A, :APP1 => 0x11B, :APP2 => 0x11C
-	}
+  SDL = { :UNKNOWN => 0x00,
+          :A => 0x04, :B => 0x05, :C => 0x06, :D => 0x07,
+          :E => 0x08, :F => 0x09, :G => 0x0A, :H => 0x0B,
+          :I => 0x0C, :J => 0x0D, :K => 0x0E, :L => 0x0F,
+          :M => 0x10, :N => 0x11, :O => 0x12, :P => 0x13,
+          :Q => 0x14, :R => 0x15, :S => 0x16, :T => 0x17,
+          :U => 0x18, :V => 0x19, :W => 0x1A, :X => 0x1B,
+          :Y => 0x1C, :Z => 0x1D, :N1 => 0x1E, :N2 => 0x1F,
+          :N3 => 0x20, :N4 => 0x21, :N5 => 0x22, :N6 => 0x23,
+          :N7 => 0x24, :N8 => 0x25, :N9 => 0x26, :N0 => 0x27,
+          :RETURN => 0x28, :ESCAPE => 0x29, :BACKSPACE => 0x2A, :TAB => 0x2B,
+          :SPACE => 0x2C, :MINUS => 0x2D, :EQUALS => 0x2E, :LEFTBRACKET => 0x2F,
+          :RIGHTBRACKET => 0x30, :BACKSLASH => 0x31, :NONUSHASH => 0x32, :SEMICOLON => 0x33,
+          :APOSTROPHE => 0x34, :GRAVE => 0x35, :COMMA => 0x36, :PERIOD => 0x37,
+          :SLASH => 0x38, :CAPSLOCK => 0x39, :F1 => 0x3A, :F2 => 0x3B,
+          :F3 => 0x3C, :F4 => 0x3D, :F5 => 0x3E, :F6 => 0x3F,
+          :F7 => 0x40, :F8 => 0x41, :F9 => 0x42, :F10 => 0x43,
+          :F11 => 0x44, :F12 => 0x45, :PRINTSCREEN => 0x46, :SCROLLLOCK => 0x47,
+          :PAUSE => 0x48, :INSERT => 0x49, :HOME => 0x4A, :PAGEUP => 0x4B,
+          :DELETE => 0x4C, :END => 0x4D, :PAGEDOWN => 0x4E, :RIGHT => 0x4F,
+          :LEFT => 0x50, :DOWN => 0x51, :UP => 0x52, :NUMLOCKCLEAR => 0x53,
+          :KP_DIVIDE => 0x54, :KP_MULTIPLY => 0x55, :KP_MINUS => 0x56, :KP_PLUS => 0x57,
+          :KP_ENTER => 0x58, :KP_1 => 0x59, :KP_2 => 0x5A, :KP_3 => 0x5B,
+          :KP_4 => 0x5C, :KP_5 => 0x5D, :KP_6 => 0x5E, :KP_7 => 0x5F,
+          :KP_8 => 0x60, :KP_9 => 0x61, :KP_0 => 0x62, :KP_PERIOD => 0x63,
+          :NONUSBACKSLASH => 0x64, :APPLICATION => 0x65, :POWER => 0x66, :KP_EQUALS => 0x67,
+          :F13 => 0x68, :F14 => 0x69, :F15 => 0x6A, :F16 => 0x6B,
+          :F17 => 0x6C, :F18 => 0x6D, :F19 => 0x6E, :F20 => 0x6F,
+          :F21 => 0x70, :F22 => 0x71, :F23 => 0x72, :F24 => 0x73,
+          :EXECUTE => 0x74, :HELP => 0x75, :MENU => 0x76, :SELECT => 0x77,
+          :STOP => 0x78, :AGAIN => 0x79, :UNDO => 0x7A, :CUT => 0x7B,
+          :COPY => 0x7C, :PASTE => 0x7D, :FIND => 0x7E, :MUTE => 0x7F,
+          :VOLUMEUP => 0x80, :VOLUMEDOWN => 0x81, :LOCKINGCAPSLOCK => 0x82, :LOCKINGNUMLOCK => 0x83,
+          :LOCKINGSCROLLLOCK => 0x84, :KP_COMMA => 0x85, :KP_EQUALSAS400 => 0x86, :INTERNATIONAL1 => 0x87,
+          :INTERNATIONAL2 => 0x88, :INTERNATIONAL3 => 0x89, :INTERNATIONAL4 => 0x8A, :INTERNATIONAL5 => 0x8B,
+          :INTERNATIONAL6 => 0x8C, :INTERNATIONAL7 => 0x8D, :INTERNATIONAL8 => 0x8E, :INTERNATIONAL9 => 0x8F,
+          :LANG1 => 0x90, :LANG2 => 0x91, :LANG3 => 0x92, :LANG4 => 0x93,
+          :LANG5 => 0x94, :LANG6 => 0x95, :LANG7 => 0x96, :LANG8 => 0x97,
+          :LANG9 => 0x98, :ALTERASE => 0x99, :SYSREQ => 0x9A, :CANCEL => 0x9B,
+          :CLEAR => 0x9C, :PRIOR => 0x9D, :RETURN2 => 0x9E, :SEPARATOR => 0x9F,
+          :OUT => 0xA0, :OPER => 0xA1, :CLEARAGAIN => 0xA2, :CRSEL => 0xA3,
+          :EXSEL => 0xA4, :KP_00 => 0xB0, :KP_000 => 0xB1, :THOUSANDSSEPARATOR => 0xB2,
+          :DECIMALSEPARATOR => 0xB3, :CURRENCYUNIT => 0xB4, :CURRENCYSUBUNIT => 0xB5, :KP_LEFTPAREN => 0xB6,
+          :KP_RIGHTPAREN => 0xB7, :KP_LEFTBRACE => 0xB8, :KP_RIGHTBRACE => 0xB9, :KP_TAB => 0xBA,
+          :KP_BACKSPACE => 0xBB, :KP_A => 0xBC, :KP_B => 0xBD, :KP_C => 0xBE,
+          :KP_D => 0xBF, :KP_E => 0xC0, :KP_F => 0xC1, :KP_XOR => 0xC2,
+          :KP_POWER => 0xC3, :KP_PERCENT => 0xC4, :KP_LESS => 0xC5, :KP_GREATER => 0xC6,
+          :KP_AMPERSAND => 0xC7, :KP_DBLAMPERSAND => 0xC8,
+          :KP_VERTICALBAR => 0xC9, :KP_DBLVERTICALBAR => 0xCA,
+          :KP_COLON => 0xCB, :KP_HASH => 0xCC, :KP_SPACE => 0xCD, :KP_AT => 0xCE,
+          :KP_EXCLAM => 0xCF, :KP_MEMSTORE => 0xD0, :KP_MEMRECALL => 0xD1, :KP_MEMCLEAR => 0xD2,
+          :KP_MEMADD => 0xD3, :KP_MEMSUBTRACT => 0xD4, :KP_MEMMULTIPLY => 0xD5, :KP_MEMDIVIDE => 0xD6,
+          :KP_PLUSMINUS => 0xD7, :KP_CLEAR => 0xD8, :KP_CLEARENTRY => 0xD9, :KP_BINARY => 0xDA,
+          :KP_OCTAL => 0xDB, :KP_DECIMAL => 0xDC, :KP_HEXADECIMAL => 0xDD, :LCTRL => 0xE0,
+          :LSHIFT => 0xE1, :LALT => 0xE2, :LGUI => 0xE3, :RCTRL => 0xE4,
+          :RSHIFT => 0xE5, :RALT => 0xE6, :RGUI => 0xE7, :MODE => 0x101,
+          :AUDIONEXT => 0x102, :AUDIOPREV => 0x103, :AUDIOSTOP => 0x104, :AUDIOPLAY => 0x105,
+          :AUDIOMUTE => 0x106, :MEDIASELECT => 0x107, :WWW => 0x108, :MAIL => 0x109,
+          :CALCULATOR => 0x10A, :COMPUTER => 0x10B, :AC_SEARCH => 0x10C, :AC_HOME => 0x10D,
+          :AC_BACK => 0x10E, :AC_FORWARD => 0x10F, :AC_STOP => 0x110, :AC_REFRESH => 0x111,
+          :AC_BOOKMARKS => 0x112, :BRIGHTNESSDOWN => 0x113, :BRIGHTNESSUP => 0x114, :DISPLAYSWITCH => 0x115,
+          :KBDILLUMTOGGLE => 0x116, :KBDILLUMDOWN => 0x117, :KBDILLUMUP => 0x118, :EJECT => 0x119,
+          :SLEEP => 0x11A, :APP1 => 0x11B, :APP2 => 0x11C }.freeze
 
-	SDL.default = SDL[:UNKNOWN]
+  SDL.default = SDL[:UNKNOWN]
 
-	WIN32 = {
-		:LBUTTON => 0x01, :RBUTTON => 0x02, :MBUTTON => 0x04,
+  WIN32 = {
+    :LBUTTON => 0x01, :RBUTTON => 0x02, :MBUTTON => 0x04,
 
-		:BACK => 0x08, :TAB => 0x09, :RETURN => 0x0D, :SHIFT => 0x10,
-		:CONTROL => 0x11, :MENU => 0x12, :PAUSE => 0x13, :CAPITAL => 0x14,
-		:ESCAPE => 0x1B, :SPACE => 0x20, :PRIOR => 0x21, :NEXT => 0x22,
-		:END => 0x23, :HOME => 0x24, :LEFT => 0x25, :UP => 0x26,
-		:RIGHT => 0x27, :DOWN => 0x28, :PRINT => 0x2A, :INSERT => 0x2D,
-		:DELETE => 0x2E,
+    :BACK => 0x08, :TAB => 0x09, :RETURN => 0x0D, :SHIFT => 0x10,
+    :CONTROL => 0x11, :MENU => 0x12, :PAUSE => 0x13, :CAPITAL => 0x14,
+    :ESCAPE => 0x1B, :SPACE => 0x20, :PRIOR => 0x21, :NEXT => 0x22,
+    :END => 0x23, :HOME => 0x24, :LEFT => 0x25, :UP => 0x26,
+    :RIGHT => 0x27, :DOWN => 0x28, :PRINT => 0x2A, :INSERT => 0x2D,
+    :DELETE => 0x2E,
 
-		:N0 => 0x30, :N1 => 0x31, :N2 => 0x32, :N3 => 0x33,
-		:N4 => 0x34, :N5 => 0x35, :N6 => 0x36, :N7 => 0x37, :N8 => 0x38,
-		:N9 => 0x39,
+    :N0 => 0x30, :N1 => 0x31, :N2 => 0x32, :N3 => 0x33,
+    :N4 => 0x34, :N5 => 0x35, :N6 => 0x36, :N7 => 0x37, :N8 => 0x38,
+    :N9 => 0x39,
 
-		:A => 0x41, :B => 0x42, :C => 0x43, :D => 0x44, :E => 0x45, :F => 0x46,
-		:G => 0x47, :H => 0x48, :I => 0x49, :J => 0x4A, :K => 0x4B, :L => 0x4C,
-		:M => 0x4D, :N => 0x4E, :O => 0x4F, :P => 0x50, :Q => 0x51, :R => 0x52,
-		:S => 0x53, :T => 0x54, :U => 0x55, :V => 0x56, :W => 0x57, :X => 0x58,
-		:Y => 0x59, :Z => 0x5A,
+    :A => 0x41, :B => 0x42, :C => 0x43, :D => 0x44, :E => 0x45, :F => 0x46,
+    :G => 0x47, :H => 0x48, :I => 0x49, :J => 0x4A, :K => 0x4B, :L => 0x4C,
+    :M => 0x4D, :N => 0x4E, :O => 0x4F, :P => 0x50, :Q => 0x51, :R => 0x52,
+    :S => 0x53, :T => 0x54, :U => 0x55, :V => 0x56, :W => 0x57, :X => 0x58,
+    :Y => 0x59, :Z => 0x5A,
 
-		:LWIN => 0x5B, :RWIN => 0x5C,
+    :LWIN => 0x5B, :RWIN => 0x5C,
 
-		:NUMPAD0 => 0x60, :NUMPAD1 => 0x61, :NUMPAD2 => 0x62, :NUMPAD3 => 0x63,
-		:NUMPAD4 => 0x64, :NUMPAD5 => 0x65, :NUMPAD6 => 0x66, :NUMPAD7 => 0x67,
-		:NUMPAD8 => 0x68, :NUMPAD9 => 0x69,
-		:MULTIPLY => 0x6A, :ADD => 0x6B, :SEPARATOR => 0x6C, :SUBSTRACT => 0x6D,
-		:DECIMAL => 0x6E, :DIVIDE => 0x6F,
+    :NUMPAD0 => 0x60, :NUMPAD1 => 0x61, :NUMPAD2 => 0x62, :NUMPAD3 => 0x63,
+    :NUMPAD4 => 0x64, :NUMPAD5 => 0x65, :NUMPAD6 => 0x66, :NUMPAD7 => 0x67,
+    :NUMPAD8 => 0x68, :NUMPAD9 => 0x69,
+    :MULTIPLY => 0x6A, :ADD => 0x6B, :SEPARATOR => 0x6C, :SUBSTRACT => 0x6D,
+    :DECIMAL => 0x6E, :DIVIDE => 0x6F,
 
-		:F1 => 0x70, :F2 => 0x71, :F3 => 0x72, :F4 => 0x73,
-		:F5 => 0x74, :F6 => 0x75, :F7 => 0x76, :F8 => 0x77,
-		:F9 => 0x78, :F10 => 0x79, :F11 => 0x7A, :F12 => 0x7B,
-		:F13 => 0x7C, :F14 => 0x7D, :F15 => 0x7E, :F16 => 0x7F,
-		:F17 => 0x80, :F18 => 0x81, :F19 => 0x82, :F20 => 0x83,
-		:F21 => 0x84, :F22 => 0x85, :F23 => 0x86, :F24 => 0x87,
+    :F1 => 0x70, :F2 => 0x71, :F3 => 0x72, :F4 => 0x73,
+    :F5 => 0x74, :F6 => 0x75, :F7 => 0x76, :F8 => 0x77,
+    :F9 => 0x78, :F10 => 0x79, :F11 => 0x7A, :F12 => 0x7B,
+    :F13 => 0x7C, :F14 => 0x7D, :F15 => 0x7E, :F16 => 0x7F,
+    :F17 => 0x80, :F18 => 0x81, :F19 => 0x82, :F20 => 0x83,
+    :F21 => 0x84, :F22 => 0x85, :F23 => 0x86, :F24 => 0x87,
 
-		:NUMLOCK => 0x90, :SCROLL => 0x91,
-		:LSHIFT => 0xA0, :RSHIFT => 0xA1, :LCONTROL => 0xA2, :RCONTROL => 0xA3,
-		:LMENU => 0xA4, :RMENU => 0xA5,
-		
-		:OEM_1 => 0xBA,
-		:OEM_PLUS => 0xBB, :OEM_COMMA => 0xBC, :OEM_MINUS => 0xBD, :OEM_PERIOD => 0xBE,
-		:OEM_2 => 0xBF, :OEM_3 => 0xC0, :OEM_4 => 0xDB, :OEM_5 => 0xDC,
-		:OEM_6 => 0xDD, :OEM_7 => 0xDE
-	}
+    :NUMLOCK => 0x90, :SCROLL => 0x91,
+    :LSHIFT => 0xA0, :RSHIFT => 0xA1, :LCONTROL => 0xA2, :RCONTROL => 0xA3,
+    :LMENU => 0xA4, :RMENU => 0xA5,
 
-	WIN32INV = WIN32.invert
+    :OEM_1 => 0xBA,
+    :OEM_PLUS => 0xBB, :OEM_COMMA => 0xBC, :OEM_MINUS => 0xBD, :OEM_PERIOD => 0xBE,
+    :OEM_2 => 0xBF, :OEM_3 => 0xC0, :OEM_4 => 0xDB, :OEM_5 => 0xDC,
+    :OEM_6 => 0xDD, :OEM_7 => 0xDE
+  }.freeze
 
-	WIN2SDL = {
-		:BACK => :BACKSPACE,
-		:CAPITAL => :CAPSLOCK,
-		:PRIOR => :PAGEUP, :NEXT => :PAGEDOWN,
-		:PRINT => :PRINTSCREEN,
+  WIN32INV = WIN32.invert
 
-		:LWIN => :LGUI, :RWIN => :RGUI,
+  WIN2SDL = {
+    :BACK => :BACKSPACE,
+    :CAPITAL => :CAPSLOCK,
+    :PRIOR => :PAGEUP, :NEXT => :PAGEDOWN,
+    :PRINT => :PRINTSCREEN,
 
-		:NUMPAD0 => :KP_0, :NUMPAD1 => :KP_1, :NUMPAD2 => :KP_2, :NUMPAD3 => :KP_3,
-		:NUMPAD4 => :KP_4, :NUMPAD5 => :KP_5, :NUMPAD6 => :KP_6, :NUMPAD7 => :KP_7,
-		:NUMPAD8 => :KP_8, :NUMPAD9 => :KP_9,
-		:MULTIPLY => :KP_MULTIPLY, :ADD => :KP_PLUS, :SUBSTRACT => :KP_MINUS,
-		:DECIMAL => :KP_DECIMAL, :DIVIDE => :KP_DIVIDE,
+    :LWIN => :LGUI, :RWIN => :RGUI,
 
-		:NUMLOCK => :NUMLOCKCLEAR, :SCROLL => :SCROLLLOCK,
-		:LCONTROL => :LCTRL, :RCONTROL => :RCTRL,
-		:LMENU => :LALT, :RMENU => :RALT,
-		
-		# These are OEM and can vary by country
-		# Values taken from Joiplay's src/input.cpp
-		:OEM_1 => :SEMICOLON,
-		:OEM_PLUS => :EQUALS, :OEM_COMMA => :COMMA, :OEM_MINUS => :MINUS, :OEM_PERIOD => :PERIOD,
-		:OEM_2 => :SLASH, :OEM_3 => :GRAVE, :OEM_4 => :LEFTBRACKET, :OEM_5 => :BACKSLASH,
-		:OEM_6 => :RIGHTBRACKET, :OEM_7 => :APOSTROPHE
-	}
+    :NUMPAD0 => :KP_0, :NUMPAD1 => :KP_1, :NUMPAD2 => :KP_2, :NUMPAD3 => :KP_3,
+    :NUMPAD4 => :KP_4, :NUMPAD5 => :KP_5, :NUMPAD6 => :KP_6, :NUMPAD7 => :KP_7,
+    :NUMPAD8 => :KP_8, :NUMPAD9 => :KP_9,
+    :MULTIPLY => :KP_MULTIPLY, :ADD => :KP_PLUS, :SUBSTRACT => :KP_MINUS,
+    :DECIMAL => :KP_DECIMAL, :DIVIDE => :KP_DIVIDE,
 
-	WIN2SDL.default = :UNKNOWN
+    :NUMLOCK => :NUMLOCKCLEAR, :SCROLL => :SCROLLLOCK,
+    :LCONTROL => :LCTRL, :RCONTROL => :RCTRL,
+    :LMENU => :LALT, :RMENU => :RALT,
+
+    # These are OEM and can vary by country
+    # Values taken from Joiplay's src/input.cpp
+    :OEM_1 => :SEMICOLON,
+    :OEM_PLUS => :EQUALS, :OEM_COMMA => :COMMA, :OEM_MINUS => :MINUS, :OEM_PERIOD => :PERIOD,
+    :OEM_2 => :SLASH, :OEM_3 => :GRAVE, :OEM_4 => :LEFTBRACKET, :OEM_5 => :BACKSLASH,
+    :OEM_6 => :RIGHTBRACKET, :OEM_7 => :APOSTROPHE
+  }.freeze
+
+  WIN2SDL.default = :UNKNOWN
 end
 
 $win32KeyStates = nil
 
 module Graphics
-	class << self
-		unless method_defined?(:win32wrap_update)
-			alias_method(:win32wrap_update, :update)
-		end
-		def update
-			win32wrap_update
-			$win32KeyStates = nil
-		end
-	end
+  class << self
+    alias win32wrap_update update unless method_defined?(:win32wrap_update)
+    def update
+      win32wrap_update
+      $win32KeyStates = nil
+    end
+  end
 end
 
+# rubocop:disable Naming/AccessorMethodName -- mirrors the
+# Win32::raw_keystates accessor name games and shims call.
 def get_raw_keystates
-	if $win32KeyStates == nil
-		$win32KeyStates = Input.raw_key_states
-	end
+  $win32KeyStates = Input.raw_key_states if $win32KeyStates.nil?
 
-	return $win32KeyStates
+  $win32KeyStates
 end
+# rubocop:enable Naming/AccessorMethodName
 
 def common_keystate(vkey)
-	vkey_name = Scancodes::WIN32INV[vkey]
+  vkey_name = Scancodes::WIN32INV[vkey]
 
-	states = get_raw_keystates
-	pressed = false
+  states = get_raw_keystates
+  pressed = false
 
-	if vkey_name == :LBUTTON
-		pressed = Input.press?(Input::MOUSELEFT)
-	elsif vkey_name == :RBUTTON
-		pressed = Input.press?(Input::MOUSERIGHT)
-	elsif vkey_name == :MBUTTON
-		pressed = Input.press?(Input::MOUSEMIDDLE)
-	elsif vkey_name == :SHIFT
-		pressed = double_state(states, :LSHIFT, :RSHIFT)
-	elsif vkey_name == :MENU
-		pressed = double_state(states, :LALT, :RALT)
-	elsif vkey_name == :CONTROL
-		pressed = double_state(states, :LCTRL, :RCTRL)
-	else
-		scan = nil
-		if Scancodes::SDL.key?(vkey_name)
-			scan = vkey_name
-		else
-			scan = Scancodes::WIN2SDL[vkey_name]
-		end
+  case vkey_name
+  when :LBUTTON
+    pressed = Input.press?(Input::MOUSELEFT)
+  when :RBUTTON
+    pressed = Input.press?(Input::MOUSERIGHT)
+  when :MBUTTON
+    pressed = Input.press?(Input::MOUSEMIDDLE)
+  when :SHIFT
+    pressed = double_state(states, :LSHIFT, :RSHIFT)
+  when :MENU
+    pressed = double_state(states, :LALT, :RALT)
+  when :CONTROL
+    pressed = double_state(states, :LCTRL, :RCTRL)
+  else
+    nil
+    scan = if Scancodes::SDL.key?(vkey_name)
+             vkey_name
+           else
+             Scancodes::WIN2SDL[vkey_name]
+           end
 
-		pressed = state_pressed(states, scan)
-	end
+    pressed = state_pressed(states, scan)
+  end
 
-	return pressed ? 1 : 0
+  pressed ? 1 : 0
 end
 
 def memcpy_string(dst, src)
-	i = 0
-	src.each_byte do |b|
-		dst[i] = b
-		i += 1
-	end
+  i = 0
+  src.each_byte do |b|
+    dst[i] = b
+    i += 1
+  end
 end
 
 def state_pressed(states, sdl_scan)
-	return states[Scancodes::SDL[sdl_scan]]
+  states[Scancodes::SDL[sdl_scan]]
 end
 
 def double_state(states, left, right)
-	return state_pressed(states, left) || state_pressed(states, right)
+  state_pressed(states, left) || state_pressed(states, right)
 end
 
 module Win32API_Impl
-	module User32
-		class Keybd_event
-			Seq = [
-				[0xA4, 0, 0, 0],
-				[0xD, 0, 0, 0],
-				[0xD, 0, 2, 0],
-				[0xA4, 0, 2, 0]]
-			Seq2 = [
-				[0x12, 0, 0, 0],
-				[0xD, 0, 0, 0],
-				[0xD, 0, 2, 0],
-				[0x12, 0, 2, 0]]
-			def initialize
-				@index = 0
-			end
-			def call(args)
-				seq = [args[0], args[1], args[2], args[3]]
+  module User32
+    class Keybd_event
+      Seq = [
+        [0xA4, 0, 0, 0],
+        [0xD, 0, 0, 0],
+        [0xD, 0, 2, 0],
+        [0xA4, 0, 2, 0]
+      ].freeze
+      Seq2 = [
+        [0x12, 0, 0, 0],
+        [0xD, 0, 0, 0],
+        [0xD, 0, 2, 0],
+        [0x12, 0, 2, 0]
+      ].freeze
+      def initialize
+        @index = 0
+      end
 
-				if seq == Seq[@index] or seq == Seq2[@index]
-					@index += 1
-				else
-					@index = 0
-				end
+      def call(args)
+        seq = [args[0], args[1], args[2], args[3]]
 
-				if @index == 4
-					@index = 0
-					Graphics.fullscreen = !Graphics.fullscreen
-				end
-			end
-		end
+        if (seq == Seq[@index]) || (seq == Seq2[@index])
+          @index += 1
+        else
+          @index = 0
+        end
 
-		class GetKeyState
-			def call(vkey)
-				# Use C-level asyncKeyState which reads directly from
-				# EventThread::keyStates[], bypassing Input::update().
-				# This is critical because games like Pokemon Essentials
-				# override Input.update at the Ruby level.
-				return Input.asyncKeyState(vkey[0]) > 0 ? 1 : 0
-			end
-		end
-		class GetAsyncKeyState
-			PRESSED_BIT = (1 << 15)
-			def call(vkey)
-				return Input.asyncKeyState(vkey[0])
-			end
-		end
-		class GetKeyboardState
-			PRESSED_BIT = 0x80
-			def call(args)
-				out_states = args[0]
+        return unless @index == 4
 
-				Scancodes::WIN32.each do |name, val|
-					pressed = Input.asyncKeyState(val) > 0
+        @index = 0
+        Graphics.fullscreen = !Graphics.fullscreen
+      end
+    end
 
-					out_states[val] = pressed ? PRESSED_BIT : 0
-				end
-				return 1
-			end
-		end
+    class GetKeyState
+      def call(vkey)
+        # Use C-level asyncKeyState which reads directly from
+        # EventThread::keyStates[], bypassing Input::update().
+        # This is critical because games like Pokemon Essentials
+        # override Input.update at the Ruby level.
+        Input.asyncKeyState(vkey[0]) > 0 ? 1 : 0
+      end
+    end
 
-		# Translates a Windows virtual-key code into a hardware scancode
-		# (or vice versa). Pokemon Essentials-based games call this with
-		# uMapType = 0 (MAPVK_VK_TO_VSC) during text entry to build the
-		# arguments for ToUnicode below.
-		#
-		# We lean on the existing WIN2SDL table: for every VK in WIN32
-		# there's either a direct same-name entry in SDL's scancode
-		# table, or an aliased entry via WIN2SDL. The returned value is
-		# the SDL scancode, not the real Windows scancode - in practice
-		# games just pass it straight into ToUnicode, which in turn
-		# ignores the scancode field for character resolution, so the
-		# exact encoding doesn't matter.
-		class MapVirtualKey
-			MAPVK_VK_TO_VSC   = 0
-			MAPVK_VSC_TO_VK   = 1
-			MAPVK_VK_TO_CHAR  = 2
+    class GetAsyncKeyState
+      PRESSED_BIT = (1 << 15)
+      def call(vkey)
+        Input.asyncKeyState(vkey[0])
+      end
+    end
 
-			def call(args)
-				code = args[0].to_i
-				map_type = args[1].to_i
+    class GetKeyboardState
+      PRESSED_BIT = 0x80
+      def call(args)
+        out_states = args[0]
 
-				case map_type
-				when MAPVK_VK_TO_VSC
-					vkey_name = Scancodes::WIN32INV[code]
-					return 0 if vkey_name.nil?
-					sdl_name = Scancodes::SDL.key?(vkey_name) ? vkey_name : Scancodes::WIN2SDL[vkey_name]
-					return Scancodes::SDL[sdl_name] || 0
-				when MAPVK_VK_TO_CHAR
-					# Uppercase letter conversion. The high bit of the
-					# return value signals "dead key" on Windows; we
-					# never set it.
-					if code >= 0x41 && code <= 0x5A
-						return code
-					end
-					if code >= 0x30 && code <= 0x39
-						return code
-					end
-					return 0
-				else
-					# VSC_TO_VK and related variants aren't used by any
-					# game we ship support for. Returning 0 is the
-					# documented "no mapping" result.
-					return 0
-				end
-			end
-		end
+        Scancodes::WIN32.each do |_name, val|
+          pressed = Input.asyncKeyState(val) > 0
 
-		# Converts a virtual-key code + keyboard-state buffer into the
-		# Unicode character(s) it produces on a US QWERTY layout. Only
-		# supports the printable-ASCII range because that's all any
-		# RPG Maker name-entry screen needs (a-z, A-Z, 0-9, space, and
-		# a handful of punctuation). Non-printable keys return 0
-		# (ToUnicode's documented "no translation" result).
-		#
-		# Return semantics:
-		#   >0 : number of wide-chars written to the output buffer
-		#    0 : no translation (e.g. Escape, F1, arrow keys)
-		#   <0 : dead key (not produced here)
-		class ToUnicode
-			PRESSED_BIT = 0x80
+          out_states[val] = pressed ? PRESSED_BIT : 0
+        end
+        1
+      end
+    end
 
-			# Keyed by VK (Scancodes::WIN32[:SYMBOL]); values are
-			# [unshifted, shifted] characters. Layout is hardcoded to
-			# US QWERTY, which is what every mkxp-z-supported game
-			# assumes regardless of the actual host keyboard layout.
-			#
-			# Control keys (VK_BACK, VK_TAB, VK_RETURN, VK_ESCAPE)
-			# intentionally have no entry: Pokemon Uranium's
-			# name-entry appends whatever ToUnicode returns directly
-			# to the name string without filtering control bytes,
-			# so emitting \b here produces rectangle tofu in the
-			# text field. Real Windows returns 0 for these anyway.
-			US_LAYOUT = {
-				0x20 => [" ",  " "],  # SPACE
-				0x30 => ["0", ")"],   # 0
-				0x31 => ["1", "!"],   # 1
-				0x32 => ["2", "@"],   # 2
-				0x33 => ["3", "#"],   # 3
-				0x34 => ["4", "$"],   # 4
-				0x35 => ["5", "%"],   # 5
-				0x36 => ["6", "^"],   # 6
-				0x37 => ["7", "&"],   # 7
-				0x38 => ["8", "*"],   # 8
-				0x39 => ["9", "("],   # 9
-				0xBA => [";", ":"],   # OEM_1 semicolon
-				0xBB => ["=", "+"],   # OEM_PLUS
-				0xBC => [",", "<"],   # OEM_COMMA
-				0xBD => ["-", "_"],   # OEM_MINUS
-				0xBE => [".", ">"],   # OEM_PERIOD
-				0xBF => ["/", "?"],   # OEM_2 slash
-				0xC0 => ["`", "~"],   # OEM_3 grave
-				0xDB => ["[", "{"],   # OEM_4 left bracket
-				0xDC => ["\\", "|"],  # OEM_5 backslash
-				0xDD => ["]", "}"],   # OEM_6 right bracket
-				0xDE => ["'", '"'],   # OEM_7 apostrophe
-			}
+    # Translates a Windows virtual-key code into a hardware scancode
+    # (or vice versa). Pokemon Essentials-based games call this with
+    # uMapType = 0 (MAPVK_VK_TO_VSC) during text entry to build the
+    # arguments for ToUnicode below.
+    #
+    # We lean on the existing WIN2SDL table: for every VK in WIN32
+    # there's either a direct same-name entry in SDL's scancode
+    # table, or an aliased entry via WIN2SDL. The returned value is
+    # the SDL scancode, not the real Windows scancode - in practice
+    # games just pass it straight into ToUnicode, which in turn
+    # ignores the scancode field for character resolution, so the
+    # exact encoding doesn't matter.
+    class MapVirtualKey
+      MAPVK_VK_TO_VSC   = 0
+      MAPVK_VSC_TO_VK   = 1
+      MAPVK_VK_TO_CHAR  = 2
 
-			def call(args)
-				vkey = args[0].to_i
-				_scancode = args[1].to_i
-				state = args[2]
-				out_buf = args[3]
-				buf_size = args[4].to_i
-				_flags = args[5].to_i
+      def call(args)
+        code = args[0].to_i
+        map_type = args[1].to_i
 
-				return 0 if state.nil? || out_buf.nil? || buf_size < 1
+        case map_type
+        when MAPVK_VK_TO_VSC
+          vkey_name = Scancodes::WIN32INV[code]
+          return 0 if vkey_name.nil?
 
-				# Check shift / caps-lock flags inside the state
-				# buffer. ToUnicode treats both 0xA0 / 0xA1 as "shift"
-				# and 0x14 as caps-lock; the high bit of each byte is
-				# the pressed flag.
-				shift_pressed = (state[0x10].to_i & PRESSED_BIT) != 0 ||
-				                (state[0xA0].to_i & PRESSED_BIT) != 0 ||
-				                (state[0xA1].to_i & PRESSED_BIT) != 0
-				caps_on = (state[0x14].to_i & 0x01) != 0
+          sdl_name = Scancodes::SDL.key?(vkey_name) ? vkey_name : Scancodes::WIN2SDL[vkey_name]
+          Scancodes::SDL[sdl_name] || 0
+        when MAPVK_VK_TO_CHAR
+          # Uppercase letter conversion. The high bit of the
+          # return value signals "dead key" on Windows; we
+          # never set it.
+          return code if code.between?(0x41, 0x5A)
+          return code if code.between?(0x30, 0x39)
 
-				ch = nil
+          0
+        else
+          # VSC_TO_VK and related variants aren't used by any
+          # game we ship support for. Returning 0 is the
+          # documented "no mapping" result.
+          0
+        end
+      end
+    end
 
-				if vkey >= 0x41 && vkey <= 0x5A
-					# Letter keys. Caps lock XOR shift decides case.
-					upper = caps_on ^ shift_pressed
-					ch = (vkey + (upper ? 0 : 32)).chr
-				elsif US_LAYOUT.key?(vkey)
-					ch = US_LAYOUT[vkey][shift_pressed ? 1 : 0]
-				end
+    # Converts a virtual-key code + keyboard-state buffer into the
+    # Unicode character(s) it produces on a US QWERTY layout. Only
+    # supports the printable-ASCII range because that's all any
+    # RPG Maker name-entry screen needs (a-z, A-Z, 0-9, space, and
+    # a handful of punctuation). Non-printable keys return 0
+    # (ToUnicode's documented "no translation" result).
+    #
+    # Return semantics:
+    #   >0 : number of wide-chars written to the output buffer
+    #    0 : no translation (e.g. Escape, F1, arrow keys)
+    #   <0 : dead key (not produced here)
+    class ToUnicode
+      PRESSED_BIT = 0x80
 
-				return 0 if ch.nil?
+      # Keyed by VK (Scancodes::WIN32[:SYMBOL]); values are
+      # [unshifted, shifted] characters. Layout is hardcoded to
+      # US QWERTY, which is what every mkxp-z-supported game
+      # assumes regardless of the actual host keyboard layout.
+      #
+      # Control keys (VK_BACK, VK_TAB, VK_RETURN, VK_ESCAPE)
+      # intentionally have no entry: Pokemon Uranium's
+      # name-entry appends whatever ToUnicode returns directly
+      # to the name string without filtering control bytes,
+      # so emitting \b here produces rectangle tofu in the
+      # text field. Real Windows returns 0 for these anyway.
+      US_LAYOUT = {
+        0x20 => [' ', ' '], # SPACE
+        0x30 => ['0', ')'],   # 0
+        0x31 => ['1', '!'],   # 1
+        0x32 => ['2', '@'],   # 2
+        0x33 => ['3', '#'],   # 3
+        0x34 => ['4', '$'],   # 4
+        0x35 => ['5', '%'],   # 5
+        0x36 => ['6', '^'],   # 6
+        0x37 => ['7', '&'],   # 7
+        0x38 => ['8', '*'],   # 8
+        0x39 => ['9', '('],   # 9
+        0xBA => [';', ':'],   # OEM_1 semicolon
+        0xBB => ['=', '+'],   # OEM_PLUS
+        0xBC => [',', '<'],   # OEM_COMMA
+        0xBD => ['-', '_'],   # OEM_MINUS
+        0xBE => ['.', '>'],   # OEM_PERIOD
+        0xBF => ['/', '?'],   # OEM_2 slash
+        0xC0 => ['`', '~'],   # OEM_3 grave
+        0xDB => ['[', '{'],   # OEM_4 left bracket
+        0xDC => ['\\', '|'],  # OEM_5 backslash
+        0xDD => [']', '}'],   # OEM_6 right bracket
+        0xDE => ["'", '"'] # OEM_7 apostrophe
+      }.freeze
 
-				# The output buffer is a Ruby string holding a packed
-				# LPWSTR - each wide char is 2 bytes, little-endian.
-				# Write the UTF-16 code unit for `ch` (only BMP chars
-				# are emitted here, so a single code unit suffices).
-				#
-				# `unpack1` is Ruby 2.4+; use `unpack` + `.first`
-				# for 1.8/1.9 compatibility. `String#unpack("U")`
-				# works on every Ruby version we target.
-				code = ch.unpack("U").first
-				lo = code & 0xFF
-				hi = (code >> 8) & 0xFF
-				out_buf[0] = lo
-				out_buf[1] = hi
-				# Null-terminate when room allows so callers that
-				# treat the buffer as a C wide-string don't read stale
-				# bytes after the written char.
-				if buf_size >= 2
-					out_buf[2] = 0
-					out_buf[3] = 0
-				end
-				return 1
-			end
-		end
+      # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
+      # `call` mirrors Win32 ToUnicode's signature; the per-vkey
+      # branching is inherent to keyboard scan-code translation.
+      def call(args)
+        vkey = args[0].to_i
+        _scancode = args[1].to_i
+        state = args[2]
+        out_buf = args[3]
+        buf_size = args[4].to_i
+        _flags = args[5].to_i
 
-		class ShowCursor
-			def initialize
-				@cursor_count = 0
-			end
-			def call(args)
-				if args[0] == 1
-					@cursor_count += 1
-				else
-					@cursor_count -= 1
-				end
+        return 0 if state.nil? || out_buf.nil? || buf_size < 1
 
-				Graphics.show_cursor = @cursor_count >= 0
-			end
-		end
+        # Check shift / caps-lock flags inside the state
+        # buffer. ToUnicode treats both 0xA0 / 0xA1 as "shift"
+        # and 0x14 as caps-lock; the high bit of each byte is
+        # the pressed flag.
+        shift_pressed = (state[0x10].to_i & PRESSED_BIT) != 0 ||
+                        (state[0xA0].to_i & PRESSED_BIT) != 0 ||
+                        (state[0xA1].to_i & PRESSED_BIT) != 0
+        caps_on = (state[0x14].to_i & 0x01) != 0
 
-		class GetCursorPos
-			def call(args)
-				out = [Input.mouse_x, Input.mouse_y].pack('ll')
-				memcpy_string(args[0], out)
-				return 1
-			end
-		end
+        ch = nil
 
-		class GetClientRect
-			def call(args)
-				return 0 if args[0] != 42
-				rect = [0, 0, 640, 480]
-				begin
-					rect[2] = Graphics.width
-					rect[3] = Graphics.height
-				rescue
-				end
-				memcpy_string(args[1], rect.pack('l4'))
-				return 1
-			end
-		end
+        if vkey.between?(0x41, 0x5A)
+          # Letter keys. Caps lock XOR shift decides case.
+          upper = caps_on ^ shift_pressed
+          ch = (vkey + (upper ? 0 : 32)).chr
+        elsif US_LAYOUT.key?(vkey)
+          ch = US_LAYOUT[vkey][shift_pressed ? 1 : 0]
+        end
 
-		class ScreenToClient
-			def call(args)
-				return 1
-			end
-		end
+        return 0 if ch.nil?
 
-		class FindWindowA
-			def call(args)
-				if args[0] == "RGSS Player" || args[1] == "RGSS Player"
-					return 42
-				else
-					return 0
-				end
-			end
-		end
+        # The output buffer is a Ruby string holding a packed
+        # LPWSTR - each wide char is 2 bytes, little-endian.
+        # Write the UTF-16 code unit for `ch` (only BMP chars
+        # are emitted here, so a single code unit suffices).
+        #
+        # `unpack1` is Ruby 2.4+; use `unpack` + `.first`
+        # for 1.8/1.9 compatibility. `String#unpack("U")`
+        # works on every Ruby version we target.
+        code = ch.unpack('U').first
+        lo = code & 0xFF
+        hi = (code >> 8) & 0xFF
+        out_buf[0] = lo
+        out_buf[1] = hi
+        # Null-terminate when room allows so callers that
+        # treat the buffer as a C wide-string don't read stale
+        # bytes after the written char.
+        if buf_size >= 2
+          out_buf[2] = 0
+          out_buf[3] = 0
+        end
+        1
+      end
+      # rubocop:enable Metrics/AbcSize, Metrics/PerceivedComplexity
+    end
 
-		# Some scripts (Vinemon's `Scene_Movie3` for instance)
-		# request the unsuffixed `FindWindow` instead of the
-		# A/W-tagged form. Win32 itself routes the unsuffixed name to
-		# the ANSI variant via macro on Windows; our constant lookup
-		# is exact-match so we have to alias here, otherwise the
-		# script falls through to TOLERATE_ERRORS and gets back 0,
-		# breaking any later `hwnd == GetForegroundWindow.call` style
-		# comparison.
-		FindWindow = FindWindowA
-		FindWindowW = FindWindowA
+    class ShowCursor
+      def initialize
+        @cursor_count = 0
+      end
 
-		class FindWindowEx
-			def call(args)
-				# FindWindowEx(parent, childAfter, className, windowName)
-				# args[2] is className, args[3] is windowName
-				if args[2] == "RGSS Player" || args[3] == "RGSS Player"
-					return 42
-				else
-					return 0
-				end
-			end
-		end
+      def call(args)
+        if args[0] == 1
+          @cursor_count += 1
+        else
+          @cursor_count -= 1
+        end
 
-		# Alias for FindWindowExA (same as FindWindowEx)
-		FindWindowExA = FindWindowEx
-		FindWindowExW = FindWindowEx
+        Graphics.show_cursor = @cursor_count >= 0
+      end
+    end
 
-		class GetForegroundWindow
-			def call(args)
-				return 42
-			end
-		end
+    class GetCursorPos
+      def call(args)
+        out = [Input.mouse_x, Input.mouse_y].pack('ll')
+        memcpy_string(args[0], out)
+        1
+      end
+    end
 
-		class RegisterHotKey
-			def call(args)
-				return 1
-			end
-		end
+    class GetClientRect
+      def call(args)
+        return 0 if args[0] != 42
 
-		class GetWindowThreadProcessId
-			def call(args)
-				# Write a fake process ID to output buffer
-				if args[1].is_a?(String) && args[1].length >= 4
-					memcpy_string(args[1], [1].pack('l'))
-				end
-				return 1  # Return thread ID
-			end
-		end
-	end
+        rect = [0, 0, 640, 480]
+        begin
+          rect[2] = Graphics.width
+          rect[3] = Graphics.height
+        rescue StandardError
+          # Graphics not yet initialised; fall back to 640x480.
+        end
+        memcpy_string(args[1], rect.pack('l4'))
+        1
+      end
+    end
 
-	module Kernel32
-		class GetCurrentThreadId
-			def call(args)
-				return 1
-			end
-		end
+    class ScreenToClient
+      def call(_args)
+        1
+      end
+    end
 
-		# Encoding-aware wide/narrow char conversion (codepage
-		# tables, WideCharToMultiByte, MultiByteToWideChar) is
-		# Ruby 1.9+ only; Encoding::*, force_encoding, byteslice,
-		# getbyte/setbyte, and kw-arg encode(invalid: :replace) are
-		# all 1.9-or-later. Lives in win32_wrap_encoding.rb, loaded
-		# conditionally from binding-mri.cpp's preload list when
-		# RUBY_API_VERSION_MAJOR/MINOR >= 1.9. On the Ruby 1.8
-		# dispatch path (mkxp18-merged.o, RGSS1/RGSS2) those classes
-		# are absent; games that probe for them via
-		# `Win32API_Impl::Kernel32.const_defined?(:WideCharToMultiByte)`
-		# will see false and Win32API#call falls through to the
-		# TOLERATE_ERRORS branch (logs + returns 0). RGSS1/RGSS2
-		# games typically don't exercise UTF-16 paths anyway.
-	end
+    class FindWindowA
+      def call(args)
+        if args[0] == 'RGSS Player' || args[1] == 'RGSS Player'
+          42
+        else
+          0
+        end
+      end
+    end
 
-	# Cross-call state for the MCI/AVI playback shim. Vinemon Sauce
-	# Edition's title screen opens an AVI via Windows' MCI subsystem
-	# (`mciSendString "open ... type AVIVideo alias X"` followed by
-	# `play X notify`) and then sits in a Win32 message-pump loop
-	# waiting for `MM_MCINOTIFY` (0x3B9) - "MCI device done playing".
-	# Without a real MCI implementation the notification never lands
-	# and the loop spins forever, allocating message buffers each
-	# iteration (visible as 1 fps + steady memory growth in the
-	# debug overlay).
-	#
-	# Can't decode AVI here, but we can short-circuit
-	# the script's wait so it falls through to the title screen
-	# without playing the intro. The shim counts `mciSendString`
-	# calls; once the script has issued at least an open + play
-	# pair, the next `GetMessage` call returns a synthesized
-	# MM_MCINOTIFY message and the message-pump loop breaks.
-	#
-	# `mkxp_reset_session` runs between game sessions so a previous
-	# game's MCI activity doesn't leak into the next launch's first
-	# `GetMessage`.
-	module MciState
-		@@send_string_calls = 0
-		@@playback_done_pending = false
+    # Some scripts (Vinemon's `Scene_Movie3` for instance)
+    # request the unsuffixed `FindWindow` instead of the
+    # A/W-tagged form. Win32 itself routes the unsuffixed name to
+    # the ANSI variant via macro on Windows; our constant lookup
+    # is exact-match so we have to alias here, otherwise the
+    # script falls through to TOLERATE_ERRORS and gets back 0,
+    # breaking any later `hwnd == GetForegroundWindow.call` style
+    # comparison.
+    FindWindow = FindWindowA
+    FindWindowW = FindWindowA
 
-		def self.observe_send_string
-			@@send_string_calls += 1
-			# 2 = open + play. The script enters its message pump
-			# right after the play command, so this is when we arm
-			# the fake notification.
-			@@playback_done_pending = true if @@send_string_calls >= 2
-		end
+    class FindWindowEx
+      def call(args)
+        # FindWindowEx(parent, childAfter, className, windowName)
+        # args[2] is className, args[3] is windowName
+        if args[2] == 'RGSS Player' || args[3] == 'RGSS Player'
+          42
+        else
+          0
+        end
+      end
+    end
 
-		def self.consume_playback_done
-			result = @@playback_done_pending
-			@@playback_done_pending = false
-			result
-		end
+    # Alias for FindWindowExA (same as FindWindowEx)
+    FindWindowExA = FindWindowEx
+    FindWindowExW = FindWindowEx
 
-		def self.reset
-			@@send_string_calls = 0
-			@@playback_done_pending = false
-		end
-	end
+    class GetForegroundWindow
+      def call(_args)
+        42
+      end
+    end
 
-	module Winmm
-		# MciSendString shim. The script passes commands as
-		# UTF-16LE-encoded byte buffers (Vinemon's
-		# `Zeus::Encode.utf8_to_utf16`); we decode the relevant ones
-		# and write canned responses into the output buffer so the
-		# caller's mci_result parser produces values that exit its
-		# video-pump loops cleanly. Anything we don't recognize is a
-		# silent no-op (the caller treats `0` as success).
-		class MciSendStringW
-			# Map of command pattern → canned response text. Tested
-			# against Vinemon's Scene_Movie3.rb commands; extend as
-			# new MCI-using games hit unhandled cases.
-			RESPONSES = [
-				# `where X source` returns "x y w h" in pixels. We
-				# need non-zero w/h so the caller's
-				# `ratio = w / h.to_f` doesn't divide by zero.
-				[/^\s*where\s+\S+\s+source\b/i,           "0 0 320 240"],
-				# Length / position 0 + 0 makes the script's
-				# `break if position >= length` fire on the first
-				# iteration.
-				[/^\s*status\s+\S+\s+length\b/i,          "0"],
-				[/^\s*status\s+\S+\s+position\b/i,        "0"],
-				# Some scripts also check `mode == 'stopped'`.
-				[/^\s*status\s+\S+\s+mode\b/i,            "stopped"],
-				[/^\s*status\s+\S+\s+window\s+handle\b/i, "42"],
-			]
+    class RegisterHotKey
+      def call(_args)
+        1
+      end
+    end
 
-			def call(args)
-				Win32API_Impl::MciState.observe_send_string
+    class GetWindowThreadProcessId
+      def call(args)
+        # Write a fake process ID to output buffer
+        memcpy_string(args[1], [1].pack('l')) if args[1].is_a?(String) && args[1].length >= 4
+        1 # Return thread ID
+      end
+    end
+  end
 
-				cmd = decode_utf16(args[0])
-				# Avoid Ruby 2.3+ syntax / methods: we also build for
-				# Ruby 1.9 native (RGSS3 multi-Ruby path).
-				#   `&.` (safe navigation)       ; 2.3+
-				#   `Regexp#match?` (bool)       ; 2.4+
-				# Use the traditional `re =~ cmd` form (returns Integer
-				# offset on match, nil on miss) which works on every
-				# Ruby version we target.
-				match = RESPONSES.find { |re, _| re =~ cmd }
-				response = match ? match.last : nil
-				write_response(args[1], response) if response
+  module Kernel32
+    class GetCurrentThreadId
+      def call(_args)
+        1
+      end
+    end
 
-				# MCIERR_NOERROR. Real MCI returns specific error
-				# codes for failures; the caller paths we hit only
-				# distinguish `0 vs nonzero` and we want success.
-				return 0
-			end
+    # Encoding-aware wide/narrow char conversion (codepage
+    # tables, WideCharToMultiByte, MultiByteToWideChar) is
+    # Ruby 1.9+ only; Encoding::*, force_encoding, byteslice,
+    # getbyte/setbyte, and kw-arg encode(invalid: :replace) are
+    # all 1.9-or-later. Lives in win32_wrap_encoding.rb, loaded
+    # conditionally from binding-mri.cpp's preload list when
+    # RUBY_API_VERSION_MAJOR/MINOR >= 1.9. On the Ruby 1.8
+    # dispatch path (mkxp18-merged.o, RGSS1/RGSS2) those classes
+    # are absent; games that probe for them via
+    # `Win32API_Impl::Kernel32.const_defined?(:WideCharToMultiByte)`
+    # will see false and Win32API#call falls through to the
+    # TOLERATE_ERRORS branch (logs + returns 0). RGSS1/RGSS2
+    # games typically don't exercise UTF-16 paths anyway.
+  end
 
-			private
+  # Cross-call state for the MCI/AVI playback shim. Vinemon Sauce
+  # Edition's title screen opens an AVI via Windows' MCI subsystem
+  # (`mciSendString "open ... type AVIVideo alias X"` followed by
+  # `play X notify`) and then sits in a Win32 message-pump loop
+  # waiting for `MM_MCINOTIFY` (0x3B9) - "MCI device done playing".
+  # Without a real MCI implementation the notification never lands
+  # and the loop spins forever, allocating message buffers each
+  # iteration (visible as 1 fps + steady memory growth in the
+  # debug overlay).
+  #
+  # Can't decode AVI here, but we can short-circuit
+  # the script's wait so it falls through to the title screen
+  # without playing the intro. The shim counts `mciSendString`
+  # calls; once the script has issued at least an open + play
+  # pair, the next `GetMessage` call returns a synthesized
+  # MM_MCINOTIFY message and the message-pump loop breaks.
+  #
+  # `mkxp_reset_session` runs between game sessions so a previous
+  # game's MCI activity doesn't leak into the next launch's first
+  # `GetMessage`.
+  module MciState
+    @@send_string_calls = 0
+    @@playback_done_pending = false
 
-			# 1.8-safe ASCII-only fallbacks. The real UTF-16 /
-			# Encoding-aware versions live in win32_wrap_encoding.rb
-			# and override these via `private` redef in a reopened
-			# class when Ruby >= 1.9.
-			#
-			# Caveat: RPG Maker's MCI bridge passes args as UTF-16LE
-			# (every other byte is 0 for ASCII-range commands).
-			# These stubs handle the ASCII subset by stripping the
-			# zero bytes; non-ASCII Unicode passes through corrupted.
-			# Acceptable for RGSS1/RGSS2 games that ran on Windows
-			# ANSI codepages with ASCII-only MCI commands like
-			# "open foo type AVIVideo alias X".
+    def self.observe_send_string
+      @@send_string_calls += 1
+      # 2 = open + play. The script enters its message pump
+      # right after the play command, so this is when we arm
+      # the fake notification.
+      @@playback_done_pending = true if @@send_string_calls >= 2
+    end
 
-			def decode_utf16(buf)
-				return "" unless buf.is_a?(String) && !buf.empty?
-				# Unpack as 16-bit little-endian unsigned shorts.
-				# `unpack("v*")` works on every Ruby version we
-				# target. For ASCII-range chars the high byte is 0
-				# and the low byte is the codepoint.
-				codes = buf.unpack("v*")
-				out = ""
-				codes.each do |c|
-					break if c == 0
-					# ASCII-range: encode as single byte.
-					# Beyond ASCII: substitute '?' (we lack proper
-					# Unicode-to-bytes conversion on 1.8).
-					out << (c < 128 ? c.chr : "?")
-				end
-				out
-			end
+    def self.consume_playback_done
+      result = @@playback_done_pending
+      @@playback_done_pending = false
+      result
+    end
 
-			def write_response(buf, text)
-				return unless buf.is_a?(String) && buf.length >= 2
-				# Encode `text` as UTF-16LE bytes manually. On 1.8
-				# all `length`/`[i] = b.chr` ops work on byte
-				# strings (no encoding system). Pad with NUL.
-				utf16 = ""
-				text.each_byte { |b| utf16 << b.chr << 0.chr }
-				utf16 << 0.chr << 0.chr  # null terminator
-				limit = [utf16.length, buf.length].min
-				limit.times { |i| buf[i] = utf16[i, 1] }
-				# Null-pad the rest of the buffer.
-				(limit...buf.length).each { |i| buf[i] = "\0" }
-			end
-		end
-		MciSendStringA = MciSendStringW
-		MciSendString  = MciSendStringW
-	end
+    def self.reset
+      @@send_string_calls = 0
+      @@playback_done_pending = false
+    end
+  end
 
-	# Extend User32 with the GetMessage shim. Defined inside this
-	# `module User32` block so it sits alongside the existing
-	# Keybd_event / GetKeyState / etc. stubs above.
-	module User32
-		# Pokemon-Essentials-derived games typically don't enter a
-		# Win32 message loop at all - the engine's own event thread
-		# handles input. The exception is scripts that use MCI for
-		# media playback and need to pump messages until
-		# MM_MCINOTIFY arrives. We fake that one notification when
-		# `MciState.consume_playback_done` is set; otherwise we
-		# return 0 (the standard "WM_QUIT received" return that
-		# breaks while-GetMessage idioms cleanly).
-		class GetMessage
-			MM_MCINOTIFY            = 0x3B9
-			MCI_NOTIFY_SUCCESSFUL   = 0x1
+  module Winmm
+    # MciSendString shim. The script passes commands as
+    # UTF-16LE-encoded byte buffers (Vinemon's
+    # `Zeus::Encode.utf8_to_utf16`); we decode the relevant ones
+    # and write canned responses into the output buffer so the
+    # caller's mci_result parser produces values that exit its
+    # video-pump loops cleanly. Anything we don't recognize is a
+    # silent no-op (the caller treats `0` as success).
+    class MciSendStringW
+      # Map of command pattern → canned response text. Tested
+      # against Vinemon's Scene_Movie3.rb commands; extend as
+      # new MCI-using games hit unhandled cases.
+      RESPONSES = [
+        # `where X source` returns "x y w h" in pixels. We
+        # need non-zero w/h so the caller's
+        # `ratio = w / h.to_f` doesn't divide by zero.
+        [/^\s*where\s+\S+\s+source\b/i, '0 0 320 240'],
+        # Length / position 0 + 0 makes the script's
+        # `break if position >= length` fire on the first
+        # iteration.
+        [/^\s*status\s+\S+\s+length\b/i,          '0'],
+        [/^\s*status\s+\S+\s+position\b/i,        '0'],
+        # Some scripts also check `mode == 'stopped'`.
+        [/^\s*status\s+\S+\s+mode\b/i,            'stopped'],
+        [/^\s*status\s+\S+\s+window\s+handle\b/i, '42']
+      ].freeze
 
-			def call(args)
-				if Win32API_Impl::MciState.consume_playback_done
-					# Win32 MSG struct, 32-bit ABI (RGSS-era):
-					#   hwnd    (4 bytes, offset 0)
-					#   message (4 bytes, offset 4)
-					#   wParam  (4 bytes, offset 8)
-					#   lParam  (4 bytes, offset 12)
-					#   time    (4 bytes, offset 16)
-					#   pt.x    (4 bytes, offset 20)
-					#   pt.y    (4 bytes, offset 24)
-					# wParam = MCI_NOTIFY_SUCCESSFUL signals the
-					# script that playback completed without error.
-					msg = [0, MM_MCINOTIFY, MCI_NOTIFY_SUCCESSFUL,
-					       0, 0, 0, 0].pack('L7')
-					memcpy_string(args[0], msg)
-					return 1
-				end
-				return 0
-			end
-		end
-		GetMessageA = GetMessage
-		GetMessageW = GetMessage
-	end
+      def call(args)
+        Win32API_Impl::MciState.observe_send_string
+
+        cmd = decode_utf16(args[0])
+        # Avoid Ruby 2.3+ syntax / methods: we also build for
+        # Ruby 1.9 native (RGSS3 multi-Ruby path).
+        #   `&.` (safe navigation)       ; 2.3+
+        #   `Regexp#match?` (bool)       ; 2.4+
+        # Use the traditional `re =~ cmd` form (returns Integer
+        # offset on match, nil on miss) which works on every
+        # Ruby version we target.
+        match = RESPONSES.find { |re, _| re =~ cmd }
+        response = match ? match.last : nil
+        write_response(args[1], response) if response
+
+        # MCIERR_NOERROR. Real MCI returns specific error
+        # codes for failures; the caller paths we hit only
+        # distinguish `0 vs nonzero` and we want success.
+        0
+      end
+
+      private
+
+      # 1.8-safe ASCII-only fallbacks. The real UTF-16 /
+      # Encoding-aware versions live in win32_wrap_encoding.rb
+      # and override these via `private` redef in a reopened
+      # class when Ruby >= 1.9.
+      #
+      # Caveat: RPG Maker's MCI bridge passes args as UTF-16LE
+      # (every other byte is 0 for ASCII-range commands).
+      # These stubs handle the ASCII subset by stripping the
+      # zero bytes; non-ASCII Unicode passes through corrupted.
+      # Acceptable for RGSS1/RGSS2 games that ran on Windows
+      # ANSI codepages with ASCII-only MCI commands like
+      # "open foo type AVIVideo alias X".
+
+      def decode_utf16(buf)
+        return '' unless buf.is_a?(String) && !buf.empty?
+
+        # Unpack as 16-bit little-endian unsigned shorts.
+        # `unpack("v*")` works on every Ruby version we
+        # target. For ASCII-range chars the high byte is 0
+        # and the low byte is the codepoint.
+        codes = buf.unpack('v*')
+        out = ''
+        codes.each do |c|
+          break if c.zero?
+
+          # ASCII-range: encode as single byte.
+          # Beyond ASCII: substitute '?' (we lack proper
+          # Unicode-to-bytes conversion on 1.8).
+          out << (c < 128 ? c.chr : '?')
+        end
+        out
+      end
+
+      def write_response(buf, text)
+        return unless buf.is_a?(String) && buf.length >= 2
+
+        # Encode `text` as UTF-16LE bytes manually. On 1.8
+        # all `length`/`[i] = b.chr` ops work on byte
+        # strings (no encoding system). Pad with NUL.
+        utf16 = ''
+        text.each_byte { |b| utf16 << b.chr << 0.chr }
+        utf16 << 0.chr << 0.chr # null terminator
+        limit = [utf16.length, buf.length].min
+        limit.times { |i| buf[i] = utf16[i, 1] }
+        # Null-pad the rest of the buffer.
+        (limit...buf.length).each { |i| buf[i] = "\0" }
+      end
+    end
+    MciSendStringA = MciSendStringW
+    MciSendString  = MciSendStringW
+  end
+
+  # Extend User32 with the GetMessage shim. Defined inside this
+  # `module User32` block so it sits alongside the existing
+  # Keybd_event / GetKeyState / etc. stubs above.
+  module User32
+    # Pokemon-Essentials-derived games typically don't enter a
+    # Win32 message loop at all - the engine's own event thread
+    # handles input. The exception is scripts that use MCI for
+    # media playback and need to pump messages until
+    # MM_MCINOTIFY arrives. We fake that one notification when
+    # `MciState.consume_playback_done` is set; otherwise we
+    # return 0 (the standard "WM_QUIT received" return that
+    # breaks while-GetMessage idioms cleanly).
+    class GetMessage
+      MM_MCINOTIFY            = 0x3B9
+      MCI_NOTIFY_SUCCESSFUL   = 0x1
+
+      def call(args)
+        if Win32API_Impl::MciState.consume_playback_done
+          # Win32 MSG struct, 32-bit ABI (RGSS-era):
+          #   hwnd    (4 bytes, offset 0)
+          #   message (4 bytes, offset 4)
+          #   wParam  (4 bytes, offset 8)
+          #   lParam  (4 bytes, offset 12)
+          #   time    (4 bytes, offset 16)
+          #   pt.x    (4 bytes, offset 20)
+          #   pt.y    (4 bytes, offset 24)
+          # wParam = MCI_NOTIFY_SUCCESSFUL signals the
+          # script that playback completed without error.
+          msg = [0, MM_MCINOTIFY, MCI_NOTIFY_SUCCESSFUL,
+                 0, 0, 0, 0].pack('L7')
+          memcpy_string(args[0], msg)
+          return 1
+        end
+        0
+      end
+    end
+    GetMessageA = GetMessage
+    GetMessageW = GetMessage
+  end
 end
-
 
 # Reset MCI shim state between game sessions so a previous game's
 # play counters don't leak into the next launch.
@@ -791,9 +803,9 @@ end
 # can catch). `const_defined?` checks the constant table directly
 # without invoking `const_missing`, sidestepping the loop.
 $__mkxp_reset_hooks ||= []
-unless $__mkxp_reset_hooks.any? { |h|
+unless $__mkxp_reset_hooks.any? do |h|
   h.respond_to?(:source_location) && h.source_location && h.source_location[0] == __FILE__
-}
+end
   $__mkxp_reset_hooks << lambda do
     if Object.const_defined?(:Win32API_Impl) &&
        Win32API_Impl.const_defined?(:MciState)
@@ -803,11 +815,11 @@ unless $__mkxp_reset_hooks.any? { |h|
 end
 
 def kappatalize(s)
-	# Sanitize to a valid Ruby constant name: strip non-alphanumeric/underscore
-	# chars (e.g. "RGSS Linker" -> "RGSSLinker") and ensure first char is uppercase.
-	s = s.gsub(/[^A-Za-z0-9_]/, '')
-	s[0] = s[0, 1].upcase if s.length > 0
-	return s
+  # Sanitize to a valid Ruby constant name: strip non-alphanumeric/underscore
+  # chars (e.g. "RGSS Linker" -> "RGSSLinker") and ensure first char is uppercase.
+  s = s.gsub(/[^A-Za-z0-9_]/, '')
+  s[0] = s[0, 1].upcase unless s.empty?
+  s
 end
 
 # `method_defined?` does not see private methods. On iOS this preload runs
@@ -817,79 +829,73 @@ end
 # "native" initialize). Treat both public and private methods as "already
 # defined" for our idempotency guards.
 def mkxp_method_or_alias_defined?(klass, name)
-	klass.method_defined?(name) || klass.private_method_defined?(name)
+  klass.method_defined?(name) || klass.private_method_defined?(name)
 end
 
 class Win32API
-	NATIVE_ON_WINDOWS = true unless const_defined?("NATIVE_ON_WINDOWS")
-	TOLERATE_ERRORS = true unless const_defined?("TOLERATE_ERRORS")
-	LOG_NATIVE = false unless const_defined?("LOG_NATIVE")
+  NATIVE_ON_WINDOWS = true unless const_defined?('NATIVE_ON_WINDOWS')
+  TOLERATE_ERRORS = true unless const_defined?('TOLERATE_ERRORS')
+  LOG_NATIVE = false unless const_defined?('LOG_NATIVE')
 
-	# mkxp-z-apple-mobile has no native Win32API implementation - the
-	# MiniFFI binding is Windows-only and was dropped when the fork
-	# narrowed to iOS/iPadOS/tvOS. The alias_method calls below check
-	# whether a native :initialize / :call exists before capturing it,
-	# so this file works both with and without the native binding
-	# (and tolerates re-execution across game sessions on a persistent
-	# Ruby VM, where a second pass must not re-alias onto our wrapper).
-	if mkxp_method_or_alias_defined?(self, :initialize) && !mkxp_method_or_alias_defined?(self, :mkxp_native_initialize)
-		alias_method :mkxp_native_initialize, :initialize
-	end
-	def initialize(dll, func, *args)
-		@dll = dll
-		@func = func
-		@called = false
+  # mkxp-z-apple-mobile has no native Win32API implementation - the
+  # MiniFFI binding is Windows-only and was dropped when the fork
+  # narrowed to iOS/iPadOS/tvOS. The alias_method calls below check
+  # whether a native :initialize / :call exists before capturing it,
+  # so this file works both with and without the native binding
+  # (and tolerates re-execution across game sessions on a persistent
+  # Ruby VM, where a second pass must not re-alias onto our wrapper).
+  if mkxp_method_or_alias_defined?(self,
+                                   :initialize) && !mkxp_method_or_alias_defined?(self,
+                                                                                  :mkxp_native_initialize)
+    alias mkxp_native_initialize initialize
+  end
+  def initialize(dll, func, *args)
+    @dll = dll
+    @func = func
+    @called = false
 
-		dll = kappatalize(dll.chomp(".dll"))
-		func = kappatalize(func)
+    dll = kappatalize(dll.chomp('.dll'))
+    func = kappatalize(func)
 
-		if !System.is_windows? or !NATIVE_ON_WINDOWS
-			if Win32API_Impl.const_defined?(dll)
-				dll_impl = Win32API_Impl.const_get(dll)
-				if dll_impl.const_defined?(func)
-					@mkxp_wrap_impl = dll_impl.const_get(func).new
-					return
-				end
-			end
-		end
+    if (!System.is_windows? || !NATIVE_ON_WINDOWS) && Win32API_Impl.const_defined?(dll)
+      dll_impl = Win32API_Impl.const_get(dll)
+      if dll_impl.const_defined?(func)
+        @mkxp_wrap_impl = dll_impl.const_get(func).new
+        return
+      end
+    end
 
-		@mkxp_native_available = false
-		if respond_to?(:mkxp_native_initialize)
-			begin
-				mkxp_native_initialize(@dll, @func, *args)
-				@mkxp_native_available = true
-				return
-			rescue
-			end
-		end
+    @mkxp_native_available = false
+    return unless respond_to?(:mkxp_native_initialize)
 
-	end
+    begin
+      mkxp_native_initialize(@dll, @func, *args)
+      @mkxp_native_available = true
+      nil
+    rescue StandardError
+      # Native initialiser missing on this Win32API build; the
+      # Ruby-only fallback path above is enough for compat.
+    end
+  end
 
-	if mkxp_method_or_alias_defined?(self, :call) && !mkxp_method_or_alias_defined?(self, :mkxp_native_call)
-		alias_method :mkxp_native_call, :call
-	end
-	def call(*args)
-		if @mkxp_wrap_impl
-			return @mkxp_wrap_impl.call(args)
-		end
+  if mkxp_method_or_alias_defined?(self, :call) && !mkxp_method_or_alias_defined?(self, :mkxp_native_call)
+    alias mkxp_native_call call
+  end
+  def call(*args)
+    return @mkxp_wrap_impl.call(args) if @mkxp_wrap_impl
 
-		if @mkxp_native_available
-			if LOG_NATIVE
-				System.puts("[Win32API] [#{@dll}:#{@func}] #{args.to_s}")
-			end
-			return mkxp_native_call(*args)
-		end
+    if @mkxp_native_available
+      System.puts("[Win32API] [#{@dll}:#{@func}] #{args}") if LOG_NATIVE
+      return mkxp_native_call(*args)
+    end
 
-		if TOLERATE_ERRORS
-			System.puts("[Win32API] [#{@dll}:#{@func}] #{args.to_s}") if !@called
-			@called = true
-			return 0
-		else
-			raise RuntimeError, "[Win32API] [#{@dll}:#{@func}] #{args.to_s}"
-		end
-	end
+    raise "[Win32API] [#{@dll}:#{@func}] #{args}" unless TOLERATE_ERRORS
+
+    System.puts("[Win32API] [#{@dll}:#{@func}] #{args}") unless @called
+    @called = true
+    0
+  end
 end
-
 
 # Keep `Win32API` and `Win32API_Impl` across between-session resets;
 # rationale and pattern documented in `platform_compat.rb`. Without
@@ -898,6 +904,6 @@ end
 # const lookup) one bare `Win32API_Impl::...` away from triggering
 # the `const_missing` recursion.
 $__mkxp_preload_keep_consts ||= []
-[:Win32API, :Win32API_Impl].each do |c|
+%i[Win32API Win32API_Impl].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end

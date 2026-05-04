@@ -33,15 +33,15 @@ module Win32API_Impl
     # unrepresentable characters and means the conversion
     # always returns *something* the caller can parse.
     CODEPAGE_TO_ENCODING = {
-      65001 => Encoding::UTF_8,
-      20127 => Encoding::US_ASCII,
-      1252  => Encoding::Windows_1252,
-      932   => Encoding::Windows_31J,  # Shift_JIS / CP932
-      949   => Encoding::CP949,
-      936   => Encoding::GBK,
-      950   => Encoding::Big5,
-      28591 => Encoding::ISO_8859_1,
-      28605 => Encoding::ISO_8859_15,
+      65_001 => Encoding::UTF_8,
+      20_127 => Encoding::US_ASCII,
+      1252 => Encoding::Windows_1252,
+      932 => Encoding::Windows_31J, # Shift_JIS / CP932
+      949 => Encoding::CP949,
+      936 => Encoding::GBK,
+      950 => Encoding::Big5,
+      28_591 => Encoding::ISO_8859_1,
+      28_605 => Encoding::ISO_8859_15
     }.freeze
 
     def self.codepage_to_encoding(cp)
@@ -53,12 +53,14 @@ module Win32API_Impl
     # passed -1 for `cchWideChar`, i.e. null-terminated) or the
     # explicit count, capped at the byte size.
     def self.wide_byte_slice(buf, cch)
-      return "" unless buf.is_a?(String)
+      return '' unless buf.is_a?(String)
+
       if cch == -1
         # Null-terminated: scan for first 16-bit zero unit.
         idx = 0
         while idx + 1 < buf.bytesize
-          break if buf.getbyte(idx) == 0 && buf.getbyte(idx + 1) == 0
+          break if buf.getbyte(idx).zero? && buf.getbyte(idx + 1).zero?
+
           idx += 2
         end
         buf.byteslice(0, idx)
@@ -73,7 +75,8 @@ module Win32API_Impl
     # `cbMultiByte == -1`, i.e. null-terminated) or the
     # requested byte slice.
     def self.byte_slice(buf, cb)
-      return "" unless buf.is_a?(String)
+      return '' unless buf.is_a?(String)
+
       if cb == -1
         idx = buf.index("\0".b)
         idx ? buf.byteslice(0, idx) : buf.dup
@@ -101,19 +104,21 @@ module Win32API_Impl
 
         wide = Win32API_Impl::Kernel32.wide_byte_slice(src_buf, src_cch)
         target = Win32API_Impl::Kernel32.codepage_to_encoding(codepage)
-        converted = wide.force_encoding(Encoding::UTF_16LE)
-          .encode(target, invalid: :replace, undef: :replace)
-          .force_encoding(Encoding::ASCII_8BIT) rescue "".b
+        converted = begin
+          wide.force_encoding(Encoding::UTF_16LE)
+              .encode(target, :invalid => :replace, :undef => :replace)
+              .force_encoding(Encoding::ASCII_8BIT)
+        rescue StandardError
+          ''.b
+        end
 
         # Length query: caller passes nil/0 for dst to ask
         # how big a buffer they need to allocate.
-        if dst_buf.nil? || !dst_buf.is_a?(String) || dst_size <= 0
-          return converted.bytesize
-        end
+        return converted.bytesize if dst_buf.nil? || !dst_buf.is_a?(String) || dst_size <= 0
 
         n = [converted.bytesize, dst_buf.bytesize, dst_size].min
         n.times { |i| dst_buf.setbyte(i, converted.getbyte(i)) }
-        return n
+        n
       end
     end
     WideCharToMultiByteA = WideCharToMultiByte
@@ -124,6 +129,9 @@ module Win32API_Impl
     # implementing it round-trips Zeus::Encode correctly so any
     # script that depends on it works.
     class MultiByteToWideChar
+      # rubocop:disable Metrics/AbcSize -- mirrors Win32
+      # MultiByteToWideChar's signature; the per-arg validation +
+      # encode round-trip is inherent to the API.
       def call(args)
         codepage = args[0].to_i
         _flags   = args[1]
@@ -134,9 +142,13 @@ module Win32API_Impl
 
         narrow = Win32API_Impl::Kernel32.byte_slice(src_buf, src_cb)
         source = Win32API_Impl::Kernel32.codepage_to_encoding(codepage)
-        converted = narrow.force_encoding(source)
-          .encode(Encoding::UTF_16LE, invalid: :replace, undef: :replace)
-          .force_encoding(Encoding::ASCII_8BIT) rescue "".b
+        converted = begin
+          narrow.force_encoding(source)
+                .encode(Encoding::UTF_16LE, :invalid => :replace, :undef => :replace)
+                .force_encoding(Encoding::ASCII_8BIT)
+        rescue StandardError
+          ''.b
+        end
 
         if dst_buf.nil? || !dst_buf.is_a?(String) || dst_cch <= 0
           # Length query: returns count of UTF-16 code
@@ -146,11 +158,11 @@ module Win32API_Impl
 
         wide_bytes = [converted.bytesize, dst_buf.bytesize, dst_cch * 2].min
         wide_bytes.times { |i| dst_buf.setbyte(i, converted.getbyte(i)) }
-        return wide_bytes / 2
+        wide_bytes / 2
       end
+      # rubocop:enable Metrics/AbcSize
     end
     MultiByteToWideCharA = MultiByteToWideChar
-
 
     # Reopen MciSendString to override decode_utf16 / write_response
     # with encoding-aware versions. The 1.8-safe stubs in
@@ -161,17 +173,23 @@ module Win32API_Impl
       private
 
       def decode_utf16(buf)
-        return "" unless buf.is_a?(String) && !buf.empty?
+        return '' unless buf.is_a?(String) && !buf.empty?
+
         bytes = buf.dup.force_encoding(Encoding::ASCII_8BIT)
-        utf8 = bytes.force_encoding(Encoding::UTF_16LE)
-          .encode(Encoding::UTF_8, invalid: :replace, undef: :replace) rescue ""
-        utf8.split("\0", 2).first || ""
+        utf8 = begin
+          bytes.force_encoding(Encoding::UTF_16LE)
+               .encode(Encoding::UTF_8, :invalid => :replace, :undef => :replace)
+        rescue StandardError
+          ''
+        end
+        utf8.split("\0", 2).first || ''
       end
 
       def write_response(buf, text)
         return unless buf.is_a?(String) && buf.bytesize >= 2
+
         utf16 = "#{text}\0".encode(Encoding::UTF_16LE)
-          .force_encoding(Encoding::ASCII_8BIT)
+                           .force_encoding(Encoding::ASCII_8BIT)
         limit = [utf16.bytesize, buf.bytesize].min
         limit.times { |i| buf.setbyte(i, utf16.getbyte(i)) }
         # Null-pad the remaining buffer so callers don't

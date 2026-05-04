@@ -117,13 +117,27 @@ unless $__mkxp_session_audit_installed
   # case the baseline missed them.
   def __mkxp_audit_safe_to_remove?(klass, method_name, kind)
     return true unless $__MKXP_AUDIT_GUARDED_CLASSES.include?(klass.name)
+
     m =
       case kind
-      when :singleton then (klass.singleton_class.instance_method(method_name) rescue nil)
-      else                  (klass.instance_method(method_name) rescue nil)
+      when :singleton then begin
+        klass.singleton_class.instance_method(method_name)
+      rescue StandardError
+        nil
+      end
+      else begin
+        klass.instance_method(method_name)
+      rescue StandardError
+        nil
+      end
       end
     return false if m.nil?
-    loc = (m.source_location rescue nil)
+
+    loc = begin
+      m.source_location
+    rescue StandardError
+      nil
+    end
     !loc.nil?
   end
 
@@ -131,12 +145,21 @@ unless $__mkxp_session_audit_installed
   # record the *names* (sorted) of each category, not the actual
   # method bodies / values. The point is to detect "did the set
   # grow", not to faithfully reconstruct state.
+  #
+  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  # The complexity is intrinsic to Ruby-VM introspection: we walk
+  # every audited class and capture five method/variable categories
+  # per class. Splitting per-category would scatter the snapshot
+  # into many small methods that all have to coordinate the same
+  # error-tolerant fallbacks.
   def __mkxp_audit_snapshot
     state = { :__classes__ => {}, :__globals__ => {} }
     $__MKXP_AUDIT_CLASSES.each do |name|
       next unless Object.const_defined?(name)
+
       klass = Object.const_get(name)
       next unless klass.is_a?(Module)
+
       # Use rocket-style hash literals so this file parses on
       # Ruby 1.8 (where `key: value` shorthand is a syntax error).
       # `&:to_sym` Symbol-to-Proc shorthand works on 1.8.7+, but
@@ -148,11 +171,35 @@ unless $__mkxp_session_audit_installed
       # later cleanup calls `instance_variable_set(v, nil)` which
       # on 1.8 requires the String form.
       state[:__classes__][name] = {
-        :instance_methods         => (klass.instance_methods(false).map { |m| m.to_sym }.sort rescue []),
-        :private_instance_methods => (klass.respond_to?(:private_instance_methods) ? (klass.private_instance_methods(false).map { |m| m.to_sym }.sort rescue []) : []),
-        :singleton_methods        => (klass.singleton_methods(false).map { |m| m.to_sym }.sort rescue []),
-        :class_variables          => (klass.class_variables.sort rescue []),
-        :instance_variables       => (klass.instance_variables.sort rescue []),
+        :instance_methods => begin
+          klass.instance_methods(false).map(&:to_sym).sort
+        rescue StandardError
+          []
+        end,
+        :private_instance_methods => (if klass.respond_to?(:private_instance_methods)
+                                        begin
+                                          klass.private_instance_methods(false).map(&:to_sym).sort
+                                        rescue StandardError
+                                          []
+                                        end
+                                      else
+                                        []
+                                      end),
+        :singleton_methods => begin
+          klass.singleton_methods(false).map(&:to_sym).sort
+        rescue StandardError
+          []
+        end,
+        :class_variables => begin
+          klass.class_variables.sort
+        rescue StandardError
+          []
+        end,
+        :instance_variables => begin
+          klass.instance_variables.sort
+        rescue StandardError
+          []
+        end
       }
     end
     # Globals: record the *class name* of each non-nil global. A
@@ -168,14 +215,32 @@ unless $__mkxp_session_audit_installed
       # preload internals (audit, reset hooks, keep-consts list,
       # session-installed flags, etc.).
       next if sym.to_s.start_with?('$__mkxp_', '$__MKXP_')
-      val = (eval(sym.to_s) rescue nil)
+
+      val = begin
+        # rubocop:disable Security/Eval -- audit code reads each
+        # global by its symbol name; there's no fixed allowlist
+        # because the point is to enumerate everything that exists.
+        # Input comes from `global_variables` (Ruby builtins), not
+        # user data, so this is safe.
+        eval(sym.to_s)
+        # rubocop:enable Security/Eval
+      rescue StandardError
+        nil
+      end
       next if val.nil?
-      class_name = val.class.name rescue '<anonymous>'
+
+      class_name = begin
+        val.class.name
+      rescue StandardError
+        '<anonymous>'
+      end
       next if class_name.start_with?('Range', 'NilClass', 'TrueClass', 'FalseClass')
+
       state[:__globals__][sym] = class_name
     end
     state
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
   # For each audited class, list the names that are present in
   # `current` but NOT in `baseline`. Removed entries don't matter
@@ -183,6 +248,12 @@ unless $__mkxp_session_audit_installed
   # after themselves, which is fine). Globals are diffed by
   # name+class: if the same global has a different (non-nil) class
   # at session start vs baseline, treat it as a leaked instance.
+  #
+  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # Diff walks two parallel structures (classes-by-name and
+  # globals-by-symbol); the cyclomatic depth is from the per-class
+  # category loop plus per-global rescue, both inherent to the
+  # operation.
   def __mkxp_audit_diff(baseline, current)
     out = {}
     classes_diff = {}
@@ -206,12 +277,14 @@ unless $__mkxp_session_audit_installed
       # that's expected stable state. New globals (not in baseline)
       # or globals that changed class are leaks.
       next if base_klass == klass_name
+
       leaked_globals[sym] = klass_name
     end
     out[:globals] = leaked_globals unless leaked_globals.empty?
 
     out
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # Capture the baseline ONCE - on first preload of session 1, when
   # the engine has just re-installed its C methods via
@@ -228,9 +301,13 @@ unless $__mkxp_session_audit_installed
   # previous game's "end of session" picture, minus the already-
   # cleaned constants/ivars on the engine-managed list.
   $__mkxp_reset_hooks ||= []
-  unless $__mkxp_reset_hooks.any? { |h|
+  unless $__mkxp_reset_hooks.any? do |h|
     h.respond_to?(:source_location) && h.source_location && h.source_location[0] == __FILE__
-  }
+  end
+    # rubocop:disable Metrics/BlockLength -- the reset-hook block
+    # walks the diff result by class + method category to remove
+    # game-side additions; splitting it into helpers would scatter
+    # related cleanup steps across many small methods.
     $__mkxp_reset_hooks << lambda do
       diff = __mkxp_audit_diff($__mkxp_audit_baseline, __mkxp_audit_snapshot)
 
@@ -260,23 +337,43 @@ unless $__mkxp_session_audit_installed
       # vs. globals games own" in the audit itself.
       (diff[:classes] || {}).each do |class_name, added|
         next unless Object.const_defined?(class_name)
+
         klass = Object.const_get(class_name)
         next unless klass.is_a?(Module)
 
         (added[:instance_methods] || []).each do |m|
           next unless __mkxp_audit_safe_to_remove?(klass, m, :instance)
-          klass.send(:remove_method, m) rescue nil
+
+          begin
+            klass.send(:remove_method, m)
+          rescue StandardError
+            nil
+          end
         end
         (added[:private_instance_methods] || []).each do |m|
           next unless __mkxp_audit_safe_to_remove?(klass, m, :instance)
-          klass.send(:remove_method, m) rescue nil
+
+          begin
+            klass.send(:remove_method, m)
+          rescue StandardError
+            nil
+          end
         end
         (added[:singleton_methods] || []).each do |m|
           next unless __mkxp_audit_safe_to_remove?(klass, m, :singleton)
-          klass.singleton_class.send(:remove_method, m) rescue nil
+
+          begin
+            klass.singleton_class.send(:remove_method, m)
+          rescue StandardError
+            nil
+          end
         end
         (added[:class_variables] || []).each do |v|
-          klass.send(:remove_class_variable, v) rescue nil
+          begin
+            klass.send(:remove_class_variable, v)
+          rescue StandardError
+            nil
+          end
         end
         # `Module#remove_instance_variable` exists, but only on
         # the instance side. For class-level instance vars on a
@@ -284,9 +381,14 @@ unless $__mkxp_session_audit_installed
         # `unless @some_aliased_flag` guards game scripts use to
         # avoid double-aliasing.
         (added[:instance_variables] || []).each do |v|
-          klass.instance_variable_set(v, nil) rescue nil
+          begin
+            klass.instance_variable_set(v, nil)
+          rescue StandardError
+            nil
+          end
         end
       end
     end
+    # rubocop:enable Metrics/BlockLength
   end
 end

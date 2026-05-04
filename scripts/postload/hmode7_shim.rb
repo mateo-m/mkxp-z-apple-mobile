@@ -77,19 +77,23 @@ return unless HM7::Native.const_defined?(:AVAILABLE) && HM7::Native::AVAILABLE
 #  (top-cumulative) - confirmed correct for Pokemon Insurgence
 #  1.2.7, assumed safe for V1.3.x as discussed above.
 # ----------------------------------------------------------------
-def self._mkxp_hm7_is_v14_or_newer
+def self._mkxp_hm7_v14_or_newer?
   # V1.4's applyZoom Ruby wrapper. Most reliable signal.
   return true if HM7.respond_to?(:apply_zoom)
 
   false
 end
 
-detected_mode = _mkxp_hm7_is_v14_or_newer ? :bottom_cumulative : :top_cumulative
+detected_mode = _mkxp_hm7_v14_or_newer? ? :bottom_cumulative : :top_cumulative
 
 unless HM7::Native.const_defined?(:WALL_LAYER_MODE)
   HM7::Native.const_set(:WALL_LAYER_MODE, detected_mode)
-  MKXP.puts "[hm7-shim] WALL_LAYER_MODE autodetected: #{detected_mode} " \
-            "(#{detected_mode == :bottom_cumulative ? 'HM7.apply_zoom present = V1.4+' : 'HM7.apply_zoom absent = pre-V1.4'})"
+  v14_marker = if detected_mode == :bottom_cumulative
+                 'HM7.apply_zoom present = V1.4+'
+               else
+                 'HM7.apply_zoom absent = pre-V1.4'
+               end
+  MKXP.puts "[hm7-shim] WALL_LAYER_MODE autodetected: #{detected_mode} (#{v14_marker})"
 end
 
 begin
@@ -133,7 +137,6 @@ begin
   # re-evaluated originals, not at stale method objects captured
   # by session 1's aliases.
   HM7.module_eval do
-
     # ------------------------------------------------------------
     #  Overrides. Each corresponds to a `def self.xxx` in
     #  Insurgence's 210-HM7_NEW_CLASSES.rb around lines 53-101.
@@ -224,7 +227,11 @@ begin
       # captured an outdated method instance). `alias_method` with an
       # existing target name just replaces the alias - no chaining.
       alias_method :_mkxp_hm7_orig_get_data, :get_data
+      # rubocop:disable Naming/AccessorMethodName -- HM7::Surface's
+      # native binding calls this exact method name; can't rename
+      # without losing the override.
       def get_data
+        # rubocop:enable Naming/AccessorMethodName
         # Fallback handling. If we lack a usable bitmap, returning
         # the original v1.2.1 6-element form would leak values
         # into the native binding's 11-element positional slots
@@ -235,7 +242,7 @@ begin
         return nil if bitmap.nil? || bitmap.disposed?
 
         half_w = bitmap.width >> 1
-        h = bitmap.height
+        bitmap.height
 
         # v1.4.4 plugin convention: `(screenX1, screenY1)` and
         # `(screenX2, screenY2)` are two ANCHOR POINTS defining a
@@ -256,7 +263,7 @@ begin
         # scales via `sFYt` based on mode-7 depth.
         sx1 = screen_x - half_w
         sx2 = screen_x + half_w
-        anchor_y = screen_y  # sprite's foot = anchor line
+        anchor_y = screen_y # sprite's foot = anchor line
 
         [
           type,             # [0]
@@ -317,16 +324,18 @@ begin
       def initialize(*args, &blk)
         _mkxp_hm7_orig_initialize(*args, &blk)
         return unless @params.is_a?(Array) && @params.length > 10
+
         s = @params[10]
         return unless s.is_a?(Bitmap) && !s.disposed?
         return if s.width >= @render.width * 2
+
         fixed = Bitmap.new(@render.width * 2, @render.height)
         @params[10] = fixed
         s.dispose
       end
     end
   else
-    MKXP.puts "[hm7-shim] WARNING: HM7::Tilemap#initialize patch skipped: " \
+    MKXP.puts '[hm7-shim] WARNING: HM7::Tilemap#initialize patch skipped: ' \
               "HM7::Tilemap defined?=#{defined?(HM7::Tilemap).inspect}"
   end
 
@@ -334,7 +343,7 @@ begin
   # can detect whether the native renderer is active. No Insurgence
   # code checks this today, but forks might.
   $mkxp_hm7_native = true
-rescue => e
+rescue StandardError => e
   # Best-effort install. If anything goes wrong (missing method,
   # unexpected HM7 internals in a different Essentials fork) leave
   # the Win32API stubs in place so at least the game doesn't crash;

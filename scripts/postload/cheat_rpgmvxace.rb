@@ -7,7 +7,7 @@
 # Features: level up current player actor (x1, x5, x10, x100),
 # gain gold, add items / weapons / armors via SceneManager.
 
-MKXP.puts("[cheats] loading RPG Maker VX Ace cheat menu")
+MKXP.puts('[cheats] loading RPG Maker VX Ace cheat menu')
 
 class Window_GetItem < Window_Selectable
   def initialize(x, y, height, type)
@@ -23,9 +23,17 @@ class Window_GetItem < Window_Selectable
     select(0)
   end
 
-  def window_width; 304; end
-  def item_max; @data ? @data.size : 1; end
-  def item; @data[index]; end
+  def window_width
+    304
+  end
+
+  def item_max
+    @data ? @data.size : 1
+  end
+
+  def item
+    @data[index]
+  end
 
   def money=(money)
     @money = money
@@ -54,7 +62,7 @@ class Window_GetItem < Window_Selectable
     @data = []
     @price = {}
     @shop_goods.each do |good|
-      if good && good.name != ""
+      if good && good.name != ''
         @data.push(good)
         @price[good] = 0
       end
@@ -74,29 +82,29 @@ end
 # that file's comment on why this matters for meta-loader games.
 if defined?(Game_Player) && Game_Player.method_defined?(:update)
   class Game_Player
-    alias :cheat_update :update unless self.method_defined?(:cheat_update)
+    alias cheat_update update unless method_defined?(:cheat_update)
     def update
       cheat_update
-      if Input.trigger?(Input::HOME) && $CHEATS
-        Sound.play_ok
-        SceneManager.call(Scene_Cheat)
-        Window_CheatCommand::init_command_position
-      end
+      return unless Input.trigger?(Input::HOME) && $CHEATS
+
+      Sound.play_ok
+      SceneManager.call(Scene_Cheat)
+      Window_CheatCommand.init_command_position
     end
   end
 else
-  MKXP.puts("[cheats] RPG Maker VX Ace cheat menu deferred: " \
-            "Game_Player not loaded at postload time")
+  MKXP.puts('[cheats] RPG Maker VX Ace cheat menu deferred: ' \
+            'Game_Player not loaded at postload time')
 end
 
 class Window_CheatCommand < Window_Command
   def make_command_list
-    add_command("Level Up",    :level)
-    add_command("Gain Gold",   :gold)
-    add_command("Get Items",   :getItems)
-    add_command("Get Weapons", :getWeapons)
-    add_command("Get Armors",  :getArmors)
-    add_command("Cancel",      :cancel)
+    add_command('Level Up',    :level)
+    add_command('Gain Gold',   :gold)
+    add_command('Get Items',   :getItems)
+    add_command('Get Weapons', :getWeapons)
+    add_command('Get Armors',  :getArmors)
+    add_command('Cancel',      :cancel)
   end
 
   def self.init_command_position
@@ -111,22 +119,22 @@ end
 
 class Window_Cheat_Level < Window_CheatCommand
   def make_command_list
-    add_command("1 Level",   :levelUp1)
-    add_command("5 Level",   :levelUp5)
-    add_command("10 Level",  :levelUp10)
-    add_command("100 Level", :levelUp100)
-    add_command("Cancel",    :cancel)
+    add_command('1 Level',   :levelUp1)
+    add_command('5 Level',   :levelUp5)
+    add_command('10 Level',  :levelUp10)
+    add_command('100 Level', :levelUp100)
+    add_command('Cancel',    :cancel)
   end
 end
 
 class Window_Cheat_Gold < Window_CheatCommand
   def make_command_list
-    add_command("100 G",  :addGold100)
-    add_command("1K G",   :addGold1000)
-    add_command("10K G",  :addGold10000)
-    add_command("100K G", :addGold100000)
-    add_command("1M G",   :addGold1000000)
-    add_command("Cancel", :cancel)
+    add_command('100 G',  :addGold100)
+    add_command('1K G',   :addGold1000)
+    add_command('10K G',  :addGold10000)
+    add_command('100K G', :addGold100000)
+    add_command('1M G',   :addGold1000000)
+    add_command('Cancel', :cancel)
   end
 end
 
@@ -179,14 +187,22 @@ class Scene_Cheat < Scene_MenuBase
     @number_window.set_handler(:cancel, method(:on_number_cancel))
   end
 
-  def cheat_items;   cheat_getItem(0); end
-  def cheat_weapons; cheat_getItem(1); end
-  def cheat_armors;  cheat_getItem(2); end
+  def cheat_items
+    cheat_getItem(0)
+  end
+
+  def cheat_weapons
+    cheat_getItem(1)
+  end
+
+  def cheat_armors
+    cheat_getItem(2)
+  end
 
   def on_buy_ok
     @item = @item_window.item
     @item_window.hide
-    @number_window.set(@item, max_buy, buying_price, "G")
+    @number_window.set(@item, max_buy, buying_price, 'G')
     @number_window.show.activate
   end
 
@@ -212,7 +228,7 @@ class Scene_Cheat < Scene_MenuBase
 
   def max_buy
     max = $game_party.max_item_number(@item) - $game_party.item_number(@item)
-    buying_price == 0 ? max : [max, money / buying_price].min
+    buying_price.zero? ? max : [max, money / buying_price].min
   end
 
   def buying_price
@@ -236,12 +252,14 @@ class Scene_Cheat < Scene_MenuBase
 
   def cheat_level_up
     return unless $game_player && $game_player.actor
+
     $game_player.actor.level_up unless $game_player.actor.max_level?
   end
 
   def announce_level
     return unless $game_message && $game_player && $game_player.actor
-    $game_message.add("Player is Level " + $game_player.actor.level.to_s + " now.")
+
+    $game_message.add("Player is Level #{$game_player.actor.level} now.")
   end
 
   def cheat_level_up1
@@ -281,14 +299,28 @@ class Scene_Cheat < Scene_MenuBase
     end
     @gold_window.close
     return_scene
-    $game_message.add("Player has " + $game_party.gold.to_s + "G now.") if $game_message
+    $game_message.add("Player has #{$game_party.gold}G now.") if $game_message
   end
 
-  def cheat_add_gold100;     cheat_add_gold(100);        end
-  def cheat_add_gold1000;    cheat_add_gold(1_000);      end
-  def cheat_add_gold10000;   cheat_add_gold(10_000);     end
-  def cheat_add_gold100000;  cheat_add_gold(100_000);    end
-  def cheat_add_gold1000000; cheat_add_gold(1_000_000);  end
+  def cheat_add_gold100
+    cheat_add_gold(100)
+  end
+
+  def cheat_add_gold1000
+    cheat_add_gold(1_000)
+  end
+
+  def cheat_add_gold10000
+    cheat_add_gold(10_000)
+  end
+
+  def cheat_add_gold100000
+    cheat_add_gold(100_000)
+  end
+
+  def cheat_add_gold1000000
+    cheat_add_gold(1_000_000)
+  end
 end
 
-MKXP.puts("[cheats] RPG Maker VX Ace cheat menu ready")
+MKXP.puts('[cheats] RPG Maker VX Ace cheat menu ready')

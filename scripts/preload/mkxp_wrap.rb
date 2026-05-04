@@ -10,99 +10,100 @@
 # Ancurio's function names can find them.
 
 module MKXP
-	class << self
-		def data_directory(*args)
-			System::data_directory(*args)
-		end
+  class << self
+    def data_directory(*args)
+      System.data_directory(*args)
+    end
 
-		def puts(*args)
-			System::puts(*args)
-		end
+    def puts(*args)
+      System.puts(*args)
+    end
 
-		def raw_key_states(*args)
-			states = Input::raw_key_states(*args)
-			class << states
-				def getbyte(byte)
-					self[byte] ? 1 : 0
-				end
-				def setbyte(byte, val)
-					self[byte] = val == 0 ? false : true
-				end
-			end
-			states
-		end
+    def raw_key_states(*args)
+      states = Input.raw_key_states(*args)
+      class << states
+        def getbyte(byte)
+          self[byte] ? 1 : 0
+        end
 
-		def mouse_in_window(*args)
-			Input::mouse_in_window(*args)
-		end
+        def setbyte(byte, val)
+          self[byte] = val != 0
+        end
+      end
+      states
+    end
 
-		def cheats_enabled?
-			System::cheats_enabled?
-		end
+    def mouse_in_window(*args)
+      Input.mouse_in_window(*args)
+    end
 
-		# Per-game in-game-keyboard toggle. The host (Empo) sets
-		# the bridge value at session start; `pokemon_input.rb`
-		# reads this to decide whether to force `USEKEYBOARDTEXTENTRY
-		# = false` and surface the game's own keyboard scene.
-		# Scripts calling this on engines without the binding hit
-		# `NoMethodError`, so callers should `respond_to?` first.
-		def use_in_game_keyboard?
-			System::use_in_game_keyboard?
-		end
+    def cheats_enabled?
+      System.cheats_enabled?
+    end
 
-		# Per-game state directory (`Documents/EmpoState/<id>/` on
-		# iOS). Engine postloads use this to write runtime-detection
-		# marker files that survive across sessions.
-		def managed_config_dir
-			System::managed_config_dir
-		end
+    # Per-game in-game-keyboard toggle. The host (Empo) sets
+    # the bridge value at session start; `pokemon_input.rb`
+    # reads this to decide whether to force `USEKEYBOARDTEXTENTRY
+    # = false` and surface the game's own keyboard scene.
+    # Scripts calling this on engines without the binding hit
+    # `NoMethodError`, so callers should `respond_to?` first.
+    def use_in_game_keyboard?
+      System.use_in_game_keyboard?
+    end
 
-		# MKXP.rpg_version / ruby_version / power_state mirror
-		# JoiPlay's helper module so scripts written against it
-		# (notably PE fangames doing `if MKXP.rpg_version > 2`)
-		# keep working on mkxp-z.
-		def rpg_version(*args)
-			System::rpg_version(*args)
-		end
+    # Per-game state directory (`Documents/EmpoState/<id>/` on
+    # iOS). Engine postloads use this to write runtime-detection
+    # marker files that survive across sessions.
+    def managed_config_dir
+      System.managed_config_dir
+    end
 
-		def ruby_version(*args)
-			System::ruby_version(*args)
-		end
+    # MKXP.rpg_version / ruby_version / power_state mirror
+    # JoiPlay's helper module so scripts written against it
+    # (notably PE fangames doing `if MKXP.rpg_version > 2`)
+    # keep working on mkxp-z.
+    def rpg_version(*args)
+      System.rpg_version(*args)
+    end
 
-		def power_state(*args)
-			System::power_state(*args)
-		end
+    def ruby_version(*args)
+      System.ruby_version(*args)
+    end
 
-		def platform(*args)
-			System::platform(*args)
-		end
+    def power_state(*args)
+      System.power_state(*args)
+    end
 
-		# Pokemon Reborn (and several other PE fangames that target
-		# JoiPlay) gate at boot on `MKXP.plugin_version.to_i`, which
-		# encodes JoiPlay's RPG Maker Plugin version as a 5-digit
-		# integer (1.20.53 -> 12053). The check refuses to run if
-		# the integer is below a hardcoded minimum. We set
-		# `$joiplay = true` to route these games through their
-		# JoiPlay code path, so we also have to advertise a
-		# plugin version high enough to satisfy those gates. We
-		# report 99999 - well above any known minimum - so future
-		# releases that bump the floor also pass without us having
-		# to chase every version.
-		def plugin_version
-			99999
-		end
+    def platform(*args)
+      System.platform(*args)
+    end
 
-		# Pokemon Reborn's ScriptLoader pipes each script section
-		# through `MKXP.apply_overrides` before `eval`, expecting
-		# the JoiPlay-shipped patcher to rewrite known-broken
-		# lines. We route to our own patcher (src/patcher.cpp),
-		# so the same config-driven rewrites work when users set
-		# `patches` in mkxp.json. Scripts that call this on
-		# engines without a patcher would just get `str` back.
-		def apply_overrides(*args)
-			System::apply_overrides(*args)
-		end
-	end
+    # Pokemon Reborn (and several other PE fangames that target
+    # JoiPlay) gate at boot on `MKXP.plugin_version.to_i`, which
+    # encodes JoiPlay's RPG Maker Plugin version as a 5-digit
+    # integer (1.20.53 -> 12053). The check refuses to run if
+    # the integer is below a hardcoded minimum. We set
+    # `$joiplay = true` to route these games through their
+    # JoiPlay code path, so we also have to advertise a
+    # plugin version high enough to satisfy those gates. We
+    # report 99999 - well above any known minimum - so future
+    # releases that bump the floor also pass without us having
+    # to chase every version.
+    def plugin_version
+      99_999
+    end
+
+    # Pokemon Reborn's ScriptLoader pipes each script section
+    # through `MKXP.apply_overrides` before `eval`, expecting
+    # the JoiPlay-shipped patcher to rewrite known-broken
+    # lines. We route to our own patcher (src/patcher.cpp),
+    # so the same config-driven rewrites work when users set
+    # `patches` in mkxp.json. Scripts that call this on
+    # engines without a patcher would just get `str` back.
+    def apply_overrides(*args)
+      System.apply_overrides(*args)
+    end
+  end
 end
 
 # Keep MKXP across between-session resets. Without this, step 1 of

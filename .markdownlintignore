@@ -1,0 +1,6 @@
+# Drive markdownlint via `git ls-files '*.md'` to scan tracked
+# files only. This file backs up that approach for editor
+# integrations that pass plain globs.
+
+hmode7/
+upstream/
