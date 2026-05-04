@@ -49,14 +49,14 @@ struct ScriptBinding
  * Each Ruby version's binding + libruby is bundled in a
  * per-version merged .o (see ios/Dependencies/multiruby/wrapper.cpp +
  * the `mkxpNN-merged` make targets in ios/Dependencies/common.make).
- * Each merged .o exports exactly one symbol —
- * `_mkxp_get_script_binding_NN()` — returning a pointer to that
+ * Each merged .o exports exactly one symbol,
+ * `_mkxp_get_script_binding_NN()`, returning a pointer to that
  * version's `ScriptBinding` vtable.
  *
  * Default fallback: 3.1, since the legacy path used Ruby 3.1 with
  * syntax-transform applied. UNSET / MKXP_RUBY_18 / MKXP_RUBY_19
  * also fall through to 3.1 today (1.8 / 1.9 native builds aren't
- * wired yet — see MULTI_RUBY_PLAN.md).
+ * wired yet; see MULTI_RUBY_PLAN.md).
  *
  * The merged .o files might not exist on a given SDK build (e.g.
  * fresh device build that hasn't run `make mkxp-merged` for that
@@ -83,7 +83,7 @@ inline ScriptBinding *getActiveScriptBinding(void) {
     }
     /* Last-resort fallback if the chosen merged.o is a build-time
      * stub (returning nullptr because that SDK didn't ship it).
-     * Order: prefer 3.1, then 3.0, then 1.9, then 1.8 — newest
+     * Order: prefer 3.1, then 3.0, then 1.9, then 1.8; newest
      * available wins so script-engine features stay maximal. */
     if (!sb) sb = mkxp_get_script_binding_31();
     if (!sb) sb = mkxp_get_script_binding_30();

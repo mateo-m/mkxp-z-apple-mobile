@@ -33,7 +33,7 @@ end
 # an mkxp-z extension our iOS build doesn't carry. Since we ship
 # JoiPlay-compat shims (NilClass safe-stubs, Win32API/DL stubs,
 # poke_* graphics aliases, cheats, network stubs) the JoiPlay code
-# path is what actually works here, so we set the flag.
+# path is what works here, so we set the flag.
 $joiplay = true
 
 # --- Thread.critical / Thread.critical= no-op shims (Ruby 1.9+) ---
@@ -456,7 +456,7 @@ end
 #    script continues. Non-network requires still propagate.
 #
 # TODO: compile Ruby with network stdlib so online features
-# actually work. See TODO.md "Engine / compatibility".
+# work. See TODO.md "Engine / compatibility".
 
 module Kernel
   # Known-missing networking requires. Match by exact path or by

@@ -1,19 +1,15 @@
-// app_bridge.h - C-linkage bridge between mkxp-z engine and host UI layer.
-//
-// This header is the ONLY interface between the engine and the UI.
-// The UI side must not import any engine headers (SDL, SharedState, etc.).
-// The engine side must not import any UI headers (UIKit, SwiftUI, etc.).
-// Both sides communicate exclusively through these functions.
+// app_bridge.h - C-linkage bridge between the mkxp-z engine and the
+// host UI layer. The only interface between them: UI never imports
+// engine headers (SDL, SharedState), engine never imports UI headers
+// (UIKit, SwiftUI). All communication goes through these functions.
 
 #ifndef IOS_BRIDGE_H
 #define IOS_BRIDGE_H
 
 #include <stdbool.h>
-// Scancode constants
-//
-// Values match SDL_Scancode (USB HID usage page 0x07) so the engine
-// can pass them through without translation. UI code should use these
-// instead of importing SDL headers.
+// Scancode constants. Values match SDL_Scancode (USB HID usage page
+// 0x07) so the engine passes them through without translation. UI
+// code uses these instead of importing SDL headers.
 
 enum {
     MKXP_SCANCODE_UNKNOWN   = 0,
@@ -97,22 +93,20 @@ int         mkxp_isEngineTerminated(void);
 void        mkxp_setEngineTerminated(void);
 void        mkxp_resetBridgeState(void);
 
-// Set by the engine when the current session ended because Ruby
-// raised SystemExit (e.g. the game's "Exit to desktop" menu). The
-// UI reads this in its engine-terminated callback to skip the
-// "game didn't exit cleanly" alert for intentional exits.
+// Set when the session ends because Ruby raised SystemExit (e.g. the
+// game's "Exit to desktop" menu). The UI checks this in its
+// engine-terminated callback to skip the "didn't exit cleanly" alert.
 int         mkxp_didEngineExitCleanly(void);
 void        mkxp_setEngineExitedCleanly(void);
 
-// Set when the RGSS thread failed to respond to a termination request.
-// The engine is unrecoverable: the UI should force-quit the process
-// because the single-reused-thread architecture cannot respawn it.
+// Set when the RGSS thread failed to respond to a termination
+// request. Engine is unrecoverable; the UI should force-quit the
+// process since the single-reused-thread architecture can't respawn it.
 int         mkxp_isEngineHung(void);
 void        mkxp_setEngineHung(void);
 
-// Lifecycle callbacks (Engine -> UI)
-//
-// Fire on the engine thread. UI must dispatch to main for any updates.
+// Lifecycle callbacks (Engine -> UI). Fire on the engine thread; UI
+// must dispatch to main for any UI updates.
 
 typedef void (*mkxp_EngineTerminatedCallback)(void *userdata);
 void        mkxp_setEngineTerminatedCallback(mkxp_EngineTerminatedCallback cb, void *userdata);
@@ -130,46 +124,35 @@ void        mkxp_injectKeyEvent(int scancode, int pressed);
 typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 
-// Managed-config directory (UI -> Engine)
+// Managed-config directory (UI -> Engine).
 //
-// Empo keeps all per-game state it generates (mkxp.json,
-// patches.json, save-state metadata, etc.) outside the game
-// folder so the game directory stays a faithful mirror of what
-// the user imported. The host UI calls
-// `mkxp_setManagedConfigDir` with an absolute path to the
-// per-game state directory before launching a session; engine
-// modules that previously loaded config from cwd (Config::read,
-// Patcher auto-discovery, ...) check this directory FIRST and
-// fall back to cwd only if the file isn't found there.
+// Empo keeps generated per-game state (mkxp.json, patches.json, save
+// metadata) outside the imported game folder so the game directory
+// stays a faithful mirror of what the user imported. The host calls
+// `mkxp_setManagedConfigDir` with the per-game state path before each
+// session; engine modules that used to load from cwd (Config::read,
+// Patcher auto-discovery) check this directory first and fall back
+// to cwd only if the file isn't found.
 //
-// Pass NULL or "" to clear the override (fall back to cwd-only
-// behaviour, matching desktop builds).
-//
-// Engine-side accessor: `mkxp_getManagedConfigDir()` returns
-// the current path (empty string if unset).
+// Pass NULL/"" to clear the override (cwd-only behavior, matches
+// desktop builds).
 void        mkxp_setManagedConfigDir(const char *path);
 const char *mkxp_getManagedConfigDir(void);
 
-// Text-input bridge (UI <-> Engine)
+// Text-input bridge (UI <-> Engine).
 //
-// Games request text input via Ruby `Input.text_input = true`, which
-// triggers `SDL_StartTextInput()` inside EventThread. The callback
-// registered with `mkxp_setTextInputModeCallback` fires from the main
-// thread when that state changes; the iOS side uses it to auto-show
-// the system keyboard so the user can immediately type without having
-// to manually toggle the keyboard toolbar.
+// Games request text input via `Input.text_input = true`, which calls
+// `SDL_StartTextInput()` inside EventThread. The mode callback fires
+// from the main thread on state changes; iOS uses it to auto-show
+// the system keyboard.
 //
-// `mkxp_pushTextInput(utf8)` is the inverse direction: the iOS soft
-// keyboard's UITextField delegate forwards typed UTF-8 strings here,
-// which are wrapped as SDL_TEXTINPUT events and end up in the engine's
-// `textInputBuffer`. Ruby reads them via `Input.gets`. Strings longer
-// than SDL's per-event limit (32 bytes including the trailing NUL) are
-// chunked at safe UTF-8 boundaries.
+// `mkxp_pushTextInput` is the inverse: the soft keyboard's
+// UITextField delegate forwards typed UTF-8 strings here, wrapped as
+// SDL_TEXTINPUT events and read by Ruby `Input.gets`. Strings longer
+// than SDL's 32-byte per-event limit are chunked at UTF-8 boundaries.
 //
-// `mkxp_isTextInputActive()` lets the UI side check whether to push
-// text events at all - when SDL text mode is OFF (e.g. user toggled
-// the keyboard toolbar manually for a non-text scene), pushing text
-// would silently fill the buffer with input nobody reads.
+// `mkxp_isTextInputActive()` lets the UI skip pushing events when SDL
+// text mode is off (otherwise the buffer fills with input nobody reads).
 typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
 void        mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata);
 void        mkxp_pushTextInput(const char *utf8);
@@ -222,16 +205,15 @@ bool        mkxp_consumeSafeAreaInsetsChanged(void);
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
-// Per-game settings (UI -> Engine, set before each session)
+// Per-game settings (UI -> Engine), set before each session by
+// selectGame() and read by the engine during the run. NOT reset in
+// mkxp_resetBridgeState(); selectGame() always re-sets them.
 //
-// Set by selectGame() before mkxp_setGamePath(), read by the engine
-// during the session. NOT reset in mkxp_resetBridgeState() — selectGame()
-// always sets them explicitly.
-//
-// To add a new setting:
+// Adding a new setting:
 //   1. Add a parameter to mkxp_applyPerGameSettings()
 //   2. Add an atomic + getter in app_bridge.cpp
-//   3. Add the field to GameSettings.swift, pass from AppState.selectGame()
+//   3. Add the field to GameSettings.swift and wire it through
+//      AppState.selectGame()
 
 typedef enum {
     MKXP_VALIGN_TOP        = 0,
@@ -247,18 +229,12 @@ bool        mkxp_getPostloadEnabled(void);
 
 // Per-game `syntaxTransform` override.
 //
-// The Empo iOS host calls this on every selectGame() so mkxp.json
-// stays free of host-managed keys (the developer's mkxp.json is
-// snapshotted at import as mkxp.original.json and merged into the
-// per-session mkxp.json without us writing syntaxTransform on top
-// of the developer's intent).
-//
-// `MKXP_SYNTAX_TRANSFORM_UNSET` is the default at startup so
-// desktop / test-harness builds that never call the setter keep
-// the legacy mkxp.json-driven path. Numeric values match
-// Config::syntaxTransform (0/1/2) since that's the engine's
-// existing on-disk schema; the typed enum only exists at this
-// boundary so callers don't sprinkle magic numbers around.
+// Empo calls this on every selectGame() so the developer's mkxp.json
+// stays free of host-managed keys. Default is `UNSET` so desktop /
+// test-harness builds that never call the setter keep the legacy
+// mkxp.json-driven path. Numeric values match Config::syntaxTransform
+// (0/1/2); the typed enum exists so callers don't sprinkle magic
+// numbers.
 typedef enum {
     MKXP_SYNTAX_TRANSFORM_UNSET     = -1,
     MKXP_SYNTAX_TRANSFORM_DISABLED  = 0,  // Ruby 3 strict
@@ -271,27 +247,19 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 
 // Per-game Ruby interpreter version selection.
 //
-// Multi-Ruby (Phase D in MULTI_RUBY_PLAN.md): each Ruby version's
-// libruby + binding code is compiled separately and merged into a
-// single relocatable .o with hidden symbols. At engine boot the
-// host tells the engine which version to dispatch to; main.cpp
-// looks up the corresponding `_mkxp_get_script_binding_<NN>()`
-// entry point exported by the relevant merged .o.
+// Each Ruby version's libruby + binding is compiled separately and
+// merged into a relocatable .o with hidden symbols. At engine boot
+// the host calls this to pick which version to dispatch to;
+// main.cpp looks up `_mkxp_get_script_binding_<NN>()` from the
+// matching merged .o.
 //
-// Replaces the syntax-transform-on-Ruby-3.1 hack: a vintage PE
-// game written in Ruby 1.8 grammar runs on actual Ruby 1.8.7's
-// parser + VM, not a 3.1 parser with patches. Also unblocks PSDK,
-// which targets Ruby 3.0.x and ships precompiled .yarb bytecode
-// that's strictly minor-version-locked.
+// Lets a vintage PE game run on actual Ruby 1.8.7's parser + VM
+// instead of a Ruby 3 parser with syntax-transform patches, and
+// unblocks PSDK (Ruby 3.0.x with minor-version-locked .yarb bytecode).
 //
-// `MKXP_RUBY_UNSET` falls back to the build's default (currently
-// 3.1, the version present in the binary via the legacy direct
-// link). Once 3.1 also moves to the merged.o pattern, UNSET will
-// be a configuration error.
-//
-// Numeric values: MMmm where MM=major, mm=minor (so 3.0 -> 30,
-// 3.1 -> 31, 1.9 -> 19, 1.8 -> 18). Mirrors JoiPlay's library
-// filename convention (libmkxp30.so etc.).
+// `MKXP_RUBY_UNSET` falls back to the build's default. Numeric values
+// are MMmm (3.0 -> 30, 1.8 -> 18), matching JoiPlay's libmkxpNN.so
+// filename convention.
 typedef enum {
     MKXP_RUBY_UNSET = -1,
     MKXP_RUBY_18    = 18,
@@ -303,55 +271,40 @@ typedef enum {
 void             mkxp_setActiveRubyVersion(MKXPRubyVersion version);
 MKXPRubyVersion  mkxp_getActiveRubyVersion(void);
 
-// Force the in-game keyboard scene for Pokemon Essentials text
-// entry, overriding the iOS soft-keyboard path.
-//
-// The default iOS soft-keyboard path works for IF / Reborn /
-// Insurgence name entry, but a few games override the Essentials
-// keyboard scene to add custom keys (mark, theme, etc.) that
-// aren't on the iOS soft keyboard. Empo exposes a per-game toggle
-// ("In-game keyboard") that, when enabled, makes
-// `pokemon_input.rb` re-apply the historical
-// `USEKEYBOARDTEXTENTRY = false` + `PokemonEntryScene::USEKEYBOARD
-// = false` overrides so the game uses its own keyboard scene
-// instead.
-//
-// Default = false (use the iOS soft keyboard).
+// Force the Pokemon Essentials in-game keyboard scene, overriding
+// the iOS soft keyboard. Default false (soft keyboard). Flip on for
+// games whose keyboard scene adds custom keys the soft keyboard
+// can't drive; `pokemon_input.rb` re-applies the historical
+// `USEKEYBOARDTEXTENTRY = false` overrides when this is set.
 void mkxp_setUseInGameKeyboard(bool enabled);
 bool mkxp_getUseInGameKeyboard(void);
 
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);
 
-// Cheat menu toggle (UI -> Engine).
-//
-// Setter sets the runtime cheat-enabled flag. The engine's postload
-// layer reads the current value on each frame/update (Ruby-side code
-// reassigns the $CHEATS global from the bridge so the UI toggle
-// takes effect mid-game without re-entering the script).
+// Cheat menu toggle (UI -> Engine). The postload layer reads the
+// current value each update; Ruby reassigns $CHEATS from the bridge
+// so the toggle takes effect mid-game without re-entering scripts.
 void        mkxp_setCheatsEnabled(bool enabled);
 bool        mkxp_getCheatsEnabled(void);
 
 void        mkxp_setViewportBoundsColor(float r, float g, float b, float a);
 void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);
 
-// Error routing (Engine -> UI)
-//
-// SDL_ShowSimpleMessageBox is a no-op on iOS, so errors are routed
-// through the bridge for the UI to present.
+// Error routing (Engine -> UI). `SDL_ShowSimpleMessageBox` is a no-op
+// on iOS, so errors come through here for the UI to present.
 
 void        mkxp_setErrorMessage(const char *message);
 
 typedef void (*mkxp_ErrorMessageCallback)(const char *message, void *userdata);
 void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata);
 
-// Pause / Resume (UI <-> Engine)
-//
-// Flow:
-//   1. UI calls mkxp_requestPause()
-//   2. Engine calls mkxp_checkPause() from Graphics blocking points —
-//      pauses audio, fires paused callback, blocks on condvar
-//   3. UI calls mkxp_requestResume() to unblock
+// Pause / Resume (UI <-> Engine).
+//   1. UI calls `mkxp_requestPause()`
+//   2. Engine's `mkxp_checkPause()` (called from Graphics blocking
+//      points) pauses audio, fires the paused callback, and blocks
+//      on a condvar
+//   3. UI calls `mkxp_requestResume()` to unblock
 
 void        mkxp_requestPause(void);
 void        mkxp_requestResume(void);
@@ -393,31 +346,20 @@ void        mkxp_signalFrameRendered(void);
 void        mkxp_setGLContextBroken(void);
 bool        mkxp_isGLContextBroken(void);
 
-// Runtime fast-forward multiplier. When > 1, the engine's FPS limiter
-// scales its target ticks-per-frame down by that factor so the game
-// paces N times as fast as the configured framerate. Multiplier of 1
-// (default) means no scaling. Toggleable live from the host UI
-// without restarting the game. Range: 1 (off) or 2-9 (active).
+// Runtime fast-forward multiplier. When > 1 the FPS limiter scales
+// target ticks-per-frame down so the game paces N times faster.
+// Toggleable live without restart. Range: 1 (off) or 2-9 (active).
 void        mkxp_setFastForwardMultiplier(int multiplier);
 int         mkxp_getFastForwardMultiplier(void);
 
-// Reset all per-session host-bridge state to engine defaults. The
-// host calls this once before each new game launch so values from
-// the previous session (fast-forward multiplier, cheats flag, etc.)
-// don't leak across processes.
+// Reset all per-session host-bridge state to engine defaults. Called
+// once before each new game launch so values from the previous
+// session (fast-forward multiplier, cheats flag) don't leak.
 //
-// "Per-session" state is the bridge fields whose values are
-// game-specific and stored in process-static atomics here. The
-// host calls a single reset entry point (this function) instead
-// of tracking each one individually, so a new bridge added in
-// app_bridge.cpp naturally surfaces the reset call alongside its
-// static declaration via the body of `mkxp_resetSessionState`.
-//
-// Globally-persistent state - the viewport-bounds debug overlay,
-// its color, and any other setting that's app-wide rather than
-// per-game - is intentionally NOT touched. Those are owned by the
-// host's app-level Settings UI and persisted across sessions
-// regardless of which game is running.
+// Per-session = bridge fields that vary per game, stored in
+// process-static atomics here. Globally-persistent state (viewport
+// bounds debug overlay etc., owned by app-level Settings UI) is NOT
+// touched.
 void        mkxp_resetSessionState(void);
 
 // Debug logging

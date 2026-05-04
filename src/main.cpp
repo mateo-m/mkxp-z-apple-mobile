@@ -194,7 +194,7 @@ int rgssThreadFun(void *userdata) {
   gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
   FBO::boundFramebufferID = FBO::screenFramebufferID;
 
-  /* AL context — persistent, just activate on this thread. */
+  /* AL context; persistent, just activate on this thread. */
   ALCcontext *alcCtx = threadData->alcCtx;
   alcMakeContextCurrent(alcCtx);
 
@@ -216,11 +216,10 @@ int rgssThreadFun(void *userdata) {
     mkxp_setGameReady();
 
 #ifdef MKXPZ_BUILD_XCODE
-    /* Multi-Ruby session log. Records which Ruby interpreter the
-     * dispatcher will use for this session, before any Ruby code
-     * runs. Useful for verifying that
-     * `mkxp_setActiveRubyVersion()` from the host side actually
-     * routes through to a per-version binding. */
+    /* Log which Ruby this session dispatches to before any
+     * Ruby code runs. Useful for verifying that
+     * `mkxp_setActiveRubyVersion()` from the host side reaches
+     * the right per-version binding. */
     {
         const char *label = "3.1 (legacy direct-link)";
         switch (mkxp_getActiveRubyVersion()) {
