@@ -75,3 +75,5 @@ DerivedData/
 
 ## Gcc Patch
 /*.gcno
+# Node tool caches (CI uses bun + bun.lock instead).
+node_modules/
