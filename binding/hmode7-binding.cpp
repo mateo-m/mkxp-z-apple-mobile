@@ -19,10 +19,10 @@
 ** the Win32API layer entirely.
 **
 ** Per-call argument shapes are documented next to each RB_METHOD
-** below. All are derived from Insurgence's `210-HM7_NEW_CLASSES.rb`
-** (call sites + data construction) cross-referenced against the
-** original plugin's C reads (`ptr[i] >> 1`). See
-** hmode7-apple-mobile/docs/HMODE7_PORT_DESIGN.md §2 for diagrams.
+** below. All are derived from the H-Mode7 Ruby script
+** (`210-HM7_NEW_CLASSES.rb`) call sites + data construction,
+** cross-referenced against the original plugin's C reads
+** (`ptr[i] >> 1`).
 */
 
 #include "binding-util.h"
