@@ -253,9 +253,8 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 // main.cpp looks up `_mkxp_get_script_binding_<NN>()` from the
 // matching merged .o.
 //
-// Lets a vintage PE game run on actual Ruby 1.8.7's parser + VM
-// instead of a Ruby 3 parser with syntax-transform patches, and
-// unblocks PSDK (Ruby 3.0.x with minor-version-locked .yarb bytecode).
+// Lets a vintage PE game run on actual Ruby 1.8's parser + VM
+// instead of a Ruby 3 parser with syntax-transform patches.
 //
 // `MKXP_RUBY_UNSET` falls back to the build's default. Numeric values
 // are MMmm (3.0 -> 30, 1.8 -> 18), matching JoiPlay's libmkxpNN.so
