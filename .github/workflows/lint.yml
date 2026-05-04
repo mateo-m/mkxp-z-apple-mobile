@@ -35,9 +35,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: "npm"
 
       - name: Install markdownlint-cli
-        run: npm install -g markdownlint-cli@0.48
+        run: npm ci
 
       - name: markdownlint
         run: |
@@ -48,5 +49,5 @@ jobs:
             ':!:src/theoraplay/' \
             ':!:hmode7/')
           if [ -n "$FILES" ]; then
-            echo "$FILES" | xargs markdownlint -c .markdownlint.json
+            echo "$FILES" | xargs npx markdownlint -c .markdownlint.json
           fi
