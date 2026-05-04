@@ -32,13 +32,10 @@ jobs:
         with:
           submodules: false
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: "npm"
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install markdownlint-cli
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: markdownlint
         run: |
@@ -49,5 +46,5 @@ jobs:
             ':!:src/theoraplay/' \
             ':!:hmode7/')
           if [ -n "$FILES" ]; then
-            echo "$FILES" | xargs npx markdownlint -c .markdownlint.json
+            echo "$FILES" | xargs bun x markdownlint -c .markdownlint.json
           fi
