@@ -125,7 +125,7 @@ begin
   # revealing only non-HM7 sprites (the fog overlay) on top of a
   # black framebuffer.
   #
-  # Ruby's `alias_method` and `def` are naturally idempotent
+  # Ruby's `alias_method` and `def` are idempotent
   # (last-write-wins), so re-running the whole shim every session
   # is correct and cheap. The inner `alias_method` calls below
   # deliberately DO re-alias each session - that refreshes the
@@ -296,11 +296,11 @@ begin
   # ----------------------------------------------------------------
   # Important Ruby gotcha: `#initialize` is implicitly PRIVATE on every
   # class, so `Class#method_defined?(:initialize)` returns false even
-  # when the class absolutely has one. Use `private_method_defined?`
+  # when the class has one. Use `private_method_defined?`
   # (which does NOT check public+private simultaneously the way a naive
   # reader might expect from the name) OR the more robust
   # `instance_method(:initialize)` lookup which throws NameError when
-  # the method truly doesn't exist, regardless of visibility.
+  # the method doesn't exist, regardless of visibility.
   tilemap_has_init =
     defined?(HM7::Tilemap) &&
     (HM7::Tilemap.method_defined?(:initialize) ||

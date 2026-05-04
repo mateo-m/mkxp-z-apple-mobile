@@ -724,7 +724,7 @@ RB_METHOD(hm7NativeRenderHM7) {
     }
 
     // Wall-layer-selection mode. Looked up on the module each call
-    // (cheap - module constant is essentially a hash probe) so a
+    // (cheap - module constant is a hash probe) so a
     // game's postload shim can set it before or even during play.
     // Defaults to `:top_cumulative` if unset or invalid. See
     // `WallLayerMode` in hm7_render.h for rationale.
