@@ -14,13 +14,13 @@ jobs:
     name: Ruby (rubocop --autocorrect)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: false
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: "3.4"
           bundler-cache: false
 
       - name: Install rubocop
@@ -29,7 +29,10 @@ jobs:
       - name: rubocop --autocorrect (would-modify is failure)
         run: |
           rubocop --autocorrect-all --format quiet
-          if ! git diff --exit-code; then
+          # Scope the diff to the rubocop-managed paths so unrelated
+          # working-tree state (uninitialised hmode7 submodule on a
+          # shallow checkout, etc.) doesn't trip the check.
+          if ! git diff --exit-code -- scripts/preload scripts/postload; then
             echo "::error::rubocop would modify files. Run \`rubocop --autocorrect-all\` locally and commit."
             exit 1
           fi
