@@ -2059,7 +2059,7 @@ static void resetBetweenSessions() {
         "$data_tilesets", "$data_common_events",
         nullptr
     };
-    /* Set to nil rather than truly undefining (Ruby's C API has no
+    /* Set to nil rather than undefining (Ruby's C API has no
      * public way to undefine a global once it's been assigned). PE
      * fangames (notably Reborn) use `if defined?($game_system)` as a
      * "already-initialized" guard, which returns "global-variable"
