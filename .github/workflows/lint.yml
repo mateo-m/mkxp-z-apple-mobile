@@ -1,0 +1,51 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+jobs:
+  ruby:
+    name: Ruby (rubocop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: Install rubocop
+        run: gem install rubocop --no-document
+
+      - name: rubocop
+        run: rubocop --format github
+
+  markdown:
+    name: Markdown (markdownlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.48
+
+      - name: markdownlint
+        run: |
+          # Drive markdownlint from git ls-files so we only scan
+          # tracked files. The hmode7/ submodule and src/ vendored
+          # upstream are already gitignored at the file-level here.
+          FILES=$(git ls-files '*.md')
+          if [ -n "$FILES" ]; then
+            echo "$FILES" | xargs markdownlint -c .markdownlint.json
+          fi

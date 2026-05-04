@@ -8,7 +8,7 @@
 # Features: level up actor[0] (x1, x5, x10, x100), gain gold,
 # add items/weapons/armors via a custom Window_GetItem.
 
-MKXP.puts("[cheats] loading RPG Maker XP cheat menu")
+MKXP.puts('[cheats] loading RPG Maker XP cheat menu')
 
 if defined?(Window_Selectable).nil? && defined?(Window_DrawableCommand)
   class Window_Selectable < Window_DrawableCommand
@@ -27,27 +27,30 @@ class Window_GetItem < Window_Selectable
   end
 
   def item
-    return @data[self.index]
+    @data[index]
   end
 
   def refresh
-    if self.contents != nil
-      self.contents.dispose
+    unless contents.nil?
+      contents.dispose
       self.contents = nil
     end
     @data = []
-    for item in @shop_goods
-      @data.push(item) if item != nil && item.name != ""
+    @shop_goods.each do |item|
+      @data.push(item) if !item.nil? && item.name != ''
     end
     @item_max = @data.size
-    if @item_max > 0
-      self.contents = Bitmap.new(width - 32, row_max * 32)
-      for i in 0...@item_max
-        draw_item(i)
-      end
+    return unless @item_max > 0
+
+    self.contents = Bitmap.new(width - 32, row_max * 32)
+    (0...@item_max).each do |i|
+      draw_item(i)
     end
   end
 
+  # rubocop:disable Metrics/AbcSize -- the per-row item draw
+  # walks count + label + price in one pass to keep the
+  # visual layout grouped in the source.
   def draw_item(index)
     item = @data[index]
     number = case item
@@ -56,33 +59,38 @@ class Window_GetItem < Window_Selectable
              when RPG::Armor  then $game_party.armor_number(item.id)
              else 0
              end
-    self.contents.font.color = number < 99 ? normal_color : disabled_color
+    contents.font.color = number < 99 ? normal_color : disabled_color
     x = 4
     y = index * 32
-    rect = Rect.new(x, y, self.width - 32, 32)
-    self.contents.fill_rect(rect, Color.new(0, 0, 0, 0))
+    rect = Rect.new(x, y, width - 32, 32)
+    contents.fill_rect(rect, Color.new(0, 0, 0, 0))
     begin
       bitmap = RPG::Cache.icon(item.icon_name)
-      opacity = self.contents.font.color == normal_color ? 255 : 128
-      self.contents.blt(x, y + 4, bitmap, Rect.new(0, 0, 24, 24), opacity)
-    rescue
+      opacity = contents.font.color == normal_color ? 255 : 128
+      contents.blt(x, y + 4, bitmap, Rect.new(0, 0, 24, 24), opacity)
+    rescue StandardError
+      # Icon name missing on this RPG Maker XP build; skip the icon.
     end
-    self.contents.draw_text(x + 28, y, 212, 32, item.name, 0)
-    self.contents.draw_text(x + 240, y, 88, 32, item.price.to_s, 2)
+    contents.draw_text(x + 28, y, 212, 32, item.name, 0)
+    contents.draw_text(x + 240, y, 88, 32, item.price.to_s, 2)
   end
+  # rubocop:enable Metrics/AbcSize
 end
 
 class Scene_Cheat
+  # rubocop:disable Metrics/AbcSize -- builds the full menu set
+  # in one pass; splitting the windows would scatter related
+  # state across many helper methods.
   def main
-    @cheat_window = Window_Command.new(160, ["Level Up", "Gain Gold", "Get Items", "Cancel"])
+    @cheat_window = Window_Command.new(160, ['Level Up', 'Gain Gold', 'Get Items', 'Cancel'])
     @cheat_window.active = true
     @cheat_window.visible = true
 
-    @level_window = Window_Command.new(160, ["1 Level", "5 Level", "10 Level", "100 Level", "Cancel"])
+    @level_window = Window_Command.new(160, ['1 Level', '5 Level', '10 Level', '100 Level', 'Cancel'])
     @level_window.active = false
     @level_window.visible = false
 
-    @gold_window = Window_Command.new(160, ["100 G", "1K G", "10K G", "100K G", "1M G", "Cancel"])
+    @gold_window = Window_Command.new(160, ['100 G', '1K G', '10K G', '100K G', '1M G', 'Cancel'])
     @gold_window.active = false
     @gold_window.visible = false
 
@@ -108,6 +116,7 @@ class Scene_Cheat
     @item_window.dispose
     @number_window.dispose
   end
+  # rubocop:enable Metrics/AbcSize
 
   def update
     @cheat_window.update
@@ -119,7 +128,8 @@ class Scene_Cheat
     return update_level  if @level_window.active
     return update_gold   if @gold_window.active
     return update_item   if @item_window.active
-    return update_number if @number_window.active
+
+    update_number if @number_window.active
   end
 
   def update_cheat
@@ -127,29 +137,29 @@ class Scene_Cheat
       $scene = Scene_Map.new
       return
     end
-    if Input.trigger?(Input::C)
-      case @cheat_window.index
-      when 0
-        @cheat_window.active = false
-        @cheat_window.visible = false
-        @level_window.active = true
-        @level_window.visible = true
-        @level_window.refresh
-      when 1
-        @cheat_window.active = false
-        @cheat_window.visible = false
-        @gold_window.active = true
-        @gold_window.visible = true
-        @gold_window.refresh
-      when 2
-        @cheat_window.active = false
-        @cheat_window.visible = false
-        @item_window.active = true
-        @item_window.visible = true
-        @item_window.refresh
-      when 3
-        $scene = Scene_Map.new
-      end
+    return unless Input.trigger?(Input::C)
+
+    case @cheat_window.index
+    when 0
+      @cheat_window.active = false
+      @cheat_window.visible = false
+      @level_window.active = true
+      @level_window.visible = true
+      @level_window.refresh
+    when 1
+      @cheat_window.active = false
+      @cheat_window.visible = false
+      @gold_window.active = true
+      @gold_window.visible = true
+      @gold_window.refresh
+    when 2
+      @cheat_window.active = false
+      @cheat_window.visible = false
+      @item_window.active = true
+      @item_window.visible = true
+      @item_window.refresh
+    when 3
+      $scene = Scene_Map.new
     end
   end
 
@@ -158,15 +168,15 @@ class Scene_Cheat
       $scene = Scene_Map.new
       return
     end
-    if Input.trigger?(Input::C)
-      case @level_window.index
-      when 0 then cheat_level_up1
-      when 1 then cheat_level_up5
-      when 2 then cheat_level_up10
-      when 3 then cheat_level_up100
-      end
-      $scene = Scene_Map.new
+    return unless Input.trigger?(Input::C)
+
+    case @level_window.index
+    when 0 then cheat_level_up1
+    when 1 then cheat_level_up5
+    when 2 then cheat_level_up10
+    when 3 then cheat_level_up100
     end
+    $scene = Scene_Map.new
   end
 
   def update_gold
@@ -174,16 +184,16 @@ class Scene_Cheat
       $scene = Scene_Map.new
       return
     end
-    if Input.trigger?(Input::C)
-      case @gold_window.index
-      when 0 then cheat_add_gold(100)
-      when 1 then cheat_add_gold(1_000)
-      when 2 then cheat_add_gold(10_000)
-      when 3 then cheat_add_gold(100_000)
-      when 4 then cheat_add_gold(1_000_000)
-      end
-      $scene = Scene_Map.new
+    return unless Input.trigger?(Input::C)
+
+    case @gold_window.index
+    when 0 then cheat_add_gold(100)
+    when 1 then cheat_add_gold(1_000)
+    when 2 then cheat_add_gold(10_000)
+    when 3 then cheat_add_gold(100_000)
+    when 4 then cheat_add_gold(1_000_000)
     end
+    $scene = Scene_Map.new
   end
 
   def update_item
@@ -191,23 +201,25 @@ class Scene_Cheat
       $scene = Scene_Map.new
       return
     end
-    if Input.trigger?(Input::C)
-      @item = @item_window.item
-      return if @item.nil?
-      number = case @item
-               when RPG::Item   then $game_party.item_number(@item.id)
-               when RPG::Weapon then $game_party.weapon_number(@item.id)
-               when RPG::Armor  then $game_party.armor_number(@item.id)
-               else 0
-               end
-      return if number == 99
-      max = [99, 99 - number].min
-      @item_window.active = false
-      @item_window.visible = false
-      @number_window.set(@item, max, @item.price)
-      @number_window.active = true
-      @number_window.visible = true
-    end
+    return unless Input.trigger?(Input::C)
+
+    @item = @item_window.item
+    return if @item.nil?
+
+    number = case @item
+             when RPG::Item   then $game_party.item_number(@item.id)
+             when RPG::Weapon then $game_party.weapon_number(@item.id)
+             when RPG::Armor  then $game_party.armor_number(@item.id)
+             else 0
+             end
+    return if number == 99
+
+    max = [99, 99 - number].min
+    @item_window.active = false
+    @item_window.visible = false
+    @number_window.set(@item, max, @item.price)
+    @number_window.active = true
+    @number_window.visible = true
   end
 
   def update_number
@@ -218,28 +230,41 @@ class Scene_Cheat
       @item_window.visible = true
       return
     end
-    if Input.trigger?(Input::C)
-      @number_window.active = false
-      @number_window.visible = false
-      case @item
-      when RPG::Item   then $game_party.gain_item(@item.id, @number_window.number)
-      when RPG::Weapon then $game_party.gain_weapon(@item.id, @number_window.number)
-      when RPG::Armor  then $game_party.gain_armor(@item.id, @number_window.number)
-      end
-      @item_window.refresh
-      @item_window.active = true
-      @item_window.visible = true
+    return unless Input.trigger?(Input::C)
+
+    @number_window.active = false
+    @number_window.visible = false
+    case @item
+    when RPG::Item   then $game_party.gain_item(@item.id, @number_window.number)
+    when RPG::Weapon then $game_party.gain_weapon(@item.id, @number_window.number)
+    when RPG::Armor  then $game_party.gain_armor(@item.id, @number_window.number)
     end
+    @item_window.refresh
+    @item_window.active = true
+    @item_window.visible = true
   end
 
   def cheat_level_up
-    $game_party.actors[0].level = $game_party.actors[0].level + 1 if $game_party && $game_party.actors && $game_party.actors[0]
+    return unless $game_party && $game_party.actors && $game_party.actors[0]
+
+    $game_party.actors[0].level = $game_party.actors[0].level + 1
   end
 
-  def cheat_level_up1;    cheat_level_up;                  end
-  def cheat_level_up5;    5.times   { cheat_level_up }; end
-  def cheat_level_up10;   10.times  { cheat_level_up }; end
-  def cheat_level_up100;  100.times { cheat_level_up }; end
+  def cheat_level_up1
+    cheat_level_up
+  end
+
+  def cheat_level_up5
+    5.times   { cheat_level_up }
+  end
+
+  def cheat_level_up10
+    10.times  { cheat_level_up }
+  end
+
+  def cheat_level_up100
+    100.times { cheat_level_up }
+  end
 
   def cheat_add_gold(amount)
     cap = 9_999_999
@@ -289,16 +314,16 @@ end
 # its first map after pressing New Game.
 if defined?(Game_Player) && Game_Player.method_defined?(:update)
   class Game_Player
-    alias :cheat_update :update unless self.method_defined?(:cheat_update)
+    alias cheat_update update unless method_defined?(:cheat_update)
     def update
       cheat_update
-      if Input.trigger?(Input::HOME) && $CHEATS
-        $scene = Scene_Cheat.new
-      end
+      return unless Input.trigger?(Input::HOME) && $CHEATS
+
+      $scene = Scene_Cheat.new
     end
   end
-  MKXP.puts("[cheats] RPG Maker XP cheat menu ready")
+  MKXP.puts('[cheats] RPG Maker XP cheat menu ready')
 else
-  MKXP.puts("[cheats] RPG Maker XP cheat menu deferred: " \
-            "Game_Player not loaded at postload time")
+  MKXP.puts('[cheats] RPG Maker XP cheat menu deferred: ' \
+            'Game_Player not loaded at postload time')
 end

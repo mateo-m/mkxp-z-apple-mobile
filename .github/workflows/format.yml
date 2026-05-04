@@ -1,0 +1,35 @@
+name: Format
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+# Format job verifies that the formatters would not modify any
+# tracked file. If they would, the job fails with a clear diff
+# so the contributor knows exactly what to run locally.
+
+jobs:
+  ruby:
+    name: Ruby (rubocop --autocorrect)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: false
+
+      - name: Install rubocop
+        run: gem install rubocop --no-document
+
+      - name: rubocop --autocorrect (would-modify is failure)
+        run: |
+          rubocop --autocorrect-all --format quiet
+          if ! git diff --exit-code; then
+            echo "::error::rubocop would modify files. Run \`rubocop --autocorrect-all\` locally and commit."
+            exit 1
+          fi

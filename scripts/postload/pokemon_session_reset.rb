@@ -61,12 +61,18 @@ Thread.new do
       next unless defined_resize
       next unless defined?($Settings) && $Settings
       next unless $Settings.respond_to?(:screensize)
-      ss = $Settings.screensize rescue nil
+
+      ss = begin
+        $Settings.screensize
+      rescue StandardError
+        nil
+      end
       next unless ss
+
       TOPLEVEL_BINDING.receiver.send(:pbSetResizeFactor, ss)
       break
     end
-  rescue
+  rescue StandardError
     # Silently no-op on any error. Games that don't define
     # pbSetResizeFactor shouldn't care, and worst case the
     # original engine behavior applies.

@@ -21,15 +21,20 @@
 # hotkey is inert and the constants used to name it never raise.
 class Map_Saver
   def initialize(map_id = 0, x = 0, y = 0); end
+
+  # rubocop:disable Naming/AccessorMethodName -- mirrors the
+  # upstream Map_Saver plugin API (`map_saver.set_scale(2)`).
   def set_scale(scale); end
+  # rubocop:enable Naming/AccessorMethodName
+
   def mapshot; end
   def screenshot; end
 end
 
 module TH
   module Map_Saver
-    Mapshot_Button    = 3452345
-    Screenshot_Button = 3452345
+    Mapshot_Button    = 3_452_345
+    Screenshot_Button = 3_452_345
   end
 end
 
@@ -40,14 +45,14 @@ end
 # return a plain gradient / blank so the UI renders without the
 # actual screenshot.
 module Cache
-  def self.bitmap_save_ss(hash, index)
+  def self.bitmap_save_ss(_hash, _index)
     sp = Bitmap.new(205, 150)
     sp.gradient_fill_rect(sp.rect, Color.new(80, 80, 80), Color.new(20, 20, 20), true)
-    sp.draw_text(sp.rect, "Save File", 1)
+    sp.draw_text(sp.rect, 'Save File', 1)
     sp
   end
 
-  def self.savefile_picture(filename)
+  def self.savefile_picture(_filename)
     Bitmap.new(160, 120)
   end
 end
@@ -76,7 +81,7 @@ end
 # screenshot PNG; route through engine Graphics.screenshot which
 # knows how to write to the sandboxed cache dir.
 class Bitmap
-  def exportBitmap(fn, type, back = nil)
+  def exportBitmap(fn, _type, _back = nil)
     Graphics.screenshot(fn) if Graphics.respond_to?(:screenshot)
   end
 end
@@ -93,12 +98,8 @@ end
 # their own `_draw_text` either before or after our postload, and
 # re-aliasing would capture our wrapper as the "original").
 class Bitmap
-  unless method_defined?(:_draw_text) || private_method_defined?(:_draw_text)
-    alias_method :_draw_text, :draw_text
-  end
-  unless method_defined?(:_text_size) || private_method_defined?(:_text_size)
-    alias_method :_text_size, :text_size
-  end
+  alias _draw_text draw_text unless method_defined?(:_draw_text) || private_method_defined?(:_draw_text)
+  alias _text_size text_size unless method_defined?(:_text_size) || private_method_defined?(:_text_size)
 end
 
 # Vitamin Plus save-screen screenshot toggles. Turning both off
@@ -113,8 +114,10 @@ end
 # blend_blt. The real implementation does per-pixel blending via
 # a Win32 DLL; no-op is safer than crashing.
 module TKTK_Bitmap
-  def blend_blt(dest_bmp, x, y, src_bmp, rect, blend_type = 0, opacity = 255)
-  end
+  # rubocop:disable Metrics/ParameterLists -- matches the upstream
+  # tktk_bitmap signature game scripts call.
+  def blend_blt(dest_bmp, x, y, src_bmp, rect, blend_type = 0, opacity = 255); end
+  # rubocop:enable Metrics/ParameterLists
 end
 
 # --- MOG Anti Lag fix ---
@@ -128,14 +131,18 @@ begin
       def anti_lag_initial_setup
         @can_update = true
         rg = [(Graphics.width / 32) - 1, (Graphics.height / 32) - 1]
-        @loop_map = ($game_map.loop_horizontal? || $game_map.loop_vertical?) ? true : false
-        out_screen = defined?(MOG_ANTI_LAG::UPDATE_OUT_SCREEN_RANGE) ?
-          MOG_ANTI_LAG::UPDATE_OUT_SCREEN_RANGE : 0
+        @loop_map = $game_map.loop_horizontal? || $game_map.loop_vertical?
+        out_screen = if defined?(MOG_ANTI_LAG::UPDATE_OUT_SCREEN_RANGE)
+                       MOG_ANTI_LAG::UPDATE_OUT_SCREEN_RANGE
+                     else
+                       0
+                     end
         @antilag_range = [-out_screen, rg[0] + out_screen, rg[1] + out_screen]
       end
     end
   end
 rescue StandardError
+  # MOG plugin not loaded; nothing to patch.
 end
 
 # --- YSE Patch System quit_fake suppression ---
@@ -143,10 +150,9 @@ end
 # on mobile (can't close, steals input). Flip its configured flag
 # to false if the plugin is loaded.
 begin
-  if defined?(YSE::PATCH_SYSTEM::LOAD_CONFIGURATION)
-    YSE::PATCH_SYSTEM::LOAD_CONFIGURATION[:quit_fake] = false
-  end
+  YSE::PATCH_SYSTEM::LOAD_CONFIGURATION[:quit_fake] = false if defined?(YSE::PATCH_SYSTEM::LOAD_CONFIGURATION)
 rescue StandardError
+  # YSE patch system not loaded; nothing to disable.
 end
 
 # --- KGC BitmapExtension default ---
@@ -171,9 +177,13 @@ module MessageEnhance
   OB3 = false
   OB4 = false
 
+  # rubocop:disable Naming/PredicateMethod -- mirrors upstream
+  # MessageEnhance.invisible accessor (named without `?` in the
+  # plugin and called as `MessageEnhance.invisible` by games).
   def self.invisible
     false
   end
+  # rubocop:enable Naming/PredicateMethod
 end
 
 # --- ZiifSaveLayoutA inert defaults ---
@@ -186,8 +196,13 @@ module ZiifSaveLayoutA
   D_Area      = false
   D_Story     = false
 
-  def self.save_background_bitmap; Bitmap.new(48, 48) end
-  def self.load_background_bitmap; Bitmap.new(48, 48) end
+  def self.save_background_bitmap
+    Bitmap.new(48, 48)
+  end
+
+  def self.load_background_bitmap
+    Bitmap.new(48, 48)
+  end
 end
 
 begin
@@ -195,6 +210,7 @@ begin
     def draw_save_bitmap; end
   end
 rescue StandardError
+  # ZiifSaveLayoutA plugin not loaded; nothing to patch.
 end
 
 # --- HN_Light / Sprite_Dark inert shells ---
@@ -208,6 +224,7 @@ end
 module HN_Light
   class Light
     attr_reader :bitmap, :cells, :width, :height, :ox, :oy
+
     def initialize(light_type, s_zoom = 1); end
     def dispose; end
   end
@@ -216,15 +233,17 @@ end
 begin
   class Sprite_Dark < Sprite
     def initialize(viewport = nil)
-      super(viewport)
+      super
       @width  = Graphics.width
       @height = Graphics.height
       @light_cache = {}
     end
+
     def add_light(character); end
     def refresh; end
   end
 rescue StandardError
+  # HN_Light Sprite_Dark not in scope; nothing to stub.
 end
 
 # --- InputMouse module stub ---
@@ -236,15 +255,49 @@ module InputMouse
   @@x = 0
   @@y = 0
 
-  def self.x;  @@x end
-  def self.y;  @@y end
-  def self.set_pos(x, y);   false end
-  def self.press?(index);   false end
-  def self.trigger?(index); false end
-  def self.repeat?(index);  false end
-  def self.input_time(index); -1 end
-  def self.input?;          false end
-  def self.wheel_delta;     0 end
-  def self.update;          end
-  def self.fullscreen?;     true end
+  def self.x
+    @@x
+  end
+
+  def self.y
+    @@y
+  end
+
+  # rubocop:disable Naming/PredicateMethod
+  # `set_pos` mirrors the upstream InputMouse plugin API; returns
+  # false to mean "not supported on this platform".
+  def self.set_pos(_x, _y)
+    false
+  end
+  # rubocop:enable Naming/PredicateMethod
+
+  def self.press?(_index)
+    false
+  end
+
+  def self.trigger?(_index)
+    false
+  end
+
+  def self.repeat?(_index)
+    false
+  end
+
+  def self.input_time(_index)
+    -1
+  end
+
+  def self.input?
+    false
+  end
+
+  def self.wheel_delta
+    0
+  end
+
+  def self.update; end
+
+  def self.fullscreen?
+    true
+  end
 end

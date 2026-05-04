@@ -22,7 +22,7 @@
 #      so games overriding `Input` with Win32API polling still see
 #      touch / gamepad events.
 
-if !$PokemonSystem.nil?
+unless $PokemonSystem.nil?
   # Persist a "this is PE" marker in the host-managed state dir.
   # The host-side static detector (GameSettings.detectPokemonEssentials)
   # can't see PE signatures inside rgssad-protected archives, so
@@ -32,15 +32,18 @@ if !$PokemonSystem.nil?
   begin
     if defined?(MKXP) && MKXP.respond_to?(:managed_config_dir)
       managed = MKXP.managed_config_dir.to_s
-      if !managed.empty?
+      unless managed.empty?
         marker = "#{managed}/.pokemon_essentials_detected"
-        File.write(marker, "") unless File.exist?(marker)
+        File.write(marker, '') unless File.exist?(marker)
       end
     end
-  rescue => e
-    MKXP.puts("[pokemon_input] failed to write PE marker: #{e}") rescue nil
+  rescue StandardError => e
+    begin
+      MKXP.puts("[pokemon_input] failed to write PE marker: #{e}")
+    rescue StandardError
+      nil
+    end
   end
-
 
   # Backspace shim for Pokemon Essentials' keyboard text-entry
   # scene. Older PE versions (Uranium / Insurgence era - PE 16-18)
@@ -57,16 +60,20 @@ if !$PokemonSystem.nil?
   if defined?(Window_TextEntry_Keyboard)
     class Window_TextEntry_Keyboard
       unless method_defined?(:_mkxp_pre_backspace_orig_update)
-        alias_method :_mkxp_pre_backspace_orig_update, :update
+        alias _mkxp_pre_backspace_orig_update update
         def update
           if @helper && @helper.cursor > 0 &&
-             (Input.triggerex?(:BACKSPACE) rescue false)
+             begin
+               Input.triggerex?(:BACKSPACE)
+             rescue StandardError
+               false
+             end
             # Delegate to the parent class's `delete` (defined on
             # Window_TextEntry) which trims the helper's text and
             # refreshes the rendered window. Skip the rest of
             # PE's update for this frame so the GetKeyboardState
             # poll doesn't immediately re-process the same key.
-            self.delete
+            delete
             return
           end
           _mkxp_pre_backspace_orig_update
@@ -90,8 +97,8 @@ if !$PokemonSystem.nil?
   # effect. The bridge value is set by AppState.selectGame BEFORE
   # the engine starts running scripts, so once postload finishes
   # `USEKEYBOARDTEXTENTRY` is locked for the session.
-  use_in_game = (defined?(MKXP) && MKXP.respond_to?(:use_in_game_keyboard?) &&
-                 MKXP.use_in_game_keyboard?)
+  use_in_game = defined?(MKXP) && MKXP.respond_to?(:use_in_game_keyboard?) &&
+                MKXP.use_in_game_keyboard?
   if use_in_game
     # PE v18 and earlier: top-level constant. PE v19+ moved most
     # settings into a `Settings` module so the original constant
@@ -101,18 +108,21 @@ if !$PokemonSystem.nil?
     # braces all three: the right one for the game wins, the
     # others are no-ops.
     [
-      [Object,           :USEKEYBOARDTEXTENTRY],
+      [Object, :USEKEYBOARDTEXTENTRY],
       [Object.const_defined?(:Settings) ? Settings : nil, :USEKEYBOARDTEXTENTRY],
-      [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD],
+      [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD]
     ].each do |scope, name|
       next unless scope
+
       # `const_defined?(name, false)` 2-arg form (skip-inheritance)
       # is Ruby 1.9+. On 1.8 the 1-arg form already only checks
       # the receiver's own constant table, so we just always pass
       # the inherit flag on 1.9+ and omit it on 1.8.
-      already = (RUBY_VERSION >= "1.9") ?
-                scope.const_defined?(name, false) :
-                scope.const_defined?(name)
+      already = if RUBY_VERSION >= '1.9'
+                  scope.const_defined?(name, false)
+                else
+                  scope.const_defined?(name)
+                end
       scope.send(:remove_const, name) if already
       scope.const_set(name, false)
     end
@@ -120,46 +130,45 @@ if !$PokemonSystem.nil?
 
   module Input
     def self.update
-      self.jupdate
+      jupdate
     end
 
     def self.press?(button)
-      return self.jpress?(button)
+      jpress?(button)
     end
 
     def self.trigger?(button)
-      return self.jtrigger?(button)
+      jtrigger?(button)
     end
 
     def self.repeat?(button)
-      return self.jrepeat?(button)
+      jrepeat?(button)
     end
 
     def self.dir4
-      return self.jdir4
+      jdir4
     end
 
     def self.dir8
-      return self.jdir8
+      jdir8
     end
 
     def self.pressex?(key)
-      return self.jpressex?(key)
+      jpressex?(key)
     end
 
     def self.triggerex?(key)
-      return self.jtriggerex?(key)
+      jtriggerex?(key)
     end
 
     def self.repeatex?(key)
-      return self.jrepeatex?(key)
+      jrepeatex?(key)
     end
 
-    def self.repeatcount(key)
-      return 0
+    def self.repeatcount(_key)
+      0
     end
 
-    def self.updateKeyState(key)
-    end
+    def self.updateKeyState(key); end
   end
 end

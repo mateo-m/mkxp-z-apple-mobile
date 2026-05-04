@@ -43,6 +43,7 @@ begin
     # game's later `class PokemonSystem ... end` still overrides
     # cleanly via Ruby's open-class semantics.
     attr_accessor :screensize
+
     def screensize
       @screensize ||= 1.0
     end
@@ -121,12 +122,30 @@ end
 # don't depend on Ruby-level loop tables - mkxp-z honors Ogg
 # `LOOPSTART`/`LOOPLENGTH` tags via its native loader).
 class FmodExHandle
-  def initialize(kind); @kind = kind; end
-  def set_position(_pos); end
-  def get_position
-    Audio.respond_to?(:bgm_position) ? (Audio.bgm_position rescue 0) : 0
+  def initialize(kind)
+    @kind = kind
   end
+
+  # rubocop:disable Naming/AccessorMethodName -- mirrors FmodEx
+  # playback-handle API (`set_position` / `get_position`) that
+  # game scripts call by exact name.
+  def set_position(_pos); end
+
+  def get_position
+    if Audio.respond_to?(:bgm_position)
+      begin
+        Audio.bgm_position
+      rescue StandardError
+        0
+      end
+    else
+      0
+    end
+  end
+  # rubocop:enable Naming/AccessorMethodName
+
   def set_loop_points(*); end
+
   def stop
     case @kind
     when :bgm then Audio.__mkxp_native_call(:@__mkxp_native_bgm_stop)
@@ -152,35 +171,61 @@ module FmodEx
     # 4-arg native form takes a position (microseconds) where
     # supported; fall back to 3-arg if the engine doesn't accept
     # it (older RGSS1 builds).
-    Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch, position) rescue
-      Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch)
+    begin
+      Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch, position)
+    rescue StandardError
+      Audio.__mkxp_native_call(
+        :@__mkxp_native_bgm_play, filename, volume, pitch
+      )
+    end
     FmodExHandle.new(:bgm)
   end
-  def bgm_fade(ms);   Audio.__mkxp_native_call(:@__mkxp_native_bgm_fade, ms); end
-  def bgm_stop;       Audio.__mkxp_native_call(:@__mkxp_native_bgm_stop); end
+
+  def bgm_fade(ms)
+    Audio.__mkxp_native_call(:@__mkxp_native_bgm_fade, ms)
+  end
+
+  def bgm_stop
+    Audio.__mkxp_native_call(:@__mkxp_native_bgm_stop)
+  end
 
   # BGS
   def bgs_play(filename, volume = 100, pitch = 100)
     Audio.__mkxp_native_call(:@__mkxp_native_bgs_play, filename, volume, pitch)
     FmodExHandle.new(:bgs)
   end
-  def bgs_fade(ms);   Audio.__mkxp_native_call(:@__mkxp_native_bgs_fade, ms); end
-  def bgs_stop;       Audio.__mkxp_native_call(:@__mkxp_native_bgs_stop); end
+
+  def bgs_fade(ms)
+    Audio.__mkxp_native_call(:@__mkxp_native_bgs_fade, ms)
+  end
+
+  def bgs_stop
+    Audio.__mkxp_native_call(:@__mkxp_native_bgs_stop)
+  end
 
   # ME (music effect - one-shot, plays over BGM)
   def me_play(filename, volume = 100, pitch = 100)
     Audio.__mkxp_native_call(:@__mkxp_native_me_play, filename, volume, pitch)
     FmodExHandle.new(:me)
   end
-  def me_fade(ms);    Audio.__mkxp_native_call(:@__mkxp_native_me_fade, ms); end
-  def me_stop;        Audio.__mkxp_native_call(:@__mkxp_native_me_stop); end
+
+  def me_fade(ms)
+    Audio.__mkxp_native_call(:@__mkxp_native_me_fade, ms)
+  end
+
+  def me_stop
+    Audio.__mkxp_native_call(:@__mkxp_native_me_stop)
+  end
 
   # SE
   def se_play(filename, volume = 100, pitch = 100)
     Audio.__mkxp_native_call(:@__mkxp_native_se_play, filename, volume, pitch)
     FmodExHandle.new(:se)
   end
-  def se_stop;        Audio.__mkxp_native_call(:@__mkxp_native_se_stop); end
+
+  def se_stop
+    Audio.__mkxp_native_call(:@__mkxp_native_se_stop)
+  end
 end
 
 # --- Disposed RGSS object safety patches ---
@@ -199,12 +244,14 @@ end
 #     / etc. at the start of every session, overwriting our wrapper.
 def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   return unless klass.method_defined?(meth)
+
   orig = :"_mkxp_orig_#{meth}"
   unless klass.method_defined?(orig) || klass.private_method_defined?(orig)
     klass.send(:alias_method, orig, meth)
   end
   klass.send(:define_method, meth) do
     return default if disposed?
+
     begin
       send(orig)
     rescue RGSSError
@@ -213,13 +260,13 @@ def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   end
 end
 
-_disposed_safe_zero = [:x, :y, :z, :ox, :oy, :width, :height,
-                        :opacity, :back_opacity, :contents_opacity]
-_disposed_safe_false = [:visible]
+disposed_safe_zero = %i[x y z ox oy width height
+                        opacity back_opacity contents_opacity]
+disposed_safe_false = [:visible]
 
 [Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
-  _disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
-  _disposed_safe_false.each { |m| _mkxp_install_disposed_safe_wrapper(klass, m, false) }
+  disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
+  disposed_safe_false.each { |m| _mkxp_install_disposed_safe_wrapper(klass, m, false) }
 end
 
 # --- Null mouse shim ---
@@ -229,10 +276,25 @@ end
 # returning false/0/nil, and is installed on $mouse by the reset hook
 # below.
 class MkxpNullMouse
-  def method_missing(*) false end
-  def respond_to_missing?(*) true end
-  def x; 0 end
-  def y; 0 end
+  # rubocop:disable Naming/PredicateMethod -- mocks Pokemon
+  # Essentials' `Game_Mouse#method_missing` contract; the Ruby
+  # method-missing protocol uses this exact name (no `?`).
+  def method_missing(*)
+    false
+  end
+  # rubocop:enable Naming/PredicateMethod
+
+  def respond_to_missing?(*)
+    true
+  end
+
+  def x
+    0
+  end
+
+  def y
+    0
+  end
 end
 
 # --- Between-session reset hook ---
@@ -248,7 +310,7 @@ end
 # state inside FmodEx (or its handle) is reset through other means
 # - here we just keep the namespace alive.
 $__mkxp_preload_keep_consts ||= []
-[:MkxpNullMouse, :FmodEx, :FmodExHandle].each do |c|
+%i[MkxpNullMouse FmodEx FmodExHandle].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
 
@@ -273,7 +335,7 @@ unless $__mkxp_reset_hooks.any? { |h| h.respond_to?(:source_location) && h.sourc
     # forks. Add new entries as we hit them; the cost of nil-ing
     # an undefined global is zero.
     $mouse = MkxpNullMouse.new
-    $game_exists = nil      # Uranium hard-reset flag
+    $game_exists = nil # Uranium hard-reset flag
     $PokemonSystem = nil
     $PokemonTemp = nil
     $PokemonGlobal = nil
