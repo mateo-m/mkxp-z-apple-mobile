@@ -21,6 +21,11 @@ AllCops:
     - hmode7/**/*
     - src/**/*
     - binding/**/*
+    # `bundle install --path vendor/bundle` (used by ruby/setup-ruby's
+    # bundler-cache) drops gem files under vendor/, which rubocop
+    # would otherwise lint (some have Ruby shebangs even without
+    # .rb extension).
+    - vendor/**/*
 
 # --- Ruby 1.8 parser compatibility ----------------------------------
 
