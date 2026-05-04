@@ -1,4 +1,4 @@
-# Session reset audit — surfaces Ruby state leaks that
+# Session reset audit; surfaces Ruby state leaks that
 # `binding-mri.cpp:resetBetweenSessions` doesn't currently scrub.
 #
 # Background: mkxp-z keeps the Ruby VM alive across game sessions

@@ -89,7 +89,7 @@ void Init_thread(void);
 void Init_digest(void);
 void Init_fcntl(void);
 
-/* Ruby 1.8 GC stack base — defined in gc.c.
+/* Ruby 1.8 GC stack base; defined in gc.c.
  * Must be updated when the RGSS thread changes between sessions,
  * otherwise GC's mark_locations_array scans the old thread's
  * (now-unmapped) stack and crashes with SIGSEGV. */
@@ -648,7 +648,7 @@ RB_METHOD(mkxpPuts) {
  * on iOS / iPadOS / tvOS, so all legacy desktop predicates return false
  * and the host string is hardcoded. Methods are preserved (rather than
  * removed) so existing game scripts that call `System::is_mac?` etc.
- * continue to load without raising NoMethodError; they simply take
+ * continue to load without raising NoMethodError; they take
  * their "unknown platform" fallback path. `System::is_ios?` is
  * provided as the new positive check. */
 RB_METHOD(mkxpPlatform) {
@@ -773,17 +773,9 @@ RB_METHOD(mkxpRubyVersion) {
     return rb_str_new_cstr(v.c_str());
 }
 
-/* System.syntax_transform_target - `[major, minor, teeny,
-   ec_active_at_1_8]` diagnostic. Exposes the raw values of the
-   three `mkxp_syntax_transform_target_ruby_version_*` globals
-   (UINT_MAX meaning "disabled") so Ruby-side probes can verify
-   whether the transform is actually reaching the runtime - we
-   hit a case with Infinite Fusion where `syntaxTransform: 0` in
-   mkxp.json appeared to set the target to disabled, yet
-   String#[] was still returning Integer-per-Ruby-1.8 semantics.
-   The fourth array element is what `mkxp_ec_is_syntax_transform_active(1, 8, -1)`
-   returns from the current frame - the same check the `String#[]`
-   patch uses to decide whether to swap in Ruby 1.8 behaviour. */
+/* System.syntax_transform_target -> [major, minor, teeny,
+   ec_active_at_1_8]. UINT_MAX in any slot = disabled. The fourth
+   element matches the same check String#[] uses internally. */
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 RB_METHOD(mkxpSyntaxTransformTarget) {
     RB_UNUSED_PARAM;
@@ -949,7 +941,7 @@ RB_METHOD(mkxpSetDefaultFontFamily) {
  * to the nearest RUBY frame on the call stack.  C (CFUNC) frames are
  * transparent to $~ propagation.  A Ruby-level wrapper would create a new
  * RUBY frame, trapping $~ inside the wrapper and making it invisible to
- * the caller — breaking patterns like:
+ * the caller; breaking patterns like:
  *     while text[/regexp/]
  *       $~.pre_match   # => nil:NilClass (NoMethodError) if wrapped in Ruby
  *
@@ -1469,7 +1461,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             "pokemon_compat",
             "win32_wrap",
             // Encoding-aware methods that override win32_wrap stubs.
-            // Uses Encoding::*, force_encoding, unpack1 — all Ruby
+            // Uses Encoding::*, force_encoding, unpack1; all Ruby
             // 1.9+ APIs. Ruby 1.8's parser refuses to compile the
             // file. Multi-Ruby (mkxp18-merged) compiles binding-mri
             // against Ruby 1.8 headers which makes RUBY_API_VERSION_*
@@ -1741,30 +1733,10 @@ static void runRMXPScripts(BacktraceData &btData) {
             btData.scriptNames.insert(buf, scriptName);
             
             
-            // if the script name starts with |s|, only execute
-            // it if "s" is the same first letter as the platform
-            // we're running on
-            
-            // |W| - Windows, |M| - Mac OS X, |L| - Linux
-            
-            // Adding a 'not' symbol means it WON'T run on that
-            // platform (i.e. |!W| won't run on Windows)
-            /*
-             if (scriptName[0] == '|') {
-             int len = strlen(scriptName);
-             if (len > 2) {
-             if (scriptName[1] == '!' && len > 3 &&
-             scriptName[3] == scriptName[0]) {
-             if (toupper(scriptName[2]) == platform[0])
-             continue;
-             }
-             if (scriptName[2] == scriptName[0] &&
-             toupper(scriptName[1]) != platform[0])
-             continue;
-             }
-             }
-             */
-            
+            // Per-platform script gating (|W|/|M|/|L| name prefix,
+            // |!W| for negation) is unimplemented; the original block
+            // sat here commented out and was removed.
+
             int state;
 
             // Per-script trace. Useful when a game hangs inside a script:
@@ -1816,19 +1788,12 @@ static void runRMXPScripts(BacktraceData &btData) {
                                  strstr(msgStr, ":Class");
                 } else if (rb_obj_is_kind_of(exc, rb_eTypeError)) {
                     /* Skip "superclass mismatch for class X" errors.
-                     * Common pattern in community Pokemon Essentials
-                     * plugins: BW_Bag (Pokemon Uranium) tries to
-                     * redefine `Window_PokemonBag < Window_DrawableCommand`
-                     * when the original PE version had it as
-                     * `< SpriteWindow_Selectable`. The original class
-                     * hierarchy survives intact; the failed redefinition
-                     * just means the plugin's bonus features don't load,
-                     * which is the right degradation: the game's stock
-                     * bag UI still works.
-                     *
-                     * Other TypeErrors (real game logic bugs like
-                     * "can't convert Class to Integer") still fatal
-                     * out so we don't mask actual problems. */
+                     * Common in community PE plugins that redefine a
+                     * Window_* class against a different parent than
+                     * the running PE version uses. The original
+                     * hierarchy survives, so the game's stock UI still
+                     * works; only the plugin's bonus features get
+                     * dropped. Other TypeErrors (real bugs) stay fatal. */
                     VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
                     const char *msgStr = StringValueCStr(msg);
                     shouldSkip = strstr(msgStr, "superclass mismatch") != NULL;
@@ -2330,7 +2295,7 @@ static void mriBindingExecutePerSession(Config &conf) {
      * any constants not in this baseline were defined by game scripts and
      * must be removed to prevent superclass-mismatch errors between
      * different games.
-     * Only capture once — the baseline is the same across sessions
+     * Only capture once; the baseline is the same across sessions
      * because mriBindingInit is deterministic. */
     {
         VALUE existing = rb_gv_get("$__mkxp_base_consts");
