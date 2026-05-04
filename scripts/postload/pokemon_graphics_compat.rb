@@ -18,21 +18,13 @@
 
 module Graphics
   class << self
-    unless respond_to?(:poke_width)
-      define_method(:poke_width) { Graphics.width }
-    end
+    define_method(:poke_width) { Graphics.width } unless respond_to?(:poke_width)
 
-    unless respond_to?(:poke_height)
-      define_method(:poke_height) { Graphics.height }
-    end
+    define_method(:poke_height) { Graphics.height } unless respond_to?(:poke_height)
 
-    unless respond_to?(:poke_snap_to_bitmap)
-      define_method(:poke_snap_to_bitmap) { Graphics.snap_to_bitmap }
-    end
+    define_method(:poke_snap_to_bitmap) { Graphics.snap_to_bitmap } unless respond_to?(:poke_snap_to_bitmap)
 
-    unless respond_to?(:mkxp_snap_to_bitmap)
-      define_method(:mkxp_snap_to_bitmap) { Graphics.snap_to_bitmap }
-    end
+    define_method(:mkxp_snap_to_bitmap) { Graphics.snap_to_bitmap } unless respond_to?(:mkxp_snap_to_bitmap)
 
     unless respond_to?(:poke_resize_screen)
       define_method(:poke_resize_screen) do |w, h|
@@ -42,9 +34,7 @@ module Graphics
 
     # Legacy PE feature probe. Always true on mkxp-z; some games
     # branch on this to decide whether to call resize_screen.
-    unless respond_to?(:haveresizescreen)
-      define_method(:haveresizescreen) { true }
-    end
+    define_method(:haveresizescreen) { true } unless respond_to?(:haveresizescreen)
 
     # Zeus video plugin ships as a separate DLL on Windows and
     # some fangames call it directly. Delegate to our native

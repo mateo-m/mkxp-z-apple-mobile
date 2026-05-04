@@ -1,0 +1,129 @@
+# Rubocop config for Empo's preload/postload compatibility scripts.
+#
+# Posture: defaults stay on. Disables below correspond to real
+# technical or API-compatibility constraints, NOT "the existing
+# code does something else." If a single site needs an exception,
+# use `# rubocop:disable <Cop> -- <reason>` inline rather than
+# disabling the rule globally.
+
+AllCops:
+  # Rubocop's lowest TargetRubyVersion is 2.0; our actual target
+  # is 1.8 (the engine dispatches per-game to 1.8 / 1.9 / 3.x).
+  # Disables below cover the parser-incompatible rules that 2.0
+  # wouldn't otherwise catch.
+  TargetRubyVersion: 2.0
+  NewCops: enable
+  SuggestExtensions: false
+  Include:
+    - scripts/preload/**/*.rb
+    - scripts/postload/**/*.rb
+  Exclude:
+    - hmode7/**/*
+    - src/**/*
+    - binding/**/*
+
+# --- Ruby 1.8 parser compatibility ----------------------------------
+
+Style/HashSyntax:
+  EnforcedStyle: hash_rockets   # 1.8 has no symbol-shorthand keys
+Style/SafeNavigation:
+  Enabled: false                # 1.8 has no &.
+Style/FrozenStringLiteralComment:
+  Enabled: false                # 1.8 doesn't recognise the magic comment
+Style/Lambda:
+  EnforcedStyle: lambda         # ->{} doesn't parse on 1.8
+Style/Encoding:
+  Enabled: false
+Style/HashEachMethods:
+  Enabled: false
+Style/OptionalBooleanParameter:
+  Enabled: false                # 1.8 has no keyword arguments
+
+# --- RGSS / PE / Win32 API surface (method/class/constant names) ----
+
+# Methods like `pbCheatMenu`, `refreshLayer0`, `setSkin`,
+# `is_logged_in` are part of the API our scripts intercept;
+# Ruby dispatches by exact method name so these have to stay.
+# Same for class/module names that mirror upstream surface
+# (`RPC2`, `AudioPostMixHooks`).
+Naming/MethodName:
+  Enabled: false
+Naming/ClassAndModuleCamelCase:
+  Enabled: false
+
+# PE constants like `USEKEYBOARDTEXTENTRY`, Win32 typedefs like
+# `INT_PTR_64`, version vars like `RGSS_3_VERSION`.
+Naming/ConstantName:
+  Enabled: false
+Naming/VariableNumber:
+  Enabled: false
+
+# --- RGSS architectural patterns ------------------------------------
+
+# RGSS games + the engine's preload/postload glue communicate via
+# globals (`$game_party`, `$PokemonSystem`, `$__mkxp_reset_hooks`,
+# `$joiplay`). This is the public contract our scripts must match;
+# refactoring would break compat with every game we shim.
+Style/GlobalVars:
+  Enabled: false
+
+# Class variables (`@@native_methods`) snapshot native Audio /
+# Graphics methods at preload so later FmodEx-routing game scripts
+# can call back into the C bindings.
+Style/ClassVars:
+  Enabled: false
+
+# Compat scripts group related Win32 API mocks (Winmm + User32 +
+# Kernel32 in one file) to keep "Win32 surface" cohesive.
+Style/OneClassPerFile:
+  Enabled: false
+
+# These scripts mock external API surfaces; YARD-style class docs
+# would just paraphrase the surface. Inline comments at each
+# patch site explain the *why*.
+Style/Documentation:
+  Enabled: false
+
+# --- Lint with comment-aware exceptions -----------------------------
+
+Lint/SuppressedException:
+  AllowComments: true
+
+# --- Layout overrides -----------------------------------------------
+
+Layout/LineLength:
+  Max: 110
+  AllowedPatterns: ['^\s*#']
+
+# --- Metrics tuning -------------------------------------------------
+
+Metrics/MethodLength:
+  Max: 30
+Metrics/ClassLength:
+  Max: 250
+Metrics/ModuleLength:
+  Max: 250
+Metrics/BlockLength:
+  Max: 50
+Metrics/CyclomaticComplexity:
+  Max: 12
+Metrics/PerceivedComplexity:
+  Max: 12
+Metrics/AbcSize:
+  Max: 30
+Metrics/BlockNesting:
+  Max: 5
+
+Naming/MethodParameterName:
+  MinNameLength: 1
+  AllowedNames:
+    - e   # rescue exception
+    - i
+    - j
+    - k
+    - v
+    - x
+    - y
+    - z
+    - id
+    - to

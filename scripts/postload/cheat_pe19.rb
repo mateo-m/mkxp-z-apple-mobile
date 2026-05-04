@@ -14,54 +14,60 @@
 # from the iOS toolbar flows through the same Input.trigger?(HOME)
 # gate the JoiPlay build uses.
 
-if Object.const_defined?("GameData") || Object.const_defined?("PBItems")
-  MKXP.puts("[cheats] loading Pokemon Essentials cheat menu")
+if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
+  MKXP.puts('[cheats] loading Pokemon Essentials cheat menu')
 
   def getPEVersion
-    return "19" unless Object.const_defined?("Essentials")
-    return Essentials::VERSION
+    return '19' unless Object.const_defined?('Essentials')
+
+    Essentials::VERSION
   end
 
-  ENABLE_GET_ITEM = Object.const_defined?("PokemonMartScreen")
+  ENABLE_GET_ITEM = Object.const_defined?('PokemonMartScreen')
 
   if ENABLE_GET_ITEM
     class CheatItemsAdapter < PokemonMartAdapter
-      def getPrice(item, selling = false)
-        return 0
+      def getPrice(_item, _selling = false)
+        0
       end
     end
 
-    if Object.const_defined?("PokemonMart_Scene")
+    if Object.const_defined?('PokemonMart_Scene')
       class SceneCheat_Items < PokemonMart_Scene
       end
-    elsif Object.const_defined?("PokemonMartScene")
+    elsif Object.const_defined?('PokemonMartScene')
       class SceneCheat_Items < PokemonMartScene
       end
     end
 
     class ScreenCheat_Items < PokemonMartScreen
+      # rubocop:disable Lint/MissingSuper -- PokemonMartScreen's
+      # initializer pulls a regular trainer's bag/funds; we replace
+      # that wiring with our cheat-specific scene+stock+adapter.
       def initialize(scene, stock)
         @scene = scene
         @stock = stock
         @adapter = CheatItemsAdapter.new
       end
+      # rubocop:enable Lint/MissingSuper
     end
   end
 
   class Scene_Cheat
     def main
-      @wtwString = $wtw ? "Disable WTW" : "Enable WTW"
+      @wtw_string = $wtw ? 'Disable WTW' : 'Enable WTW'
       @cviewport = Viewport.new(0, 0, Graphics.width, Graphics.height)
-      @cviewport.z = 99999
+      @cviewport.z = 99_999
       @cheat_window = Window_CommandPokemon.new(
-        ["Get Items", "Heal Party", @wtwString, "Cancel"], 160)
+        ['Get Items', 'Heal Party', @wtw_string, 'Cancel'], 160
+      )
       @cheat_window.active = true
       @cheat_window.visible = true
       @cheat_window.viewport = @cviewport
 
-      @partyArray = []
-      $Trainer.party.each { |pokemon| @partyArray.push(pokemon.name) } if $Trainer && $Trainer.party
-      @partyArray.push("Cancel")
+      @party_array = []
+      $Trainer.party.each { |pokemon| @party_array.push(pokemon.name) } if $Trainer && $Trainer.party
+      @party_array.push('Cancel')
       Graphics.transition
       loop do
         Graphics.update
@@ -75,47 +81,53 @@ if Object.const_defined?("GameData") || Object.const_defined?("PBItems")
 
     def update
       @cheat_window.update
-      return update_cheat if @cheat_window.active
+      update_cheat if @cheat_window.active
     end
 
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    # The case-when handles each menu entry's distinct flow; the
+    # branch bodies don't share enough structure to factor into
+    # smaller methods without losing readability.
     def update_cheat
       return -1 if Input.trigger?(Input::B)
-      if Input.trigger?(Input::C)
-        case @cheat_window.index
-        when 0
-          if ENABLE_GET_ITEM
-            @cheat_window.active = false
-            @cheat_window.visible = false
-            scene = SceneCheat_Items.new
-            array = []
-            if Object.const_defined?("GameData")
-              GameData::Item.each do |i|
-                array.push(i) unless i.name.empty?
-              end
-            else
-              (0..PBItems.maxValue).each do |i|
-                array.push(i) unless PBItems.getName(i).empty?
-              end
-            end
-            screen = ScreenCheat_Items.new(scene, array)
-            screen.pbBuyScreen
-            pbScrollMap(-6, -5, -5)
-          end
-          return -1
-        when 1
-          $Trainer.party.each { |pokemon| pokemon.heal } if $Trainer && $Trainer.party
+
+      return unless Input.trigger?(Input::C)
+
+      case @cheat_window.index
+      when 0
+        if ENABLE_GET_ITEM
           @cheat_window.active = false
           @cheat_window.visible = false
-          return -1
-        when 2
-          $wtw = !$wtw
-          return -1
-        when 3
-          return -1
+          scene = SceneCheat_Items.new
+          array = []
+          if Object.const_defined?('GameData')
+            GameData::Item.each do |i|
+              array.push(i) unless i.name.empty?
+            end
+          else
+            (0..PBItems.maxValue).each do |i|
+              array.push(i) unless PBItems.getName(i).empty?
+            end
+          end
+          screen = ScreenCheat_Items.new(scene, array)
+          screen.pbBuyScreen
+          pbScrollMap(-6, -5, -5)
         end
-        return
+        return -1
+      when 1
+        $Trainer.party.each(&:heal) if $Trainer && $Trainer.party
+        @cheat_window.active = false
+        @cheat_window.visible = false
+        return -1
+      when 2
+        $wtw = !$wtw
+        return -1
+      when 3
+        return -1
       end
+      nil
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
     def return_scene
       @cviewport.dispose
@@ -127,7 +139,7 @@ if Object.const_defined?("GameData") || Object.const_defined?("PBItems")
   end
 
   class Scene_Map
-    alias cheatUpdateMaps updateMaps unless self.method_defined?(:cheatUpdateMaps)
+    alias cheatUpdateMaps updateMaps unless method_defined?(:cheatUpdateMaps)
     def updateMaps
       if Input.trigger?(Input::HOME) && $CHEATS
         $game_temp.menu_calling = false if $game_temp
@@ -142,21 +154,29 @@ if Object.const_defined?("GameData") || Object.const_defined?("PBItems")
   end
 
   class Game_Player
-    alias cheatPassable? passable? unless self.method_defined?(:cheatPassable?)
+    alias cheatPassable? passable? unless method_defined?(:cheatPassable?)
     def passable?(x, y, d, strict = false)
       if $wtw
-        new_x = x + (d == 6 ? 1 : d == 4 ? -1 : 0)
-        new_y = y + (d == 2 ? 1 : d == 8 ? -1 : 0)
-        return $game_map.valid?(new_x, new_y)
+        new_x = x + (if d == 6
+                       1
+                     else
+                       d == 4 ? -1 : 0
+                     end)
+        new_y = y + (if d == 2
+                       1
+                     else
+                       d == 8 ? -1 : 0
+                     end)
+        $game_map.valid?(new_x, new_y)
       else
         begin
           cheatPassable?(x, y, d, strict)
-        rescue
+        rescue StandardError
           cheatPassable?(x, y, d)
         end
       end
     end
   end
 
-  MKXP.puts("[cheats] Pokemon Essentials cheat menu ready")
+  MKXP.puts('[cheats] Pokemon Essentials cheat menu ready')
 end

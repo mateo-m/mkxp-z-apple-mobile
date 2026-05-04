@@ -24,36 +24,36 @@
 
 module HTTP
   class << self
-    def get(host, query = "")
+    def get(host, query = '')
       url = _join(host, query)
       result = HTTPLite.get(url)
-      result.is_a?(Hash) ? (result[:body] || "") : result.to_s
-    rescue => e
-      _log_err("GET", url, e)
-      ""
+      result.is_a?(Hash) ? (result[:body] || '') : result.to_s
+    rescue StandardError => e
+      _log_err('GET', url, e)
+      ''
     end
 
-    def post(host, query = "", body = {})
+    def post(host, query = '', body = {})
       url = _join(host, query)
       result = HTTPLite.post(url, body || {})
-      result.is_a?(Hash) ? (result[:body] || "") : result.to_s
-    rescue => e
-      _log_err("POST", url, e)
-      ""
+      result.is_a?(Hash) ? (result[:body] || '') : result.to_s
+    rescue StandardError => e
+      _log_err('POST', url, e)
+      ''
     end
 
     # JoiPlay invokes this for trophy unlocks / update checks; a
     # success status is enough, our side does not need to stream
     # bytes to disk because those probes discard the payload.
-    def download(host, query, path, on_progress = nil)
+    def download(host, query, _path, on_progress = nil)
       if on_progress.is_a?(String) && respond_to?(on_progress, true)
         send(on_progress, 100, 100)
       elsif on_progress.respond_to?(:call)
         on_progress.call(100, 100)
       end
       200
-    rescue => e
-      _log_err("DOWNLOAD", _join(host, query), e)
+    rescue StandardError => e
+      _log_err('DOWNLOAD', _join(host, query), e)
       0
     end
 
@@ -66,13 +66,15 @@ module HTTP
       host = host.to_s
       query = query.to_s
       return host if query.empty?
-      return host + query if host.end_with?("/") || query.start_with?("/")
-      return host + query if query.start_with?("?")
-      host + "/" + query
+      return host + query if host.end_with?('/') || query.start_with?('/')
+      return host + query if query.start_with?('?')
+
+      "#{host}/#{query}"
     end
 
     def _log_err(verb, url, e)
       return unless defined?(MKXP) && MKXP.respond_to?(:puts)
+
       MKXP.puts("[http] #{verb} #{url} failed: #{e.class}: #{e.message}")
     end
   end

@@ -6,21 +6,26 @@
 # DEBUG: marker BEFORE require so we can tell whether the script
 # even starts evaluating, vs failing at the require call.
 begin
-  System.puts "[platform_compat] preload TOP (Ruby #{RUBY_VERSION})" if defined?(System) && System.respond_to?(:puts)
-rescue => e
+  if defined?(System) && System.respond_to?(:puts)
+    System.puts "[platform_compat] preload TOP (Ruby #{RUBY_VERSION})"
+  end
+rescue StandardError => e
   # System.puts itself missing? Fall back to stderr (which the engine
   # captures into the session log).
-  STDERR.puts "[platform_compat] System.puts unavailable: #{e.class}: #{e.message}"
+  warn "[platform_compat] System.puts unavailable: #{e.class}: #{e.message}"
 end
 
 # Try the require under exception handling so a failure doesn't
 # abort the whole preload silently.
 begin
   require 'zlib'
-  System.puts "[platform_compat] require 'zlib' OK ($LOADED_FEATURES has zlib? #{$LOADED_FEATURES.any? {|f| f.include?('zlib') }})" if defined?(System)
+  if defined?(System)
+    has_zlib = $LOADED_FEATURES.any? { |f| f.include?('zlib') }
+    System.puts "[platform_compat] require 'zlib' OK ($LOADED_FEATURES has zlib? #{has_zlib})"
+  end
 rescue LoadError => e
   System.puts "[platform_compat] require 'zlib' FAILED: #{e.message}" if defined?(System)
-rescue => e
+rescue StandardError => e
   System.puts "[platform_compat] require 'zlib' EXC: #{e.class}: #{e.message}" if defined?(System)
 end
 
@@ -57,9 +62,13 @@ $joiplay = true
 # The 1.8 cooperative-scheduling semantics don't apply under modern
 # Ruby anyway; calling code only cared that the methods existed.
 unless Thread.respond_to?(:critical)
+  # rubocop:disable Naming/PredicateMethod -- mocking Ruby 1.8's
+  # `Thread.critical` reader, which returns a Boolean but is named
+  # without `?` for backwards compatibility with the 1.8 API.
   def Thread.critical
     false
   end
+  # rubocop:enable Naming/PredicateMethod
 
   def Thread.critical=(value)
     value
@@ -97,9 +106,7 @@ end
 
 module Process
   class << self
-    if respond_to?(:exit!) && !method_defined?(:_mkxp_orig_exit_bang)
-      alias_method :_mkxp_orig_exit_bang, :exit!
-    end
+    alias _mkxp_orig_exit_bang exit! if respond_to?(:exit!) && !method_defined?(:_mkxp_orig_exit_bang)
 
     def exit!(status = false)
       Kernel.exit(status)
@@ -151,10 +158,21 @@ module Kernel
   # Windows. Return nil so games keep running; real exec() would
   # terminate the process but that's the entire iOS app here, so a
   # silent no-op is the safer default.
-  def system(*args) nil end
-  def exec(*args)   nil end
-  def fork(*args)   nil end
-  def spawn(*args)  nil end
+  def system(*_args)
+    nil
+  end
+
+  def exec(*_args)
+    nil
+  end
+
+  def fork(*_args)
+    nil
+  end
+
+  def spawn(*_args)
+    nil
+  end
   module_function :system, :exec, :fork, :spawn
 end
 
@@ -165,36 +183,37 @@ end
 # scripts constructing paths from ENV don't return nil and crash.
 # Values point into the iOS sandbox (or are blank strings) so File.exist?
 # returns false rather than reading unrelated system dirs.
-_tmp = "/tmp"
+tmp = '/tmp'
 begin
-  _tmp = Dir.tmpdir
-rescue
+  tmp = Dir.tmpdir
+rescue StandardError
+  # Dir.tmpdir can raise on locked-down sandboxes; fall back to /tmp.
 end
-_userdata = "#{_tmp}/UserData"
-ENV["TEMP"] ||= _tmp
-ENV["TMP"]  ||= _tmp
-ENV["APPDATA"]              ||= "#{_userdata}/AppData"
-ENV["LOCALAPPDATA"]         ||= "#{_userdata}/AppData"
-ENV["ALLUSERSPROFILE"]      ||= _userdata
-ENV["USERPROFILE"]          ||= _userdata
-ENV["HOMEDRIVE"]            ||= ""
-ENV["HOMEPATH"]             ||= _userdata
-ENV["SystemRoot"]           ||= _userdata
-ENV["windir"]               ||= _userdata
-ENV["COMPUTERNAME"]         ||= "Empo"
-ENV["USERNAME"]             ||= "Empo"
-ENV["USERDOMAIN"]           ||= "Empo"
-ENV["SESSIONNAME"]          ||= "Empo"
-ENV["OS"]                   ||= "Windows_NT"
-ENV["PATH"]                 ||= ""
-ENV["PATHEXT"]              ||= ""
-ENV["Platform"]             ||= ""
-ENV["NUMBER_OF_PROCESSORS"] ||= "4"
-ENV["PROCESSOR_ARCHITECTURE"] ||= "x86"
-ENV["PROCESSOR_IDENTIFIER"] ||= "Intel64 Family6"
-ENV["PROCESSOR_LEVEL"]      ||= "6"
-ENV["PROCESSOR_REVISION"]   ||= "2a07"
-ENV["AV_APPDATA"]           ||= "#{_userdata}/AppData"
+userdata = "#{tmp}/UserData"
+ENV['TEMP'] ||= tmp
+ENV['TMP']  ||= tmp
+ENV['APPDATA']              ||= "#{userdata}/AppData"
+ENV['LOCALAPPDATA']         ||= "#{userdata}/AppData"
+ENV['ALLUSERSPROFILE']      ||= userdata
+ENV['USERPROFILE']          ||= userdata
+ENV['HOMEDRIVE']            ||= ''
+ENV['HOMEPATH']             ||= userdata
+ENV['SystemRoot']           ||= userdata
+ENV['windir']               ||= userdata
+ENV['COMPUTERNAME']         ||= 'Empo'
+ENV['USERNAME']             ||= 'Empo'
+ENV['USERDOMAIN']           ||= 'Empo'
+ENV['SESSIONNAME']          ||= 'Empo'
+ENV['OS']                   ||= 'Windows_NT'
+ENV['PATH']                 ||= ''
+ENV['PATHEXT']              ||= ''
+ENV['Platform']             ||= ''
+ENV['NUMBER_OF_PROCESSORS'] ||= '4'
+ENV['PROCESSOR_ARCHITECTURE'] ||= 'x86'
+ENV['PROCESSOR_IDENTIFIER'] ||= 'Intel64 Family6'
+ENV['PROCESSOR_LEVEL']      ||= '6'
+ENV['PROCESSOR_REVISION']   ||= '2a07'
+ENV['AV_APPDATA']           ||= "#{_userdata}/AppData"
 
 # --- Float bitwise-op monkey-patches ---
 # RGSS scripts occasionally do `x ^ 2` when they mean `x ** 2` (a
@@ -202,9 +221,17 @@ ENV["AV_APPDATA"]           ||= "#{_userdata}/AppData"
 # stock Ruby these raise NoMethodError against Float. Adding the ops
 # is a zero-risk unlock for a long tail of buggy scripts.
 class Float
-  def ^(power) self ** power end
-  def <<(num)  self * (2 ** num) end
-  def >>(num)  self / (2 ** num) end
+  def ^(other)
+    self**other
+  end
+
+  def <<(num)
+    self * (2**num)
+  end
+
+  def >>(other)
+    self / (2**other)
+  end
 end
 
 # --- Input::Controller state stubs ---
@@ -224,24 +251,70 @@ unless defined?(Input::Controller)
   module Input
     module Controller
       class State
-        def left_trigger_value;  0; end
-        def right_trigger_value; 0; end
-        def thumb_left_x;  0; end
-        def thumb_left_y;  0; end
-        def thumb_right_x; 0; end
-        def thumb_right_y; 0; end
-        def thumb_left_dir4;  0; end
-        def thumb_left_dir8;  0; end
-        def thumb_right_dir4; 0; end
-        def thumb_right_dir8; 0; end
-        def press?(_button);   false; end
-        def trigger?(_button); false; end
-        def repeat?(_button);  false; end
-        def pressed_buttons;   []; end
+        def left_trigger_value
+          0
+        end
+
+        def right_trigger_value
+          0
+        end
+
+        def thumb_left_x
+          0
+        end
+
+        def thumb_left_y
+          0
+        end
+
+        def thumb_right_x
+          0
+        end
+
+        def thumb_right_y
+          0
+        end
+
+        def thumb_left_dir4
+          0
+        end
+
+        def thumb_left_dir8
+          0
+        end
+
+        def thumb_right_dir4
+          0
+        end
+
+        def thumb_right_dir8
+          0
+        end
+
+        def press?(_button)
+          false
+        end
+
+        def trigger?(_button)
+          false
+        end
+
+        def repeat?(_button)
+          false
+        end
+
+        def pressed_buttons
+          []
+        end
       end
 
-      def self.states;      [State.new]; end
-      def self.first_state; State.new;   end
+      def self.states
+        [State.new]
+      end
+
+      def self.first_state
+        State.new
+      end
     end
   end
 end
@@ -292,23 +365,48 @@ end
 #    namespaces like FmodEx, FmodEx::System, etc.
 module IOS
   class NullStub
-    def self.method_missing(name, *args, &block); self; end
-    def self.respond_to_missing?(name, include_private = false); true; end
-    def self.const_missing(name); self; end
-    def self.new(*args, &block); self; end
+    def self.method_missing(_name, *_args)
+      self
+    end
+
+    def self.respond_to_missing?(_name, _include_private = false)
+      true
+    end
+
+    def self.const_missing(_name)
+      self
+    end
+
+    def self.new(*_args)
+      self
+    end
+
     # to_s/to_str return empty string so `"prefix: #{stub}"` and any implicit
     # string coercion produce clean output instead of leaking the internal
     # class name or raising TypeError on Ruby 3.x strict coercion.
-    def self.to_s;    ""; end
-    def self.to_str;  ""; end
-    def self.inspect; "#<IOS::NullStub>"; end
+    def self.to_s
+      ''
+    end
 
-    def method_missing(name, *args, &block); nil; end
-    def respond_to_missing?(name, include_private = false); true; end
+    def self.to_str
+      ''
+    end
+
+    def self.inspect
+      '#<IOS::NullStub>'
+    end
+
+    def method_missing(_name, *_args)
+      nil
+    end
+
+    def respond_to_missing?(_name, _include_private = false)
+      true
+    end
   end
 
-  ErrorStubs = {}
-  ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/
+  ErrorStubs = {}.freeze
+  ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/.freeze
 end
 
 class Module
@@ -357,7 +455,7 @@ end
 # `@@send_string_calls` counter - is reset explicitly by entries
 # in `$__mkxp_reset_hooks`.
 $__mkxp_preload_keep_consts ||= []
-[:IOS, :DL].each do |c|
+%i[IOS DL].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
 
@@ -369,15 +467,17 @@ end
 # the no-arg form, which is safe and well-defined (returns to home
 # dir or no-op when called with a block on no-arg).
 class << Dir
-  unless method_defined?(:_mkxp_orig_chdir)
-    alias_method :_mkxp_orig_chdir, :chdir
-  end
+  alias _mkxp_orig_chdir chdir unless method_defined?(:_mkxp_orig_chdir)
   def chdir(dir = nil, &block)
     return _mkxp_orig_chdir(&block) if dir.nil? || dir.empty?
+
     _mkxp_orig_chdir(dir, &block)
   end
 end
-System.puts "[platform_compat] Dir.chdir patch applied (orig defined? #{Dir.respond_to?(:_mkxp_orig_chdir)})" if defined?(System) && System.respond_to?(:puts)
+if defined?(System) && System.respond_to?(:puts)
+  has_orig = Dir.respond_to?(:_mkxp_orig_chdir)
+  System.puts "[platform_compat] Dir.chdir patch applied (orig defined? #{has_orig})"
+end
 
 # --- DL / DL::CFunc legacy fake module ---
 # Older Pokemon Essentials forks and a few community plugins use
@@ -394,35 +494,41 @@ System.puts "[platform_compat] Dir.chdir patch applied (orig defined? #{Dir.resp
 # already routes to noop / safe-default returns on iOS).
 module DL
   class CFunc
-    def initialize(func, type = "i")
+    def initialize(func, type = 'i')
       @func_name = func.to_s
       @type = type
       @impl = begin
-        Win32API.new("User32", @func_name, %w(l p), 'i') if defined?(Win32API)
-      rescue
+        Win32API.new('User32', @func_name, %w[l p], 'i') if defined?(Win32API)
+      rescue StandardError
         nil
       end
     end
 
     def call(*args)
       return @impl.call(*args) if @impl
+
       0
     end
 
-    def to_s;  @func_name.to_s; end
-    def to_str; @func_name.to_s; end
+    def to_s
+      @func_name.to_s
+    end
+
+    def to_str
+      @func_name.to_s
+    end
   end
 
-  USER32_FUNCS = %w(
+  USER32_FUNCS = %w[
     GetActiveWindow GetSystemMetrics GetWindowRect SetWindowLong
     SetWindowPos FindWindow GetForegroundWindow GetCursorPos
     SetWindowText
-  ).freeze
+  ].freeze
 
-  KERNEL32_FUNCS = %w(
+  KERNEL32_FUNCS = %w[
     GetModuleHandle GetPrivateProfileString GetCurrentThreadId
     GetCurrentProcess SetPriorityClass
-  ).freeze
+  ].freeze
 
   def self.dlopen(lib = '')
     name = lib.to_s.downcase
@@ -431,7 +537,7 @@ module DL
             when /kernel32/ then KERNEL32_FUNCS
             else []
             end
-    h = Hash.new { |_, k| k.to_s }  # unknown keys echo their own name
+    h = Hash.new { |_, k| k.to_s } # unknown keys echo their own name
     table.each { |fn| h[fn] = fn }
     h
   end
@@ -462,31 +568,32 @@ module Kernel
   # Known-missing networking requires. Match by exact path or by
   # prefix so `net/http`, `net/https`, `net/http/status`, etc. are
   # all absorbed by a single `net/` entry.
-  _NETWORK_REQUIRE_PATHS = [
-    "socket", "resolv", "resolv-replace",
-    "openssl", "digest",
-    "uri", "ipaddr",
-    "net", "net/",
-    "httparty", "rest-client", "rest_client",
-    "discord", "discord-rpc", "discordrb",
-    "poke-api-v2", "pokeapi",
-    "websocket", "websocket-client",
-    "json-jwt", "jwt",
+  NETWORK_REQUIRE_PATHS = [
+    'socket', 'resolv', 'resolv-replace',
+    'openssl', 'digest',
+    'uri', 'ipaddr',
+    'net', 'net/',
+    'httparty', 'rest-client', 'rest_client',
+    'discord', 'discord-rpc', 'discordrb',
+    'poke-api-v2', 'pokeapi',
+    'websocket', 'websocket-client',
+    'json-jwt', 'jwt'
   ].freeze
 
-  _orig_require = instance_method(:require)
+  orig_require = instance_method(:require)
 
   define_method(:require) do |path|
     begin
-      _orig_require.bind(self).call(path)
+      orig_require.bind(self).call(path)
     rescue LoadError => e
-      p = path.to_s
-      matched = _NETWORK_REQUIRE_PATHS.any? { |entry|
-        entry.end_with?("/") ? p.start_with?(entry) : p == entry
-      }
+      str = path.to_s
+      matched = NETWORK_REQUIRE_PATHS.any? do |entry|
+        entry.end_with?('/') ? str.start_with?(entry) : str == entry
+      end
       raise e unless matched
+
       # Mark as loaded so future `require` calls short-circuit.
-      feature = p.end_with?(".rb") ? p : "#{p}.rb"
+      feature = str.end_with?('.rb') ? str : "#{str}.rb"
       $LOADED_FEATURES << feature unless $LOADED_FEATURES.include?(feature)
       false
     end

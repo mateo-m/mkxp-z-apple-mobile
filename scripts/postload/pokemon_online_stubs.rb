@@ -20,14 +20,25 @@
 # the original gate was effectively always false at postload time
 # and the stubs never applied even for the games they target).
 
+# rubocop:disable Naming/AccessorMethodName, Naming/PredicateMethod, Naming/PredicatePrefix
+# These modules mock external API surfaces (GameJolt, ADIK, Berka)
+# that PE games call by exact method name. Renaming would break the
+# game-side calls that this file exists to neutralise.
 if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # Runtime asset downloader used by Green Remix / Natural Green.
   # Replaced wholesale: report nothing-to-download, complete
   # immediately, and no-op every call site.
   module Downloader
-    def self.downloading?;           false end
-    def self.update;                 end
-    def self.progress?;              100   end
+    def self.downloading?
+      false
+    end
+
+    def self.update; end
+
+    def self.progress?
+      100
+    end
+
     def self.download(url, filename) end
     def self.createIfNecessary(f)    end
     def self.finishUp;               end
@@ -41,24 +52,24 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # subclass Ruby rejects as a raise target).
   module Berka
     module NetErrorErr
-      ConIn    = "Unable to connect to Internet"
-      ConFtp   = "Unable to connect to Ftp"
-      ConHttp  = "Unable to connect to the Server"
-      NoFFtpIn = "The file to be downloaded doesn't exist"
-      NoFFtpEx = "The file to be uploaded doesn't exist"
-      TranHttp = "Http Download failed"
-      DownFtp  = "Ftp Download failed"
-      UpFtp    = "Ftp Upload failed"
-      NoFile   = "No file to be downloaded"
-      Mkdir    = "Unable to create a new directory"
+      ConIn    = 'Unable to connect to Internet'.freeze
+      ConFtp   = 'Unable to connect to Ftp'.freeze
+      ConHttp  = 'Unable to connect to the Server'.freeze
+      NoFFtpIn = "The file to be downloaded doesn't exist".freeze
+      NoFFtpEx = "The file to be uploaded doesn't exist".freeze
+      TranHttp = 'Http Download failed'.freeze
+      DownFtp  = 'Ftp Download failed'.freeze
+      UpFtp    = 'Ftp Upload failed'.freeze
+      NoFile   = 'No file to be downloaded'.freeze
+      Mkdir    = 'Unable to create a new directory'.freeze
     end
   end
 
   # Natural Green probes external URLs via pbGetTextFromInternet;
   # return empty string so downstream `.split` etc. get an empty
   # array instead of nil.
-  def pbGetTextFromInternet(url)
-    ""
+  def pbGetTextFromInternet(_url)
+    ''
   end
 
   # FontInstaller tries to shell out to the Windows font installer.
@@ -86,36 +97,80 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # always take the offline path.
   module GameJolt
     @status = -1
-    @error  = ""
+    @error  = ''
 
-    def self.login;          true end
-    def self.login_status;   @status end
-    def self.reset_status;   @status = -1 end
-    def self.is_logged_in;   false end
-    def self.call;           self.login end
+    def self.login
+      true
+    end
+
+    def self.login_status
+      @status
+    end
+
+    def self.reset_status
+      @status = -1
+    end
+
+    def self.is_logged_in
+      false
+    end
+
+    def self.call
+      login
+    end
+
     def self.logoff
       @status = -1
       $user = nil
       $password = nil
     end
 
-    def self.has_already_got_trophy?(trophy_id); false end
-    def self.award_trophy(trophy_id);            end
-    def self.submit_score(score, *args);         false end
-    def self.show_highscores(*args);             end
+    def self.has_already_got_trophy?(_trophy_id)
+      false
+    end
 
-    def self.do_request(base_url);               {"success" => "false"} end
-    def self.make_bool(s);                       s == "true" end
-    def self.authenticate(user, token);          true end
-    def self.get_userdata_string;                end
-    def self.get_error;                          @error end
-    def self.sync_trophies;                      end
-    def self.get_highscores_formatted(*args);    "" end
-    def self.get_highscores(*args);              nil end
-    def self.has_login_data;                     "Empo" end
+    def self.award_trophy(trophy_id); end
 
-    def self.enter_text(text = "", var = nil, max_char = 30)
-      $inputText = pbEnterText(text, 0, max_char, "", 3, nil) if defined?(pbEnterText)
+    def self.submit_score(_score, *_args)
+      false
+    end
+
+    def self.show_highscores(*args); end
+
+    def self.do_request(_base_url)
+      { 'success' => 'false' }
+    end
+
+    def self.make_bool(s)
+      s == 'true'
+    end
+
+    def self.authenticate(_user, _token)
+      true
+    end
+
+    def self.get_userdata_string; end
+
+    def self.get_error
+      @error
+    end
+
+    def self.sync_trophies; end
+
+    def self.get_highscores_formatted(*_args)
+      ''
+    end
+
+    def self.get_highscores(*_args)
+      nil
+    end
+
+    def self.has_login_data
+      'Empo'
+    end
+
+    def self.enter_text(text = '', _var = nil, max_char = 30)
+      $inputText = pbEnterText(text, 0, max_char, '', 3, nil) if defined?(pbEnterText)
     end
   end
 
@@ -125,10 +180,11 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # array iteration downstream.
   module ADIK
     module DATA
-      DATA_PATH = "CURRENT"
-      FOLDER    = []
-      FILENAME  = "gjdata.data"
+      DATA_PATH = 'CURRENT'.freeze
+      FOLDER    = [].freeze
+      FILENAME  = 'gjdata.data'.freeze
       AUTOSAVE  = false
     end
   end
 end
+# rubocop:enable Naming/AccessorMethodName, Naming/PredicateMethod, Naming/PredicatePrefix
