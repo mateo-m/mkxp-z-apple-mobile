@@ -26,7 +26,19 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-struct Exception
+// `__attribute__((visibility("default")))` forces the typeinfo
+// (`__ZTI9Exception`) and typestring (`__ZTS9Exception`) symbols
+// emitted for this class to keep external visibility even when
+// the rest of the translation unit is hidden. Without it, under
+// `-O3` the per-TU weak typeinfo instances don't always dedup
+// across the `ld -r` merge step that builds `mkxp{N}-merged.o`,
+// and `__cxa_throw` / `__cxa_can_catch` end up comparing
+// different typeinfo addresses for what is logically the same
+// type. The catch in `RB_METHOD_GUARD_END` then misses, the
+// engine throw escapes, libc++abi terminates the app with
+// "uncaught exception of type Exception". Default visibility
+// guarantees a single canonical typeinfo address per type.
+struct __attribute__((visibility("default"))) Exception
 {
 	enum Type
 	{
