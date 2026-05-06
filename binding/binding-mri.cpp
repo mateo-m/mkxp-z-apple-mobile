@@ -1349,9 +1349,20 @@ static void logRubyError(const char *type, const char *detail) {
     mkxp_debugLog(type, "binding-mri.cpp [C++]", detail);
 }
 
+/* Counts script sections that ran to completion without error during
+ * the current session. Reset at the top of runRMXPScripts and read
+ * by mriBindingExecute to decide whether a no-pending-exception
+ * shutdown should be classified as a clean exit. A session where
+ * every script was skipped (e.g. all required missing native libs)
+ * leaves this at 0 and the UI shows the recovery alert instead of
+ * the "game has ended" message. */
+static int s_scriptsExecutedThisSession = 0;
+
 static void runRMXPScripts(BacktraceData &btData) {
     const Config &conf = shState->rtData().config;
     const std::string &scriptPack = conf.game.scripts;
+
+    s_scriptsExecutedThisSession = 0;
 
     if (scriptPack.empty()) {
         showMsg("No script file has been specified. Check the game's INI and try again.");
@@ -1738,6 +1749,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             // sat here commented out and was removed.
 
             int state;
+            bool wasSkipped = false;
 
             // Per-script trace. Useful when a game hangs inside a script:
             // the last TRACE line points at the culprit.
@@ -1812,11 +1824,15 @@ static void runRMXPScripts(BacktraceData &btData) {
                     }
                     rb_set_errinfo(Qnil);
                     state = 0;
+                    wasSkipped = true;
                 }
                 }
             }
             if (state)
                 break;
+
+            if (!wasSkipped)
+                s_scriptsExecutedThisSession++;
 
             {
                 char trace[600];
@@ -2389,8 +2405,17 @@ static void mriBindingExecutePerSession(Config &conf) {
      * own "Exit to desktop" menu calling Kernel.exit). Only real
      * crashes short-circuit past this path, so the default clean=
      * false state from mkxp_setGamePath stays false in those cases
-     * and the UI shows the recovery alert. */
-    if (NIL_P(exc) || rb_obj_is_kind_of(exc, rb_eSystemExit)) {
+     * and the UI shows the recovery alert.
+     *
+     * Additional gate: at least one script section must have
+     * executed without being skipped. If every script bailed via
+     * the LoadError/SyntaxError/NoMethodError tolerance path
+     * (e.g. a game whose Main does nothing but `require 'socket'`),
+     * the user never got a running game and shouldn't see the
+     * "game has ended or requested a restart" message - that text
+     * only makes sense for sessions where the game actually ran. */
+    if ((NIL_P(exc) || rb_obj_is_kind_of(exc, rb_eSystemExit)) &&
+        s_scriptsExecutedThisSession > 0) {
         mkxp_setEngineExitedCleanly();
     }
 
