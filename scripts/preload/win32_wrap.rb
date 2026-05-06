@@ -37,6 +37,9 @@ unless Kernel.respond_to?(:load_module)
 end
 
 module Scancodes
+  # rubocop:disable Style/MutableConstant -- SDL/WIN32/WIN2SDL get
+  # `.default = ...` set after definition (lines 104, 179) so they
+  # can't be frozen.
   SDL = { :UNKNOWN => 0x00,
           :A => 0x04, :B => 0x05, :C => 0x06, :D => 0x07,
           :E => 0x08, :F => 0x09, :G => 0x0A, :H => 0x0B,
@@ -99,7 +102,7 @@ module Scancodes
           :AC_BACK => 0x10E, :AC_FORWARD => 0x10F, :AC_STOP => 0x110, :AC_REFRESH => 0x111,
           :AC_BOOKMARKS => 0x112, :BRIGHTNESSDOWN => 0x113, :BRIGHTNESSUP => 0x114, :DISPLAYSWITCH => 0x115,
           :KBDILLUMTOGGLE => 0x116, :KBDILLUMDOWN => 0x117, :KBDILLUMUP => 0x118, :EJECT => 0x119,
-          :SLEEP => 0x11A, :APP1 => 0x11B, :APP2 => 0x11C }.freeze
+          :SLEEP => 0x11A, :APP1 => 0x11B, :APP2 => 0x11C }
 
   SDL.default = SDL[:UNKNOWN]
 
@@ -146,7 +149,7 @@ module Scancodes
     :OEM_PLUS => 0xBB, :OEM_COMMA => 0xBC, :OEM_MINUS => 0xBD, :OEM_PERIOD => 0xBE,
     :OEM_2 => 0xBF, :OEM_3 => 0xC0, :OEM_4 => 0xDB, :OEM_5 => 0xDC,
     :OEM_6 => 0xDD, :OEM_7 => 0xDE
-  }.freeze
+  }
 
   WIN32INV = WIN32.invert
 
@@ -174,9 +177,10 @@ module Scancodes
     :OEM_PLUS => :EQUALS, :OEM_COMMA => :COMMA, :OEM_MINUS => :MINUS, :OEM_PERIOD => :PERIOD,
     :OEM_2 => :SLASH, :OEM_3 => :GRAVE, :OEM_4 => :LEFTBRACKET, :OEM_5 => :BACKSLASH,
     :OEM_6 => :RIGHTBRACKET, :OEM_7 => :APOSTROPHE
-  }.freeze
+  }
 
   WIN2SDL.default = :UNKNOWN
+  # rubocop:enable Style/MutableConstant
 end
 
 $win32KeyStates = nil
@@ -904,6 +908,6 @@ end
 # const lookup) one bare `Win32API_Impl::...` away from triggering
 # the `const_missing` recursion.
 $__mkxp_preload_keep_consts ||= []
-%i[Win32API Win32API_Impl].each do |c|
+[:Win32API, :Win32API_Impl].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end

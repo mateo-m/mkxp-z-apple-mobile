@@ -213,7 +213,7 @@ ENV['PROCESSOR_ARCHITECTURE'] ||= 'x86'
 ENV['PROCESSOR_IDENTIFIER'] ||= 'Intel64 Family6'
 ENV['PROCESSOR_LEVEL']      ||= '6'
 ENV['PROCESSOR_REVISION']   ||= '2a07'
-ENV['AV_APPDATA']           ||= "#{_userdata}/AppData"
+ENV['AV_APPDATA']           ||= "#{userdata}/AppData"
 
 # --- Float bitwise-op monkey-patches ---
 # RGSS scripts occasionally do `x ^ 2` when they mean `x ** 2` (a
@@ -405,7 +405,11 @@ module IOS
     end
   end
 
-  ErrorStubs = {}.freeze
+  # rubocop:disable Style/MutableConstant -- const_missing populates
+  # this lazily via `ErrorStubs[key] ||= ...` (line ~437) so it can't
+  # be frozen.
+  ErrorStubs = {}
+  # rubocop:enable Style/MutableConstant
   ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/.freeze
 end
 
@@ -455,7 +459,7 @@ end
 # `@@send_string_calls` counter - is reset explicitly by entries
 # in `$__mkxp_reset_hooks`.
 $__mkxp_preload_keep_consts ||= []
-%i[IOS DL].each do |c|
+[:IOS, :DL].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
 
