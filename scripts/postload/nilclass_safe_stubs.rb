@@ -151,6 +151,22 @@ class NilClass
     0
   end
 
+  # `Object#id` was removed in Ruby 1.9 (use `object_id` for the
+  # real value), but Pokemon Essentials forks frequently call `.id`
+  # on potentially-nil receivers in feature-detect blocks like:
+  #
+  #   sym = sym.id if !sym.is_a?(Symbol) && sym.respond_to?(:id)
+  #
+  # Pokemon Flux's `pbWeight` hits this path on a Pokemon with no
+  # held item: `itemActive?` returns true while `self.item` returns
+  # nil, so `nil.id` is called from the held-item weight-effect
+  # trigger and crashes the battle send-out animation. Returning
+  # nil here mimics "no id present"; the calling lookup `self[nil]`
+  # then returns nil and the trigger no-ops cleanly.
+  def id
+    nil
+  end
+
   def imag
     0
   end
