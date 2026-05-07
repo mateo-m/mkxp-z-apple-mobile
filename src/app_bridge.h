@@ -259,6 +259,12 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 // `MKXP_RUBY_UNSET` falls back to the build's default. Numeric values
 // are MMmm (3.0 -> 30, 1.8 -> 18), matching JoiPlay's libmkxpNN.so
 // filename convention.
+//
+// `MKXP_RUBY_30` is retained for back-compat with metadata.json
+// values written by older builds (when a native 3.0 binding shipped
+// in the merged.o set). New builds route 30 to the 3.1 binding +
+// Legacy syntax-transform mode at dispatch time; keeping the enum
+// value here keeps old `rubyVersion: 30` JSON decoding correctly.
 typedef enum {
     MKXP_RUBY_UNSET = -1,
     MKXP_RUBY_18    = 18,

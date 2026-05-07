@@ -225,7 +225,7 @@ int rgssThreadFun(void *userdata) {
         switch (mkxp_getActiveRubyVersion()) {
         case MKXP_RUBY_18: label = "1.8 (mkxp18-merged.o)"; break;
         case MKXP_RUBY_19: label = "1.9 (mkxp19-merged.o)"; break;
-        case MKXP_RUBY_30: label = "3.0 (mkxp30-merged.o)"; break;
+        case MKXP_RUBY_30: label = "3.1 (3.0 detected, routed to 3.1+Legacy)"; break;
         case MKXP_RUBY_31: label = "3.1 (mkxp31-merged.o)"; break;
         case MKXP_RUBY_UNSET: default: label = "3.1 (legacy, UNSET fallback)"; break;
         }
@@ -690,9 +690,22 @@ void EngineHost::runSessions(int argc, char *argv[]) {
 
     if (!rgssThread_) {
       /* First session: create the persistent RGSS thread.
-       * Ruby 3.1's GC is precise, so 1 MB is plenty. */
+       *
+       * 16 MB virtual stack. Ruby 1.8 / 1.9 use a conservative
+       * GC that walks the entire machine stack on every collection
+       * and copies the live stack into a fiber buffer on every
+       * Fiber switch (cont_save_machine_stack memcpys
+       * machine_stack_start - machine_stack_end). Deep RGSS3
+       * games (MOG title plugins, Window class hierarchy,
+       * fibers from Show Choices) regularly need 4-8 MB of
+       * live stack; the previous 1 MB cap caused SP to drop
+       * into the stack guard page mid-fiber-switch, surfacing
+       * as either an xzone malloc trap or an ASan memcpy
+       * out-of-bounds depending on heap layout. iOS commits
+       * stack pages lazily so the 16 MB only costs virtual
+       * address space, not physical RAM. */
       rgssThread_ = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                   1 * 1024 * 1024, &rtData);
+                                                   16 * 1024 * 1024, &rtData);
     } else {
       /* Subsequent sessions: signal the persistent RGSS thread
        * with the new session data. */

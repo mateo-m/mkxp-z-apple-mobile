@@ -346,7 +346,10 @@ const char *mkxp_getRubyVersion(void) {
     switch (mkxp_getActiveRubyVersion()) {
         case MKXP_RUBY_18: return "1.8";
         case MKXP_RUBY_19: return "1.9";
-        case MKXP_RUBY_30: return "3.0";
+        /* MKXP_RUBY_30 is deprecated; the binding routes it to the
+         * 3.1 build at runtime. Keep the enum value for old metadata
+         * decode but report the runtime version honestly. */
+        case MKXP_RUBY_30: return "3.1";
         case MKXP_RUBY_31: return "3.1";
         case MKXP_RUBY_UNSET:
         default:           break;

@@ -69,7 +69,6 @@ struct ScriptBinding
 
 extern "C" ScriptBinding *mkxp_get_script_binding_18(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_19(void);
-extern "C" ScriptBinding *mkxp_get_script_binding_30(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
 
 inline ScriptBinding *getActiveScriptBinding(void) {
@@ -77,16 +76,15 @@ inline ScriptBinding *getActiveScriptBinding(void) {
     switch (mkxp_getActiveRubyVersion()) {
     case MKXP_RUBY_18: sb = mkxp_get_script_binding_18(); break;
     case MKXP_RUBY_19: sb = mkxp_get_script_binding_19(); break;
-    case MKXP_RUBY_30: sb = mkxp_get_script_binding_30(); break;
-    /* UNSET / MKXP_RUBY_31 / unknown → 3.1 (default modern). */
+    /* UNSET / MKXP_RUBY_30 (deprecated, routed to 3.1 + Legacy
+     * compat) / MKXP_RUBY_31 / unknown → 3.1 (default modern). */
     default:           sb = mkxp_get_script_binding_31(); break;
     }
     /* Last-resort fallback if the chosen merged.o is a build-time
      * stub (returning nullptr because that SDK didn't ship it).
-     * Order: prefer 3.1, then 3.0, then 1.9, then 1.8; newest
-     * available wins so script-engine features stay maximal. */
+     * Order: prefer 3.1, then 1.9, then 1.8; newest available
+     * wins so script-engine features stay maximal. */
     if (!sb) sb = mkxp_get_script_binding_31();
-    if (!sb) sb = mkxp_get_script_binding_30();
     if (!sb) sb = mkxp_get_script_binding_19();
     if (!sb) sb = mkxp_get_script_binding_18();
     return sb;
