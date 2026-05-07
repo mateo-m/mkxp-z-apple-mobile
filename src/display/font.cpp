@@ -120,6 +120,46 @@ SharedFontState::SharedFontState(const Config &conf)
 {
 	p = new SharedFontStatePrivate;
 
+	/* iOS doesn't ship Windows system fonts (Tahoma, Verdana, Arial,
+	 * Times New Roman, Courier New, MS *). Games that hardcode these
+	 * names would hit "font not found" and end up rendering with the
+	 * bundled fallback (liberation.ttf) anyway - but several games
+	 * exercise edge cases (translucent + outline + custom Bitmap
+	 * surfaces) that crash inside SDL_ttf / libfreetype when the
+	 * fallback path is reached late. Mapping the common Windows
+	 * font names to the bundled font ("" = built-in liberation.ttf
+	 * via openBundledFont) makes the lookup succeed up-front and
+	 * avoids the late fallback path. User-provided fontSubs below
+	 * override these defaults. */
+	const std::pair<const char *, const char *> defaultSubs[] = {
+		{"tahoma", ""},
+		{"verdana", ""},
+		{"arial", ""},
+		{"arial black", ""},
+		{"arial narrow", ""},
+		{"times new roman", ""},
+		{"times", ""},
+		{"courier new", ""},
+		{"courier", ""},
+		{"ms sans serif", ""},
+		{"ms serif", ""},
+		{"microsoft sans serif", ""},
+		{"segoe ui", ""},
+		{"calibri", ""},
+		{"cambria", ""},
+		{"consolas", ""},
+		{"georgia", ""},
+		{"impact", ""},
+		{"lucida console", ""},
+		{"lucida sans unicode", ""},
+		{"palatino linotype", ""},
+		{"trebuchet ms", ""},
+	};
+	for (const auto &sub : defaultSubs)
+	{
+		p->subs.insert(sub.first, sub.second);
+	}
+
 	/* Parse font substitutions */
 	for (size_t i = 0; i < conf.fontSubs.size(); ++i)
 	{
