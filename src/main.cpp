@@ -658,6 +658,12 @@ int main(int argc, char *argv[]) {
                  "LiteRGSS engine boot failed (rc=%d). Close Empo "
                  "from the app switcher and try again.", rc);
         mkxp_setErrorMessage(msg);
+      } else {
+        // Mirror what mkxp's binding-mri does on a clean session
+        // exit: tell the host the engine finished without an
+        // exception so the swift layer skips the "didn't exit
+        // cleanly" recovery alert and just returns to the library.
+        mkxp_setEngineExitedCleanly();
       }
       mkxp_setEngineTerminated();
       return 0;
