@@ -38,6 +38,13 @@ static std::atomic<bool> s_pathSet{false};
 // litergss_run from litergss30-merged.o).
 static std::atomic<int> s_activeEngineKind{MKXP_ENGINE_MKXP};
 
+// Bundled PSDK scripts directory. Host sets this at app launch
+// from `Bundle.main.resourcePath`/Assets.bundle/PSDK so
+// litergss_run can fall back to it when the game ships only
+// `Game.yarb` (no plaintext psdk/scripts).
+static std::mutex s_psdkBundleMutex;
+static std::string s_psdkBundleDir;
+
 // Engine terminated flag: set by engine after full teardown.
 static std::atomic<bool> s_engineTerminated{false};
 static std::atomic<bool> s_terminateRequested{false};
@@ -224,6 +231,18 @@ void mkxp_setActiveEngineKind(MKXPEngineKind kind) {
 MKXPEngineKind mkxp_getActiveEngineKind(void) {
     return static_cast<MKXPEngineKind>(
         s_activeEngineKind.load(std::memory_order_acquire));
+}
+
+void mkxp_setBundledPSDKScriptsDir(const char *path) {
+    std::lock_guard<std::mutex> lock(s_psdkBundleMutex);
+    s_psdkBundleDir = path ? path : "";
+}
+
+const char *mkxp_getBundledPSDKScriptsDir(void) {
+    thread_local std::string copy;
+    std::lock_guard<std::mutex> lock(s_psdkBundleMutex);
+    copy = s_psdkBundleDir;
+    return copy.c_str();
 }
 
 const char *mkxp_waitForGamePath(void) {

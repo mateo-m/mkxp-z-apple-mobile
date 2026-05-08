@@ -101,6 +101,14 @@ typedef enum {
 void           mkxp_setActiveEngineKind(MKXPEngineKind kind);
 MKXPEngineKind mkxp_getActiveEngineKind(void);
 
+// Path to the bundled pokemonsdk/scripts directory inside Empo.app
+// (Empo.app/Assets.bundle/PSDK/). The host sets this at app launch
+// from `Bundle.main.resourcePath` so litergss_run has a reliable
+// fallback when the game itself doesn't ship plaintext PSDK source.
+// Empty string means "no bundled fallback available".
+void        mkxp_setBundledPSDKScriptsDir(const char *path);
+const char *mkxp_getBundledPSDKScriptsDir(void);
+
 // Engine termination
 
 void        mkxp_requestTerminate(void);
