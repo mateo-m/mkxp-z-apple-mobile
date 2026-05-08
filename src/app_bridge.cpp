@@ -40,8 +40,8 @@ static std::atomic<bool> s_terminateRequested{false};
 // this to skip the "didn't exit cleanly" alert and return silently.
 static std::atomic<bool> s_engineExitedCleanly{false};
 // Set when the RGSS thread didn't ack a termination request in time.
-// `mkxp_isEngineHung()` makes the UI force-quit since the single
-// reused thread can't recover.
+// `mkxp_isEngineHung()` makes the UI surface a "close from app
+// switcher" alert; we can't recover the engine in-process.
 static std::atomic<bool> s_engineHung{false};
 static std::atomic<bool> s_glContextBroken{false};
 
@@ -271,46 +271,7 @@ void mkxp_setEngineHung(void) {
 
 void mkxp_setEngineTerminated(void) {
     s_engineTerminated.store(true, std::memory_order_release);
-    // Clear pathSet so the next mkxp_waitForGamePath() blocks
-    // until the Library UI provides a new game selection.
-    s_pathSet.store(false, std::memory_order_release);
     s_engineTerminatedCb.fire();
-}
-
-void mkxp_resetBridgeState(void) {
-    s_gameReady.store(false, std::memory_order_release);
-    s_pathSet.store(false, std::memory_order_release);
-    s_engineTerminated.store(false, std::memory_order_release);
-    s_terminateRequested.store(false, std::memory_order_release);
-    s_gameRectX.store(0, std::memory_order_relaxed);
-    s_gameRectY.store(0, std::memory_order_relaxed);
-    s_gameRectW.store(0, std::memory_order_relaxed);
-    s_gameRectH.store(0, std::memory_order_relaxed);
-    // Note: s_verticalAlignment and s_postloadEnabled are NOT reset here.
-    // They are explicitly set by selectGame() before each session.
-    s_sdlWindowID.store(0, std::memory_order_relaxed);
-    // Game-driven text-input intent (set by `Input.text_input=`).
-    // Empo doesn't seed it; the game flips it on entry to a name /
-    // chat input UI. Force-reset here in case the previous session
-    // was force-quit while intent was true, otherwise the next
-    // session would auto-show the soft keyboard before the game
-    // asked for it.
-    s_gameTextInputIntent.store(false, std::memory_order_relaxed);
-    // Reset pause state so a stale pause doesn't block the next session.
-    s_pauseRequested.store(false, std::memory_order_relaxed);
-    s_paused.store(false, std::memory_order_relaxed);
-    s_needsFrameRenderedSignal.store(false, std::memory_order_relaxed);
-    s_glContextBroken.store(false, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(s_snapshotMutex);
-        s_snapshotData.clear();
-        s_snapshotWidth = 0;
-        s_snapshotHeight = 0;
-    }
-    {
-        std::lock_guard<std::mutex> lock(s_pathMutex);
-        s_gamePath.clear();
-    }
 }
 
 double mkxp_getAverageFPS(void) {

@@ -56,8 +56,7 @@ end
 # Pokemon Uranium checks $game_exists on startup and calls
 # system('Uranium') + exit to relaunch itself. On iOS, system() is
 # neutralized (see platform_compat.rb), but we also clear the flag so the
-# hard-reset code path is never reached. The between-session reset hook
-# at the bottom of this file handles subsequent sessions.
+# hard-reset code path is never reached.
 $game_exists = nil
 
 # --- FmodEx routing to native Audio ---
@@ -85,10 +84,7 @@ $game_exists = nil
 # similar guard). One mechanism, fewer game-specific scopes.
 if defined?(Audio) && Audio.is_a?(Module)
   # Snapshot native Audio methods before any game script can
-  # rebind them. Stored as module instance variables on Audio so
-  # we can fetch them back even if the engine's
-  # `resetBetweenSessions()` clears Ruby-side ivars - module
-  # constants survive the reset.
+  # rebind them. Stored as module instance variables on Audio.
   Audio.instance_eval do
     @__mkxp_native_bgm_play  = method(:bgm_play)  if respond_to?(:bgm_play)
     @__mkxp_native_bgm_fade  = method(:bgm_fade)  if respond_to?(:bgm_fade)
@@ -104,9 +100,8 @@ if defined?(Audio) && Audio.is_a?(Module)
   end
 
   # Helper: best-effort call of the saved native method. If the
-  # snapshot is missing (engine didn't expose that method, or
-  # session-reset cleared it), silently no-op so the game keeps
-  # running rather than raising.
+  # snapshot is missing (engine didn't expose that method) silently
+  # no-op so the game keeps running rather than raising.
   def Audio.__mkxp_native_call(ivar, *args)
     m = instance_variable_get(ivar)
     m.call(*args) if m
@@ -236,12 +231,12 @@ end
 #
 # We wrap property accessors to return safe defaults instead of
 # crashing. Two constraints:
-#   - The alias must run only ONCE across all sessions. Re-aliasing on
-#     session 2 would capture our own wrapper (from session 1) as the
-#     "original", producing infinite recursion.
-#   - The wrapper `define_method` must run EVERY session because
-#     mriBindingInit re-registers the native C method on Sprite / Window
-#     / etc. at the start of every session, overwriting our wrapper.
+#   - The alias is idempotent (only captures the original method
+#     if no `_mkxp_orig_<meth>` already exists), guarding against
+#     repeated invocations.
+#   - The wrapper `define_method` runs after the engine's binding
+#     init, which would otherwise overwrite our wrapper with the
+#     native C method.
 def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   return unless klass.method_defined?(meth)
 
@@ -272,11 +267,10 @@ disposed_safe_false = [:visible]
 end
 
 # --- Null mouse shim ---
-# Pokemon Essentials games set $mouse = Game_Mouse.new. Between
-# sessions, constant cleanup removes Game_Mouse but $mouse still
-# holds an orphaned instance. MkxpNullMouse absorbs any method call,
-# returning false/0/nil, and is installed on $mouse by the reset hook
-# below.
+# Pokemon Essentials games set $mouse = Game_Mouse.new. The MkxpNullMouse
+# class absorbs any method call, returning false/0/nil; some PE forks
+# poll $mouse before they instantiate Game_Mouse, so a non-nil default
+# avoids NoMethodError on the very first frame.
 class MkxpNullMouse
   # rubocop:disable Naming/PredicateMethod -- mocks Pokemon
   # Essentials' `Game_Mouse#method_missing` contract; the Ruby
@@ -299,54 +293,12 @@ class MkxpNullMouse
   end
 end
 
+<<<<<<< HEAD
 # --- Between-session reset hook ---
 # The C side invokes each Proc in $__mkxp_reset_hooks right before
 # a new game session's scripts run. Use this to scrub Pokemon-specific
 # state that would otherwise bleed from the previous session.
 #
-# Preload-defined infrastructure constants kept across between-session
-# resets. Rationale documented in `platform_compat.rb`: without this
-# the engine's reset step 1 removes them, and any reset-time code
-# path that touches them (a hook lambda, a closure) walks into the
-# `Module#const_missing` recursion described there. Per-session
-# state inside FmodEx (or its handle) is reset through other means
-# - here we just keep the namespace alive.
-$__mkxp_preload_keep_consts ||= []
-# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
-[:MkxpNullMouse, :FmodEx, :FmodExHandle].each do |c|
-  $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
-end
-# rubocop:enable Style/SymbolArray
-
-$__mkxp_reset_hooks ||= []
-$__mkxp_pokemon_compat_reset_hook_installed ||= false
-unless $__mkxp_pokemon_compat_reset_hook_installed
-  $__mkxp_pokemon_compat_reset_hook_installed = true
-  $__mkxp_reset_hooks << lambda do
-    # Pokemon Essentials / Pokemon fangames globals.
-    #
-    # Each `$Pokemon*` global commonly holds an instance whose
-    # class is defined in the previous game's scripts (PokemonTemp,
-    # PokemonSystem, ...). The engine's `resetBetweenSessions`
-    # step 1 removes those classes from `Object` but leaves the
-    # globals alone, so the next game sees a "ghost" object whose
-    # class no longer exists - calls to methods the next game's
-    # script expects then `NoMethodError` even when the Ruby method
-    # name is sensible (concrete failure: Pokemon Z -> Vinemon
-    # crashes on `$PokemonTemp.defaultBGM` because Pokemon Z's
-    # `PokemonTemp` is gone but the global still points at the
-    # PZ instance, which never had `defaultBGM`).
-    #
-    # The set below covers the globals seen in Pokemon Essentials
-    # forks. Add new entries as we hit them; the cost of nil-ing
-    # an undefined global is zero.
-    $mouse = MkxpNullMouse.new
-    $game_exists = nil # Uranium hard-reset flag
-    $PokemonSystem = nil
-    $PokemonTemp = nil
-    $PokemonGlobal = nil
-    $PokemonBag = nil
-    $PokemonStorage = nil
-    $Trainer = nil
-  end
-end
+# Default $mouse to a null shim so PE forks that poll the global
+# before Game_Mouse.new runs don't NoMethodError on the first frame.
+$mouse = MkxpNullMouse.new

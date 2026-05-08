@@ -53,7 +53,7 @@ module MKXP
 
     # Per-game state directory (`Documents/EmpoState/<id>/` on
     # iOS). Engine postloads use this to write runtime-detection
-    # marker files that survive across sessions.
+    # marker files.
     def managed_config_dir
       System.managed_config_dir
     end
@@ -105,12 +105,3 @@ module MKXP
     end
   end
 end
-
-# Keep MKXP across between-session resets. Without this, step 1 of
-# `resetBetweenSessions` strips the constant before step 4 fires
-# the reset hooks - then any hook that does `MKXP.puts(...)` for
-# diagnostic logging silently no-ops because `defined?(MKXP)`
-# returns nil. Rationale and pattern documented in
-# `platform_compat.rb`.
-$__mkxp_preload_keep_consts ||= []
-$__mkxp_preload_keep_consts << :MKXP unless $__mkxp_preload_keep_consts.include?(:MKXP)

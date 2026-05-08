@@ -164,26 +164,18 @@ void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
     mkxp_refreshANGLENativeLayerSize(win, w, h);
 }
 
-/* Persistent RGSS thread.
- * Ruby's VM has internal state (parser, symbol table, thread-local
- * storage) bound to the thread that called ruby_init(). Creating a
- * new thread for each game session causes crashes because the VM's
- * stack boundaries and TLS references become stale. Solution: keep
- * the RGSS thread alive across sessions and receive new session data
- * via EngineHost's semaphores. */
-
-/* Forward-declaration only. The actual class definition is below.
- * The RGSS thread reaches the session-coordination members through
- * this pointer, which is set by EngineHost::init() and cleared by
- * EngineHost::shutdown(). Exactly one EngineHost exists per process
- * so this pointer is safe to use globally. */
-class EngineHost;
-static EngineHost *s_host = nullptr;
-
-static SDL_sem *hostSessionReady();
-static SDL_sem *hostSessionDone();
-static RGSSThreadData *hostNextRTData();
-
+/* Single-shot RGSS thread.
+ *
+ * Runs the game session once and exits. Once the user returns to
+ * the Library, the engine is fully torn down and the user must
+ * close + reopen Empo to play another game (per App Store
+ * guideline 2.5.1, we can't terminate the process programmatically).
+ *
+ * Ruby's VM has process-global state (signal handlers, atexit,
+ * parser, symbol table) that doesn't unwind cleanly via
+ * `ruby_cleanup`, so even if the persistent-thread architecture
+ * worked we couldn't ruby_init twice in one process. Single-shot
+ * matches what actually happens at runtime. */
 int rgssThreadFun(void *userdata) {
   RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
 
@@ -194,100 +186,63 @@ int rgssThreadFun(void *userdata) {
   gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
   FBO::boundFramebufferID = FBO::screenFramebufferID;
 
-  /* AL context; persistent, just activate on this thread. */
+  /* AL context; activate on this thread. */
   ALCcontext *alcCtx = threadData->alcCtx;
   alcMakeContextCurrent(alcCtx);
 
-  /* --- Session loop: runs on the SAME thread forever --- */
-  while (true) {
-    /* Re-set FBO state for this session (SharedState::finiInstance
-     * may have unbound it). */
-    FBO::screenFramebufferID = FBO::ID(s_screenFBO);
-    gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
-    FBO::boundFramebufferID = FBO::screenFramebufferID;
-
-    try {
-      SharedState::initInstance(threadData);
-    } catch (const Exception &exc) {
-      rgssThreadError(threadData, exc.msg);
-      break;
-    }
-
-    mkxp_setGameReady();
-
-#ifdef MKXPZ_BUILD_XCODE
-    /* Log which Ruby this session dispatches to before any
-     * Ruby code runs. Useful for verifying that
-     * `mkxp_setActiveRubyVersion()` from the host side reaches
-     * the right per-version binding. */
-    {
-        const char *label = "3.1 (legacy direct-link)";
-        switch (mkxp_getActiveRubyVersion()) {
-        case MKXP_RUBY_18: label = "1.8 (mkxp18-merged.o)"; break;
-        case MKXP_RUBY_19: label = "1.9 (mkxp19-merged.o)"; break;
-        case MKXP_RUBY_30: label = "3.1 (3.0 detected, routed to 3.1+Legacy)"; break;
-        case MKXP_RUBY_31: label = "3.1 (mkxp31-merged.o)"; break;
-        case MKXP_RUBY_UNSET: default: label = "3.1 (legacy, UNSET fallback)"; break;
-        }
-        mkxp_debugLog("RUBY", "main.cpp", label);
-    }
-#endif
-
-    /* Run game scripts.
-     *
-     * Dispatch through `getActiveScriptBinding()` (binding.h)
-     * instead of the global `scriptBinding` directly so the host's
-     * `mkxp_setActiveRubyVersion()` setting picks which Ruby
-     * interpreter runs this session. The default keeps using the
-     * legacy 3.1 binding via the global pointer; other versions go
-     * through the per-version `_mkxp_get_script_binding_NN()` entry
-     * points exported by their merged .o files. */
-    getActiveScriptBinding()->execute();
-
-    /* Detach disposables before destroying SharedState */
-    shState->graphics().detachAllDisposables();
-
-    threadData->rqTermAck.set();
-    threadData->ethread->requestTerminate();
-
-    /* Ensure the OpenAL context is current before tearing down Audio.
-     * mkxp_checkPause() never nulls the context, so this is a no-op
-     * in normal operation; kept as a safety net. */
-    alcMakeContextCurrent(alcCtx);
-
-    SharedState::finiInstance();
-
-    /* Release GL context so the main thread can safely claim it
-     * (e.g. for the inter-session clear). Making the same context
-     * current on another thread while it's still bound here is
-     * undefined behavior. */
-    mkxpGL_MakeCurrent(threadData->window, NULL);
-
-    /* Signal main thread that session is done */
-    SDL_SemPost(hostSessionDone());
-
-    /* Wait for the main thread to provide the next session's data.
-     * Blocks until EngineHost posts its sessionReady semaphore. */
-    SDL_SemWait(hostSessionReady());
-
-    /* Pick up the new RGSSThreadData */
-    threadData = hostNextRTData();
-    if (!threadData)
-      break; // null = quit
-
-    /* Reclaim the EGL context for this thread. The context is the
-     * same one used by every session - ANGLE's EGL context persists
-     * for the life of the process. */
-    mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
-
-    /* Screen FBO is captured once at init and typically 0 under ANGLE. */
-    FBO::screenFramebufferID = FBO::ID(s_screenFBO);
-    gl.BindFramebuffer(GL_FRAMEBUFFER, FBO::screenFramebufferID.gl);
-    FBO::boundFramebufferID = FBO::screenFramebufferID;
+  try {
+    SharedState::initInstance(threadData);
+  } catch (const Exception &exc) {
+    rgssThreadError(threadData, exc.msg);
+    return 0;
   }
 
+  mkxp_setGameReady();
+
+#ifdef MKXPZ_BUILD_XCODE
+  /* Log which Ruby this session dispatches to before any Ruby code
+   * runs. Useful for verifying that `mkxp_setActiveRubyVersion()`
+   * from the host side reaches the right per-version binding. */
+  {
+      const char *label = "3.1 (legacy direct-link)";
+      switch (mkxp_getActiveRubyVersion()) {
+      case MKXP_RUBY_18: label = "1.8 (mkxp18-merged.o)"; break;
+      case MKXP_RUBY_19: label = "1.9 (mkxp19-merged.o)"; break;
+      case MKXP_RUBY_30: label = "3.1 (3.0 detected, routed to 3.1+Legacy)"; break;
+      case MKXP_RUBY_31: label = "3.1 (mkxp31-merged.o)"; break;
+      case MKXP_RUBY_UNSET: default: label = "3.1 (legacy, UNSET fallback)"; break;
+      }
+      mkxp_debugLog("RUBY", "main.cpp", label);
+  }
+#endif
+
+  /* Run game scripts.
+   *
+   * Dispatch through `getActiveScriptBinding()` (binding.h) instead
+   * of the global `scriptBinding` directly so the host's
+   * `mkxp_setActiveRubyVersion()` setting picks which Ruby
+   * interpreter runs. The default keeps using the legacy 3.1
+   * binding via the global pointer; other versions go through the
+   * per-version `_mkxp_get_script_binding_NN()` entry points
+   * exported by their merged .o files. */
+  getActiveScriptBinding()->execute();
+
+  /* Detach disposables before destroying SharedState. */
+  shState->graphics().detachAllDisposables();
+
+  threadData->rqTermAck.set();
+  threadData->ethread->requestTerminate();
+
+  /* Ensure the OpenAL context is current before tearing down Audio.
+   * mkxp_checkPause() never nulls the context, so this is a no-op
+   * in normal operation; kept as a safety net. */
+  alcMakeContextCurrent(alcCtx);
+
+  SharedState::finiInstance();
+
+  /* Release contexts so the main thread can safely tear down. */
+  mkxpGL_MakeCurrent(threadData->window, NULL);
   alcMakeContextCurrent(NULL);
-  mkxpGL_MakeCurrent(threadData ? threadData->window : nullptr, NULL);
 
   return 0;
 }
@@ -489,30 +444,6 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
   return true;
 }
 
-/* Block until the Library UI selects a game. On quit, returns false.
- * On success, copies the selected path into `dataDir` and resets
- * bridge state + cwd so the engine picks up the new game. Called
- * between game sessions (not before the first one - that wait happens
- * before SDL_Init in main()). */
-static bool waitForNextGame(char *dataDir, size_t dataDirLen) {
-  mkxp_setEngineTerminated();
-  EventThread::resetAllInputStates();
-
-  const char *nextPath = mkxp_waitForGamePath();
-  if (!nextPath || !nextPath[0])
-    return false; // empty path = quit
-
-  snprintf(dataDir, dataDirLen, "%s", nextPath);
-
-  /* Reset bridge state AFTER copying the path, so the UI has had
-   * time to observe mkxp_isEngineTerminated() during
-   * mkxp_waitForGamePath(). */
-  mkxp_resetBridgeState();
-
-  mkxp_fs::setCurrentDirectory(dataDir);
-  return true;
-}
-
 /* Wait for rqTermAck with run-loop pumping so SwiftUI stays responsive.
  * Gives up after 10 seconds. Returns true if ack received. */
 static bool waitForRGSSAck(RGSSThreadData &rtData) {
@@ -526,48 +457,18 @@ static bool waitForRGSSAck(RGSSThreadData &rtData) {
   return false;
 }
 
-/* Block until the RGSS thread posts sessionDone. Pumps the run loop
- * meanwhile so the UI stays responsive during teardown. */
-static void waitForSessionDone(SDL_sem *sessionDone) {
-  while (SDL_SemTryWait(sessionDone) != 0) {
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
-  }
-}
-
-/* Clear the framebuffer to black between sessions so the next session
- * doesn't briefly flash the last frame of the previous one. The GL
- * context is held by the RGSS thread (blocked on sessionReady at this
- * point); claim it on the main thread for this single clear, then
- * release. */
-static void clearFramebufferBetweenSessions(SDL_Window *win,
-                                             SDL_GLContext ctx,
-                                             GLuint screenFBO) {
-  mkxpGL_MakeCurrent(win, ctx);
-  gl.BindFramebuffer(GL_FRAMEBUFFER, screenFBO);
-  gl.ClearColor(0, 0, 0, 1);
-  gl.Clear(GL_COLOR_BUFFER_BIT);
-  mkxpGL_SwapWindow(win);
-  mkxpGL_MakeCurrent(win, NULL);
-}
-
 /* EngineHost owns the process-wide engine resources (window, EGL
- * context, OpenAL device/context, RGSS thread, session-coordination
- * semaphores) and drives the game session loop. Lifecycle:
- * init() -> runSessions() -> shutdown(). The three phases must be
+ * context, OpenAL device/context, RGSS thread). Lifecycle:
+ * init() -> runSession() -> shutdown(). The three phases must be
  * called in that order; init() returning false means the host is
- * already torn down and runSessions/shutdown must not be called. */
+ * already torn down and runSession/shutdown must not be called.
+ * Single-shot: once runSession returns, the engine is dead and the
+ * user has to relaunch Empo to play another game. */
 class EngineHost {
 public:
   bool init(int argc, char *argv[]);
-  void runSessions(int argc, char *argv[]);
+  void runSession(int argc, char *argv[]);
   void shutdown();
-
-  /* Session-coordination accessors used by rgssThreadFun via the
-   * s_host global pointer. Members are raw because the RGSS thread
-   * and main thread synchronize via the semaphores themselves. */
-  SDL_sem         *sessionReady()  { return sessionReady_; }
-  SDL_sem         *sessionDone()   { return sessionDone_; }
-  RGSSThreadData  *nextRTData()    { return nextRTData_; }
 
 private:
   SDL_Window      *persistWin_    = nullptr;
@@ -577,17 +478,7 @@ private:
   SDL_Thread      *rgssThread_    = nullptr;
   SDL_DisplayMode  displayMode_{};
   char             dataDir_[512]{};
-  SDL_sem         *sessionReady_  = nullptr; // main -> RGSS: "new session available"
-  SDL_sem         *sessionDone_   = nullptr; // RGSS -> main: "session finished"
-  RGSSThreadData  *nextRTData_    = nullptr; // session data the RGSS thread picks up
 };
-
-/* Accessor shims so rgssThreadFun (a C-shaped function) can reach
- * EngineHost's members without including a class header or exposing
- * members publicly to any other TU. */
-static SDL_sem *hostSessionReady() { return s_host ? s_host->sessionReady() : nullptr; }
-static SDL_sem *hostSessionDone()  { return s_host ? s_host->sessionDone()  : nullptr; }
-static RGSSThreadData *hostNextRTData() { return s_host ? s_host->nextRTData() : nullptr; }
 
 bool EngineHost::init(int argc, char *argv[]) {
   /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
@@ -636,147 +527,89 @@ bool EngineHost::init(int argc, char *argv[]) {
 
   SDL_GetDisplayMode(0, 0, &displayMode_);
 
-  sessionReady_ = SDL_CreateSemaphore(0);
-  sessionDone_  = SDL_CreateSemaphore(0);
-
-  /* Publish ourselves so the RGSS thread can reach session members. */
-  s_host = this;
   return true;
 }
 
-void EngineHost::runSessions(int argc, char *argv[]) {
-  bool firstSession = true;
-  while (true) {
-    /* On sessions after the first, block until the Library UI
-     * provides the next game. An empty path means the user quit. */
-    if (!firstSession && !waitForNextGame(dataDir_, sizeof(dataDir_)))
-      break;
-    firstSession = false;
+void EngineHost::runSession(int argc, char *argv[]) {
+  Config conf;
+  conf.read(argc, argv);
 
-    Config conf;
-    conf.read(argc, argv);
+  if (conf.windowTitle.empty())
+    conf.windowTitle = conf.game.title;
 
-    if (conf.windowTitle.empty())
-      conf.windowTitle = conf.game.title;
+  assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
+  printRgssVersion(conf.rgssVersion);
 
-    assert(conf.rgssVersion >= 1 && conf.rgssVersion <= 3);
-    printRgssVersion(conf.rgssVersion);
+  initSyntaxTransform(conf);
 
-    initSyntaxTransform(conf);
+  SDL_SetWindowTitle(persistWin_, conf.windowTitle.c_str());
 
-    SDL_SetWindowTitle(persistWin_, conf.windowTitle.c_str());
+  if (!displayMode_.refresh_rate)
+    conf.syncToRefreshrate = false;
 
-    if (!displayMode_.refresh_rate)
-      conf.syncToRefreshrate = false;
+  EventThread eventThread;
 
-    EventThread eventThread;
+  RGSSThreadData rtData(&eventThread, argv[0], persistWin_, persistAlcDev_,
+                        persistAlcCtx_, displayMode_.refresh_rate,
+                        mkxp_sys::getScalingFactor(), conf, persistGLCtx_);
 
-    RGSSThreadData rtData(&eventThread, argv[0], persistWin_, persistAlcDev_,
-                          persistAlcCtx_, displayMode_.refresh_rate,
-                          mkxp_sys::getScalingFactor(), conf, persistGLCtx_);
+  int winW, winH, drwW, drwH;
+  SDL_GetWindowSize(persistWin_, &winW, &winH);
+  rtData.windowSizeMsg.post(Vec2i(winW, winH));
 
-    int winW, winH, drwW, drwH;
-    SDL_GetWindowSize(persistWin_, &winW, &winH);
-    rtData.windowSizeMsg.post(Vec2i(winW, winH));
+  mkxpGL_GetDrawableSize(persistWin_, &drwW, &drwH);
+  rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
 
-    mkxpGL_GetDrawableSize(persistWin_, &drwW, &drwH);
-    rtData.drawableSizeMsg.post(Vec2i(drwW, drwH));
+  rtData.bindingUpdateMsg.post(loadBindings(conf));
 
-    rtData.bindingUpdateMsg.post(loadBindings(conf));
+  SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
-    /* Drain stale events (especially SDL_QUIT) left over from the
-     * previous session so the event loop doesn't exit immediately. */
-    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+  /* 16 MB virtual stack. Ruby 1.8 / 1.9 use a conservative GC that
+   * walks the entire machine stack on every collection and copies
+   * the live stack into a fiber buffer on every Fiber switch
+   * (cont_save_machine_stack memcpys machine_stack_start -
+   * machine_stack_end). Deep RGSS3 games (MOG title plugins, Window
+   * class hierarchy, fibers from Show Choices) regularly need 4-8 MB
+   * of live stack; the previous 1 MB cap caused SP to drop into the
+   * stack guard page mid-fiber-switch, surfacing as either an xzone
+   * malloc trap or an ASan memcpy out-of-bounds depending on heap
+   * layout. iOS commits stack pages lazily so the 16 MB only costs
+   * virtual address space, not physical RAM. */
+  rgssThread_ = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
+                                               16 * 1024 * 1024, &rtData);
 
-    if (!rgssThread_) {
-      /* First session: create the persistent RGSS thread.
-       *
-       * 16 MB virtual stack. Ruby 1.8 / 1.9 use a conservative
-       * GC that walks the entire machine stack on every collection
-       * and copies the live stack into a fiber buffer on every
-       * Fiber switch (cont_save_machine_stack memcpys
-       * machine_stack_start - machine_stack_end). Deep RGSS3
-       * games (MOG title plugins, Window class hierarchy,
-       * fibers from Show Choices) regularly need 4-8 MB of
-       * live stack; the previous 1 MB cap caused SP to drop
-       * into the stack guard page mid-fiber-switch, surfacing
-       * as either an xzone malloc trap or an ASan memcpy
-       * out-of-bounds depending on heap layout. iOS commits
-       * stack pages lazily so the 16 MB only costs virtual
-       * address space, not physical RAM. */
-      rgssThread_ = SDL_CreateThreadWithStackSize(rgssThreadFun, "rgss",
-                                                   16 * 1024 * 1024, &rtData);
-    } else {
-      /* Subsequent sessions: signal the persistent RGSS thread
-       * with the new session data. */
-      nextRTData_ = &rtData;
-      SDL_SemPost(sessionReady_);
-    }
+  /* Run event processing until the game ends. */
+  eventThread.process(rtData);
 
-    /* Run event processing until the game ends. */
-    eventThread.process(rtData);
+  /* Ask the RGSS thread to stop, then wait for it. */
+  rtData.rqTerm.set();
+  const bool acked = waitForRGSSAck(rtData);
 
-    /* Ask the RGSS thread to stop, then wait for it. */
-    rtData.rqTerm.set();
-    const bool acked = waitForRGSSAck(rtData);
-
-    if (acked) {
-      /* RGSS thread is shutting down: wait for it to finish
-       * SharedState::finiInstance before we proceed. */
-      waitForSessionDone(sessionDone_);
-    } else {
-      /* The RGSS thread is stuck (never called checkShutdown).
-       * Our single-reused-thread architecture cannot respawn a
-       * new VM while the old one is blocked, so the only safe
-       * recovery is to force-quit the app. The UI will terminate
-       * the process when the user taps OK. */
-      mkxp_setEngineHung();
-      /* Intentionally generic - by the time this alert is seen,
-       * the user may have already selected a different game in
-       * the Library. */
-      mkxp_setErrorMessage(
-          "The previous game stopped responding. The app will now close.");
-    }
-
-    if (!rtData.rgssErrorMsg.empty()) {
-      Debug() << rtData.rgssErrorMsg;
-      mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
-    }
-
-    eventThread.cleanup();
-
-    clearFramebufferBetweenSessions(persistWin_, persistGLCtx_, s_screenFBO);
-
-    Debug() << "Game session ended.";
+  if (!acked) {
+    /* The RGSS thread is stuck (never called checkShutdown). Tell
+     * the UI to ask the user to force-close the app. */
+    mkxp_setEngineHung();
+    mkxp_setErrorMessage(
+        "The game stopped responding. Close Empo from the app switcher.");
   }
-}
 
-void EngineHost::shutdown() {
-  /* Signal the RGSS thread to exit. */
-  nextRTData_ = nullptr;
-  if (sessionReady_)
-    SDL_SemPost(sessionReady_);
+  if (!rtData.rgssErrorMsg.empty()) {
+    Debug() << rtData.rgssErrorMsg;
+    mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
+  }
+
   if (rgssThread_) {
     SDL_WaitThread(rgssThread_, 0);
     rgssThread_ = nullptr;
   }
-  if (sessionReady_) {
-    SDL_DestroySemaphore(sessionReady_);
-    sessionReady_ = nullptr;
-  }
-  if (sessionDone_) {
-    SDL_DestroySemaphore(sessionDone_);
-    sessionDone_ = nullptr;
-  }
 
-  /* Stop publishing ourselves. After this the RGSS thread must not
-   * try to use any EngineHost member (shouldn't happen since we
-   * waited for it above, but keep the contract explicit). */
-  if (s_host == this)
-    s_host = nullptr;
+  eventThread.cleanup();
 
-  /* Cleanup persistent resources. Unreachable in normal flow but
-   * kept for completeness in case the session loop ever exits. */
+  Debug() << "Game session ended.";
+  mkxp_setEngineTerminated();
+}
+
+void EngineHost::shutdown() {
   if (persistGLCtx_) {
     SDL_GL_DeleteContext(persistGLCtx_);
     persistGLCtx_ = nullptr;
@@ -801,7 +634,7 @@ int main(int argc, char *argv[]) {
     EngineHost host;
     if (!host.init(argc, argv))
       return 0;
-    host.runSessions(argc, argv);
+    host.runSession(argc, argv);
     host.shutdown();
 
     Debug() << "Shutting down.";

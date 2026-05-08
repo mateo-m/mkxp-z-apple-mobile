@@ -969,9 +969,8 @@ void Font::initDefaultDynAttribs()
 {
 	// NOTE: do not `delete` the existing defaultColor/defaultOutColor here.
 	// They're owned by Ruby's Color wrapper (wrapProperty in font-binding.cpp).
-	// Ruby GC frees them when the class iv is cleared in the session reset
-	// at binding-mri.cpp. Deleting here would double-free.
-	// We reset the tmp values so their *contents* don't bleed across sessions.
+	// Ruby GC frees them when the class iv is cleared. Deleting here would
+	// double-free.
 	FontPrivate::defaultColorTmp    = Color(255, 255, 255, 255);
 	FontPrivate::defaultOutColorTmp = Color(0,   0,   0,   128);
 
@@ -986,8 +985,6 @@ void Font::initDefaults(const SharedFontState &sfs)
 	std::vector<std::string> &names = FontPrivate::initialDefaultNames;
 	names.clear();
 
-	// Reset scalar defaults so a re-init (iOS multi-session) doesn't carry
-	// previous RGSS version's values into a new session.
 	FontPrivate::defaultName   = "Arial";
 	FontPrivate::defaultSize   = 22;
 	FontPrivate::defaultBold   = false;

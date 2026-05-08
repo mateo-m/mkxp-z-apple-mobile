@@ -91,7 +91,6 @@ const char *mkxp_waitForGamePath(void);
 void        mkxp_requestTerminate(void);
 int         mkxp_isEngineTerminated(void);
 void        mkxp_setEngineTerminated(void);
-void        mkxp_resetBridgeState(void);
 
 // Set when the session ends because Ruby raised SystemExit (e.g. the
 // game's "Exit to desktop" menu). The UI checks this in its
@@ -100,8 +99,8 @@ int         mkxp_didEngineExitCleanly(void);
 void        mkxp_setEngineExitedCleanly(void);
 
 // Set when the RGSS thread failed to respond to a termination
-// request. Engine is unrecoverable; the UI should force-quit the
-// process since the single-reused-thread architecture can't respawn it.
+// request. Engine is unrecoverable; the UI surfaces a "close from
+// app switcher" alert because we can't recover in-process.
 int         mkxp_isEngineHung(void);
 void        mkxp_setEngineHung(void);
 
@@ -205,9 +204,8 @@ bool        mkxp_consumeSafeAreaInsetsChanged(void);
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
-// Per-game settings (UI -> Engine), set before each session by
-// selectGame() and read by the engine during the run. NOT reset in
-// mkxp_resetBridgeState(); selectGame() always re-sets them.
+// Per-game settings (UI -> Engine), set by selectGame() before
+// engine boot and read by the engine during the run.
 //
 // Adding a new setting:
 //   1. Add a parameter to mkxp_applyPerGameSettings()

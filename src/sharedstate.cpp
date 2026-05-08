@@ -230,7 +230,8 @@ void SharedState::finiInstance()
 	delete SharedState::instance->p->defaultFont;
 
 	delete SharedState::instance;
-	// Null out so `if (shState)` guards elsewhere actually work between sessions.
+	// Null out so `if (shState)` guards elsewhere actually work
+	// during teardown.
 	SharedState::instance = nullptr;
 
 	delete _globalIBO;

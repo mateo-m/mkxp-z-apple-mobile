@@ -66,9 +66,9 @@ Naming/VariableNumber:
 # --- RGSS architectural patterns ------------------------------------
 
 # RGSS games + the engine's preload/postload glue communicate via
-# globals (`$game_party`, `$PokemonSystem`, `$__mkxp_reset_hooks`,
-# `$joiplay`). This is the public contract our scripts must match;
-# refactoring would break compat with every game we shim.
+# globals (`$game_party`, `$PokemonSystem`, `$joiplay`). This is the
+# public contract our scripts must match; refactoring would break
+# compat with every game we shim.
 Style/GlobalVars:
   Enabled: false
 

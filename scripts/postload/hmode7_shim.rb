@@ -97,45 +97,10 @@ unless HM7::Native.const_defined?(:WALL_LAYER_MODE)
 end
 
 begin
-  # The shim MUST re-run every session, not just the first.
-  #
-  # Cross-session pollution background: mkxp-z keeps the Ruby VM
-  # alive between game sessions on iOS (a full VM teardown would
-  # cost several seconds of re-initialisation). When the user
-  # quits a game and starts a second session, `resetBetweenSessions`
-  # (binding-mri.cpp) removes game-defined top-level constants BUT
-  # keeps constants listed in `$__mkxp_base_consts`. The engine
-  # snapshots that list immediately after `mriBindingInit` runs for
-  # the first time, and `hmode7BindingInit` is part of that init,
-  # so `HM7` itself (created by `rb_define_module("HM7")`) ends up
-  # in the base-consts snapshot and is NOT wiped between sessions.
-  #
-  # That means on session 2:
-  #   1. `HM7` survives unchanged (our shim's session-1 overrides
-  #      still installed on it).
-  #   2. Insurgence's game scripts re-run, re-opening `module HM7`
-  #      and re-executing `def self.draw_map_tileset ...` etc. -
-  #      OVERWRITING our session-1 overrides with the original
-  #      Win32API-calling versions.
-  #   3. Our postload runs again.
-  #
-  # An idempotency guard like `next if respond_to?(:_mkxp_hm7_shim_installed)`
-  # used to live here - and was the direct cause of the
-  # "cinematic works on session 1, black screen + fog only on
-  # session 2" bug: the marker from session 1 caused the shim to
-  # skip install on session 2, leaving the just-re-evaluated
-  # Win32API paths active. The Win32API calls fall through to our
-  # no-op stubs, so every HM7 render call produced zero output,
-  # revealing only non-HM7 sprites (the fog overlay) on top of a
-  # black framebuffer.
-  #
-  # Ruby's `alias_method` and `def` are idempotent
-  # (last-write-wins), so re-running the whole shim every session
-  # is correct and cheap. The inner `alias_method` calls below
-  # deliberately DO re-alias each session - that refreshes the
-  # `_mkxp_hm7_orig_*` aliases to point at the game's freshly
-  # re-evaluated originals, not at stale method objects captured
-  # by session 1's aliases.
+  # Insurgence's game scripts (210-HM7_NEW_CLASSES.rb) define
+  # `def self.xxx` on `HM7` AFTER `hmode7BindingInit` registers the
+  # native module, so our overrides have to land last. The postload
+  # runs after game scripts.
   HM7.module_eval do
     # ------------------------------------------------------------
     #  Overrides. Each corresponds to a `def self.xxx` in

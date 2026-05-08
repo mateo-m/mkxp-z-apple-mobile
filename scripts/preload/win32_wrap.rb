@@ -616,9 +616,6 @@ module Win32API_Impl
   # pair, the next `GetMessage` call returns a synthesized
   # MM_MCINOTIFY message and the message-pump loop breaks.
   #
-  # `mkxp_reset_session` runs between game sessions so a previous
-  # game's MCI activity doesn't leak into the next launch's first
-  # `GetMessage`.
   module MciState
     @@send_string_calls = 0
     @@playback_done_pending = false
@@ -635,11 +632,6 @@ module Win32API_Impl
       result = @@playback_done_pending
       @@playback_done_pending = false
       result
-    end
-
-    def self.reset
-      @@send_string_calls = 0
-      @@playback_done_pending = false
     end
   end
 
@@ -786,38 +778,6 @@ module Win32API_Impl
   end
 end
 
-# Reset MCI shim state between game sessions so a previous game's
-# play counters don't leak into the next launch.
-#
-# Match the pattern in `pokemon_compat.rb`: idempotency-guarded
-# lambda keyed off `source_location[0]`. A bare `<<` of a fresh
-# `proc` every preload would let the hook array grow unboundedly
-# (preload re-runs every session).
-#
-# CRITICAL: gate constant access via `Object.const_defined?` rather
-# than naked `Win32API_Impl::MciState`. The engine's
-# `resetBetweenSessions` runs the hooks AFTER it removes our
-# preload-defined constants from Object - including
-# `Win32API_Impl` *and* `IOS`. A bare `Win32API_Impl::...` would
-# trigger our `Module#const_missing` shim, which evaluates
-# `::IOS::ERROR_SUFFIX_RE` to classify the missing name; with
-# `IOS` also removed, that nested constant lookup re-enters the
-# same `const_missing`, recursing until the C stack overflows
-# (SIGSEGV before Ruby's stack-overflow detection or any `rescue`
-# can catch). `const_defined?` checks the constant table directly
-# without invoking `const_missing`, sidestepping the loop.
-$__mkxp_reset_hooks ||= []
-$__mkxp_win32_wrap_reset_hook_installed ||= false
-unless $__mkxp_win32_wrap_reset_hook_installed
-  $__mkxp_win32_wrap_reset_hook_installed = true
-  $__mkxp_reset_hooks << lambda do
-    if Object.const_defined?(:Win32API_Impl) &&
-       Win32API_Impl.const_defined?(:MciState)
-      Win32API_Impl::MciState.reset
-    end
-  end
-end
-
 def kappatalize(s)
   # Sanitize to a valid Ruby constant name: strip non-alphanumeric/underscore
   # chars (e.g. "RGSS Linker" -> "RGSSLinker") and ensure first char is uppercase.
@@ -826,12 +786,8 @@ def kappatalize(s)
   s
 end
 
-# `method_defined?` does not see private methods. On iOS this preload runs
-# once per game session in a persistent Ruby VM, so a second-session pass
-# must not re-alias `initialize` (it would capture our wrapper as the
-# alias target, leading to infinite recursion when the wrapper calls the
-# "native" initialize). Treat both public and private methods as "already
-# defined" for our idempotency guards.
+# `method_defined?` does not see private methods. Treat both public
+# and private methods as "already defined" for our idempotency guards.
 def mkxp_method_or_alias_defined?(klass, name)
   klass.method_defined?(name) || klass.private_method_defined?(name)
 end
@@ -845,9 +801,7 @@ class Win32API
   # MiniFFI binding is Windows-only and was dropped when the fork
   # narrowed to iOS/iPadOS/tvOS. The alias_method calls below check
   # whether a native :initialize / :call exists before capturing it,
-  # so this file works both with and without the native binding
-  # (and tolerates re-execution across game sessions on a persistent
-  # Ruby VM, where a second pass must not re-alias onto our wrapper).
+  # so this file works both with and without the native binding.
   if mkxp_method_or_alias_defined?(self,
                                    :initialize) && !mkxp_method_or_alias_defined?(self,
                                                                                   :mkxp_native_initialize)
@@ -900,16 +854,3 @@ class Win32API
     0
   end
 end
-
-# Keep `Win32API` and `Win32API_Impl` across between-session resets;
-# rationale and pattern documented in `platform_compat.rb`. Without
-# this, `Win32API_Impl` would be removed at step 1 of every reset,
-# leaving `$__mkxp_reset_hooks` lambdas (and any other reset-time
-# const lookup) one bare `Win32API_Impl::...` away from triggering
-# the `const_missing` recursion.
-$__mkxp_preload_keep_consts ||= []
-# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
-[:Win32API, :Win32API_Impl].each do |c|
-  $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
-end
-# rubocop:enable Style/SymbolArray
