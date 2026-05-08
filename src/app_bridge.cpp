@@ -32,6 +32,12 @@ static std::mutex s_pathMutex;
 static std::string s_gamePath;
 static std::atomic<bool> s_pathSet{false};
 
+// Engine kind selector. Library calls mkxp_setActiveEngineKind
+// before mkxp_setGamePath to pick which engine boots in the
+// EngineHost::runSession dispatch (mkxp's RGSS thread vs.
+// litergss_run from litergss30-merged.o).
+static std::atomic<int> s_activeEngineKind{MKXP_ENGINE_MKXP};
+
 // Engine terminated flag: set by engine after full teardown.
 static std::atomic<bool> s_engineTerminated{false};
 static std::atomic<bool> s_terminateRequested{false};
@@ -208,6 +214,16 @@ void mkxp_setGamePath(const char *path) {
     // previous session so the termination callback for this one
     // starts from the default "unclean unless proven clean" state.
     s_engineExitedCleanly.store(false, std::memory_order_release);
+}
+
+void mkxp_setActiveEngineKind(MKXPEngineKind kind) {
+    s_activeEngineKind.store(static_cast<int>(kind),
+                             std::memory_order_release);
+}
+
+MKXPEngineKind mkxp_getActiveEngineKind(void) {
+    return static_cast<MKXPEngineKind>(
+        s_activeEngineKind.load(std::memory_order_acquire));
 }
 
 const char *mkxp_waitForGamePath(void) {

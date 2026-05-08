@@ -481,9 +481,8 @@ private:
 };
 
 bool EngineHost::init(int argc, char *argv[]) {
-  /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
-   * creates a window that would cover the Library UI, so we wait
-   * for the user to pick a game first. */
+  /* main() already waited for the game path before dispatching to
+   * us; replay the value into dataDir_. */
   const char *selectedPath = mkxp_waitForGamePath();
   if (selectedPath && selectedPath[0])
     snprintf(dataDir_, sizeof(dataDir_), "%s", selectedPath);
@@ -629,8 +628,38 @@ void EngineHost::shutdown() {
   }
 }
 
+/* Forward decl: defined in litergss_wrapper.cpp inside
+ * litergss30-merged.o. Linked into the final binary by Empo's
+ * project.yml. Cross-TU reference works because the .o is part of
+ * the same final dylib. */
+extern "C" int litergss_run(const char *gameDir);
+
 int main(int argc, char *argv[]) {
   try {
+    /* Engine dispatch. The Library UI sets the active engine kind
+     * via mkxp_setActiveEngineKind BEFORE mkxp_setGamePath, so by
+     * the time we drop into the engine path we know which one to
+     * boot. SDL_Init / EGL / window creation only happen on the
+     * mkxp branch — LiteRGSS owns its own platform stack via SFML
+     * (graphics + window + audio), and starting SDL alongside
+     * would create a competing UIWindow. */
+    const char *gameDir = mkxp_waitForGamePath();
+
+    if (mkxp_getActiveEngineKind() == MKXP_ENGINE_LITERGSS) {
+      Debug() << "Engine kind: LiteRGSS (PSDK)";
+      int rc = litergss_run(gameDir ? gameDir : "");
+      if (rc != 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg),
+                 "LiteRGSS engine boot failed (rc=%d). Close Empo "
+                 "from the app switcher and try again.", rc);
+        mkxp_setErrorMessage(msg);
+      }
+      mkxp_setEngineTerminated();
+      Debug() << "Shutting down.";
+      return 0;
+    }
+
     EngineHost host;
     if (!host.init(argc, argv))
       return 0;

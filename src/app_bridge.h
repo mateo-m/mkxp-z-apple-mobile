@@ -86,6 +86,21 @@ int         mkxp_isGameReady(void);
 void        mkxp_setGamePath(const char *path);
 const char *mkxp_waitForGamePath(void);
 
+// Engine kind selection. Default is MKXP_ENGINE_MKXP (the RGSS
+// engine + mkxp{18,19,31}-merged.o). Set to MKXP_ENGINE_LITERGSS
+// before mkxp_setGamePath when launching a PSDK game so main.cpp's
+// engine dispatcher routes through litergss_run (litergss30-merged.o)
+// instead of the mkxp RGSS thread. Single-shot per app process —
+// once an engine boots, the user has to close + reopen Empo to
+// switch.
+typedef enum {
+    MKXP_ENGINE_MKXP     = 0,
+    MKXP_ENGINE_LITERGSS = 1,
+} MKXPEngineKind;
+
+void           mkxp_setActiveEngineKind(MKXPEngineKind kind);
+MKXPEngineKind mkxp_getActiveEngineKind(void);
+
 // Engine termination
 
 void        mkxp_requestTerminate(void);
