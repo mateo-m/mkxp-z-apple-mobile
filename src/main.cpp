@@ -56,6 +56,7 @@
 
 #include <Availability.h>
 #include <TargetConditionals.h>
+#include <os/log.h>
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
 static void showInitError(const std::string &msg);
@@ -646,8 +647,11 @@ int main(int argc, char *argv[]) {
     const char *gameDir = mkxp_waitForGamePath();
 
     if (mkxp_getActiveEngineKind() == MKXP_ENGINE_LITERGSS) {
-      Debug() << "Engine kind: LiteRGSS (PSDK)";
+      os_log(OS_LOG_DEFAULT,
+             "[engine-dispatch] LiteRGSS (PSDK), gameDir=%{public}s",
+             gameDir ? gameDir : "(none)");
       int rc = litergss_run(gameDir ? gameDir : "");
+      os_log(OS_LOG_DEFAULT, "[engine-dispatch] litergss_run returned rc=%d", rc);
       if (rc != 0) {
         char msg[128];
         snprintf(msg, sizeof(msg),
@@ -656,9 +660,10 @@ int main(int argc, char *argv[]) {
         mkxp_setErrorMessage(msg);
       }
       mkxp_setEngineTerminated();
-      Debug() << "Shutting down.";
       return 0;
     }
+    os_log(OS_LOG_DEFAULT, "[engine-dispatch] mkxp (RGSS), gameDir=%{public}s",
+           gameDir ? gameDir : "(none)");
 
     EngineHost host;
     if (!host.init(argc, argv))
