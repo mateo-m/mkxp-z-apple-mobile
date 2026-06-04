@@ -47,3 +47,89 @@ module Graphics
     end
   end
 end
+
+module MkxpPokemonGraphicsCompat
+  def self.patch_ball_animation_mixin
+    return unless defined?(PokeBattle_BallAnimationMixin)
+    return unless PokeBattle_BallAnimationMixin.method_defined?(:ballTracksHand)
+
+    PokeBattle_BallAnimationMixin.module_eval do
+      unless method_defined?(:__mkxp_ball_tracks_hand_with_bitmap)
+        alias __mkxp_ball_tracks_hand_with_bitmap ballTracksHand
+      end
+
+      def ballTracksHand(ball, traSprite, safariThrow = false)
+        bitmap = traSprite.bitmap if traSprite
+        return [-6, 202] if bitmap.nil?
+        __mkxp_ball_tracks_hand_with_bitmap(ball, traSprite, safariThrow)
+      end
+    end
+  end
+end
+
+MkxpPokemonGraphicsCompat.patch_ball_animation_mixin
+
+class Module
+  unless method_defined?(:__mkxp_graphics_compat_include)
+    alias __mkxp_graphics_compat_include include
+
+    def include(*mods)
+      ret = __mkxp_graphics_compat_include(*mods)
+      if defined?(PokeBattle_BallAnimationMixin) && mods.include?(PokeBattle_BallAnimationMixin)
+        MkxpPokemonGraphicsCompat.patch_ball_animation_mixin
+      end
+      ret
+    end
+  end
+end
+
+if defined?(GameData::TrainerType) && GameData::TrainerType.respond_to?(:check_file)
+  module GameData
+    class TrainerType
+      class << self
+        unless method_defined?(:__mkxp_case_sensitive_check_file)
+          alias __mkxp_case_sensitive_check_file check_file
+        end
+
+        def check_file(tr_type, path, optional_suffix = "", suffix = "")
+          ret = __mkxp_case_sensitive_check_file(tr_type, path, optional_suffix, suffix)
+          return ret if ret
+
+          tr_type_data = try_get(tr_type)
+          return nil if tr_type_data.nil?
+
+          candidates = []
+          if optional_suffix && !optional_suffix.empty?
+            candidates << path + tr_type_data.id.to_s + optional_suffix + suffix
+            candidates << path + sprintf("%03d", tr_type_data.id_number) + optional_suffix + suffix
+          end
+          candidates << path + tr_type_data.id.to_s + suffix
+          candidates << path + sprintf("%03d", tr_type_data.id_number) + suffix
+
+          candidates.each do |candidate|
+            resolved = __mkxp_case_insensitive_bitmap(candidate)
+            return resolved if resolved
+          end
+          nil
+        end
+
+        def __mkxp_case_insensitive_bitmap(candidate)
+          dir = File.dirname(candidate)
+          base = File.basename(candidate).downcase
+
+          Dir.foreach(dir) do |entry|
+            next if entry == "." || entry == ".."
+            name = File.basename(entry, File.extname(entry)).downcase
+            ext = File.extname(entry).downcase
+            if name == base && [".png", ".gif"].include?(ext)
+              return File.join(dir, File.basename(entry, File.extname(entry)))
+            end
+          end
+          nil
+        rescue SystemCallError
+          nil
+        end
+      end
+    end
+  end
+end

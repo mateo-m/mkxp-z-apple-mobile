@@ -44,6 +44,25 @@
 #include <iconv.h>
 #endif
 
+#ifdef __APPLE__
+static void toNFC(char *inout, iconv_t nfd2nfc, char *buf, size_t bufBytes) {
+  if (nfd2nfc == (iconv_t)-1 || bufBytes == 0)
+    return;
+
+  size_t srcSize = strlen(inout);
+  size_t bufSize = bufBytes - 1;
+  char *bufPtr = buf;
+  char *inoutPtr = inout;
+
+  iconv(nfd2nfc, NULL, NULL, NULL, NULL);
+  if (iconv(nfd2nfc, &inoutPtr, &srcSize, &bufPtr, &bufSize) == (size_t)-1)
+    return;
+
+  *bufPtr = 0;
+  strcpy(inout, buf);
+}
+#endif
+
 struct SDLRWIoContext {
   SDL_RWops *ops;
   std::string filename;
@@ -258,7 +277,7 @@ static void initReadOps(PHYSFS_File *handle, SDL_RWops &ops, bool freeOnClose) {
 
 static void strTolower(std::string &str) {
   for (size_t i = 0; i < str.size(); ++i)
-    str[i] = tolower(str[i]);
+    str[i] = tolower(static_cast<unsigned char>(str[i]));
 }
 
 const Uint32 SDL_RWOPS_PHYSFS = SDL_RWOPS_UNKNOWN + 10;
@@ -372,18 +391,7 @@ struct CacheEnumData {
   /* Converts in-place */
   void toNFC(char *inout) {
 #ifdef __APPLE__
-    size_t srcSize = strlen(inout);
-    size_t bufSize = sizeof(buf);
-    char *bufPtr = buf;
-    char *inoutPtr = inout;
-
-    /* Reserve room for null terminator */
-    --bufSize;
-
-    iconv(nfd2nfc, &inoutPtr, &srcSize, &bufPtr, &bufSize);
-    /* Null-terminate */
-    *bufPtr = 0;
-    strcpy(inout, buf);
+    ::toNFC(inout, nfd2nfc, buf, sizeof(buf));
 #else
     (void)inout;
 #endif
@@ -397,11 +405,14 @@ static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
 
   CacheEnumData &data = *static_cast<CacheEnumData *>(d);
   char fullPath[512];
+  char originalPath[512];
 
   if (!*origdir)
     snprintf(fullPath, sizeof(fullPath), "%s", fname);
   else
     snprintf(fullPath, sizeof(fullPath), "%s/%s", origdir, fname);
+
+  strcpySafe(originalPath, fullPath, sizeof(originalPath), -1);
 
   /* Deal with OSX' weird UTF-8 standards */
   data.toNFC(fullPath);
@@ -411,7 +422,7 @@ static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
   strTolower(lowerCase);
 
   PHYSFS_Stat stat;
-  PHYSFS_stat(fullPath, &stat);
+  PHYSFS_stat(originalPath, &stat);
 
   if (stat.filetype == PHYSFS_FILETYPE_DIRECTORY) {
     /* Create a new list for this directory */
@@ -419,19 +430,23 @@ static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
 
     /* Iterate over its contents */
     data.fileLists.push(&list);
-    PHYSFS_enumerate(fullPath, cacheEnumCB, d);
+    PHYSFS_enumerate(originalPath, cacheEnumCB, d);
     data.fileLists.pop();
   } else {
     /* Get the file list for the directory we're currently
      * traversing and append this filename to it */
     std::vector<std::string> &list = *data.fileLists.top();
 
-    std::string lowerFilename(fname);
+    char filename[512];
+    strcpySafe(filename, fname, sizeof(filename), -1);
+    data.toNFC(filename);
+
+    std::string lowerFilename(filename);
     strTolower(lowerFilename);
     list.push_back(lowerFilename);
 
     /* Add the lower -> mixed mapping of the file's full path */
-    data.p->pathCache.insert(lowerCase, mixedCase);
+    data.p->pathCache.insert(lowerCase, originalPath);
   }
 
   return PHYSFS_ENUM_OK;
@@ -613,9 +628,18 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
   size_t len = strcpySafe(buffer, filename_nm.c_str(), sizeof(buffer), -1);
   char *delim;
 
-  if (p->havePathCache)
+  if (p->havePathCache) {
+#ifdef __APPLE__
+    iconv_t nfd2nfc = iconv_open("utf-8", "utf-8-mac");
+    char nfcBuf[512];
+    toNFC(buffer, nfd2nfc, nfcBuf, sizeof(nfcBuf));
+    if (nfd2nfc != (iconv_t)-1)
+      iconv_close(nfd2nfc);
+    len = strlen(buffer);
+#endif
     for (size_t i = 0; i < len; ++i)
-      buffer[i] = tolower(buffer[i]);
+      buffer[i] = tolower(static_cast<unsigned char>(buffer[i]));
+  }
 
   /* Find the deliminator separating directory and file name */
   for (delim = buffer + len; delim > buffer; --delim)

@@ -22,6 +22,52 @@
 # than crashing the game. This matches JoiPlay's C++ behavior
 # where any libcurl error path returns "" from the binding.
 
+if defined?(HTTPLite)
+  module HTTPLite
+    class << self
+      unless method_defined?(:__mkxp_native_get)
+        alias __mkxp_native_get get
+        alias __mkxp_native_post post
+        alias __mkxp_native_post_body post_body
+
+        def get(*args)
+          __mkxp_native_get(*args)
+        rescue Exception => e
+          raise unless __mkxp_http_error?(e)
+          __mkxp_empty_response('GET', args[0], e)
+        end
+
+        def post(*args)
+          __mkxp_native_post(*args)
+        rescue Exception => e
+          raise unless __mkxp_http_error?(e)
+          __mkxp_empty_response('POST', args[0], e)
+        end
+
+        def post_body(*args)
+          __mkxp_native_post_body(*args)
+        rescue Exception => e
+          raise unless __mkxp_http_error?(e)
+          __mkxp_empty_response('POST', args[0], e)
+        end
+
+        private
+
+        def __mkxp_http_error?(error)
+          error.is_a?(StandardError) || (defined?(MKXPError) && error.is_a?(MKXPError))
+        end
+
+        def __mkxp_empty_response(verb, url, error)
+          if defined?(MKXP) && MKXP.respond_to?(:puts)
+            MKXP.puts("[http] #{verb} #{url} failed: #{error.class}: #{error.message}")
+          end
+          { :status => 0, :body => '', :headers => {} }
+        end
+      end
+    end
+  end
+end
+
 module HTTP
   class << self
     def get(host, query = '')
