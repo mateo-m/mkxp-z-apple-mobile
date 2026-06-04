@@ -1431,16 +1431,21 @@ static void runRMXPScripts(BacktraceData &btData) {
             break;
         }
         
-        /* Prepend a magic encoding comment so the Ruby 3.1 parser
-         * treats source as raw bytes rather than UTF-8. Without this,
-         * regex literals with \x7f-\x9f byte ranges (common in older
-         * Pokemon Essentials utility scripts) fail to parse with
-         * "invalid multibyte escape". Only add it if not already
-         * present at the top of the script. */
+        /* Most modern Pokemon Essentials forks ship valid UTF-8
+         * script sources and expect ordinary string literals to stay
+         * UTF-8 at runtime. Only force binary parsing for the small
+         * subset of legacy scripts that actually contains byte-range
+         * regex escapes like `\x7f-\x9f`, which Ruby 3.1 otherwise
+         * rejects with "invalid multibyte escape". Blanket-tagging
+         * every script as ASCII-8BIT fixes those regexes but turns
+         * normal text literals (item names, UI strings) binary too,
+         * which later explodes in `_INTL`, battle text, debug logs,
+         * etc. */
         {
             const char *src = decodeBuffer.c_str();
             size_t srcLen = bufferLen;
             bool hasEncoding = false;
+            bool needsBinaryEncoding = false;
             if (srcLen >= 11 && (strncmp(src, "# encoding:", 11) == 0 ||
                                   strncmp(src, "#encoding:", 10) == 0 ||
                                   strncmp(src, "# coding:", 9) == 0 ||
@@ -1448,6 +1453,24 @@ static void runRMXPScripts(BacktraceData &btData) {
                 hasEncoding = true;
             }
             if (!hasEncoding) {
+                static const char *binaryRegexMarkers[] = {
+                    "\\x7f-\\x9f",
+                    "\\x7F-\\x9F",
+                    "\\x80-\\x9f",
+                    "\\x80-\\x9F",
+                    "\\x80-\\xFF",
+                    "\\x81-\\x9f",
+                    "\\x81-\\x9F",
+                    nullptr
+                };
+                for (const char **marker = binaryRegexMarkers; *marker; ++marker) {
+                    if (strstr(src, *marker) != nullptr) {
+                        needsBinaryEncoding = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasEncoding && needsBinaryEncoding) {
                 std::string prefixed = "# encoding: ASCII-8BIT\n";
                 prefixed.append(src, srcLen);
                 rb_ary_store(script, 3, mkxp_str_new(prefixed.c_str(), prefixed.size()));
