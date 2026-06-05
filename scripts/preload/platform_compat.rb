@@ -171,7 +171,7 @@ unless defined?(MKXPCasefoldFS)
     ].freeze
     FILE_READ_METHODS = [:read, :binread, :readlines, :foreach].freeze
     # rubocop:enable Style/SymbolArray
-    GLOB_META_RE = /[*?[{]/.freeze
+    GLOB_META_RE = /[*?\[{]/.freeze
 
     module_function
 
