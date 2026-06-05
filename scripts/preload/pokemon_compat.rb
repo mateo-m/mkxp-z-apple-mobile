@@ -293,7 +293,6 @@ class MkxpNullMouse
   end
 end
 
-<<<<<<< HEAD
 # --- Between-session reset hook ---
 # The C side invokes each Proc in $__mkxp_reset_hooks right before
 # a new game session's scripts run. Use this to scrub Pokemon-specific

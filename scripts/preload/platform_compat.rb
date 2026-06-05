@@ -317,8 +317,9 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
         @_mkxp_wrapping_pbResolveBitmap = true
         original_method = instance_method(:pbResolveBitmap)
 
-        define_method(:pbResolveBitmap) do |x|
-          result = original_method.bind(self).call(x)
+        define_method(:pbResolveBitmap) do |*args|
+          result = original_method.bind(self).call(*args)
+          x = args[0]
           resolved = MKXPCasefoldFS.resolve_bitmap(x)
           return result unless resolved
 
@@ -333,6 +334,7 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
           end
           resolved
         end
+        ruby2_keywords(:pbResolveBitmap) if respond_to?(:ruby2_keywords, true)
 
         private :pbResolveBitmap
       end
