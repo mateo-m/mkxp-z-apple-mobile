@@ -2,7 +2,11 @@
   "name": "mkxp-z-apple-mobile-ci-tools",
   "private": true,
   "description": "Pinned versions of Node-based CI lint/format tools. Not shipped with the engine; consumed only by .github/workflows/.",
+  "scripts": {
+    "prepare": "lefthook install --reset-hooks-path"
+  },
   "devDependencies": {
+    "lefthook": "2.1.9",
     "markdownlint-cli": "0.48.0"
   }
 }

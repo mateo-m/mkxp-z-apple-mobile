@@ -60,6 +60,7 @@ Issues and PRs welcome on [GitHub](https://github.com/mateo-m/mkxp-z-apple-mobil
 
 When opening a PR:
 
+- Run `bun install` once so LeftHook installs the local hooks.
 - Build green via the empo-app build pipeline.
 - Match the existing code style; no formatter is enforced.
 - Reference any related issue.

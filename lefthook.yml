@@ -1,0 +1,5 @@
+pre-commit:
+  parallel: false
+  commands:
+    block-detached-head:
+      run: "git symbolic-ref -q HEAD >/dev/null || { echo 'pre-commit failed: refusing commit on detached HEAD' >&2; exit 1; }"
