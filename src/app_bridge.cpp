@@ -121,7 +121,8 @@ struct BridgeCallback {
     // to the stored function pointer; userdata is appended.
     template <typename... Args>
     void fire(Args&&... args) noexcept {
-        if (auto s = snapshot(); s && s->fn) {
+        auto s = snapshot();
+        if (s && s->fn) {
             s->fn(std::forward<Args>(args)..., s->userdata);
         }
     }
