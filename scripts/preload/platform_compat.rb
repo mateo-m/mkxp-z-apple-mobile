@@ -155,6 +155,7 @@ end
 # Ruby-side helpers still needed by higher-level script APIs.
 unless defined?(MKXPCasefoldFS)
   module MKXPCasefoldFS
+    # rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
     FILE_QUERY_METHODS = [
       :exist?, :directory?, :file?, :zero?, :size?,
       :readable?, :readable_real?, :world_readable?,
@@ -169,7 +170,8 @@ unless defined?(MKXPCasefoldFS)
       :stat, :lstat, :ftype, :realpath, :readlink
     ].freeze
     FILE_READ_METHODS = [:read, :binread, :readlines, :foreach].freeze
-    GLOB_META_RE = /[*?\[\{]/.freeze
+    # rubocop:enable Style/SymbolArray
+    GLOB_META_RE = /[*?[{]/.freeze
 
     module_function
 
@@ -201,7 +203,7 @@ unless defined?(MKXPCasefoldFS)
       return nil unless resolved_dir
 
       basename = File.basename(path)
-      resolved_dir = resolved_dir.gsub(/[\\\/]\z/, '')
+      resolved_dir = resolved_dir.gsub(%r{[\\/]\z}, '')
       basename.empty? ? resolved_dir : "#{resolved_dir}/#{basename}"
     rescue StandardError
       nil
@@ -242,7 +244,7 @@ unless defined?(MKXPCasefoldFS)
       resolved_dir = resolve(dirname)
       return nil unless resolved_dir
 
-      "#{resolved_dir.gsub(/[\\\/]\z/, '')}/#{suffix}"
+      "#{resolved_dir.gsub(%r{[\\/]\z}, '')}/#{suffix}"
     rescue StandardError
       nil
     end
@@ -260,7 +262,6 @@ unless defined?(MKXPCasefoldFS)
         remap_glob_pattern(arg)
       end
     end
-
   end
 end
 
@@ -272,6 +273,10 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
   class << Object
     alias _mkxp_casefold_orig_method_added method_added
 
+    # rubocop:disable Lint/MissingSuper -- this callback must invoke the aliased
+    # original hook so the same code parses on Ruby 1.8.
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    # rubocop:disable Naming/VariableName -- preserve upstream Pokemon method names.
     def method_added(name)
       _mkxp_casefold_orig_method_added(name)
 
@@ -280,25 +285,29 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
         return if @_mkxp_wrapping_pbTryString
 
         @_mkxp_wrapping_pbTryString = true
-        original = instance_method(:pbTryString)
+        original_method = instance_method(:pbTryString)
 
         define_method(:pbTryString) do |x|
-          result = original.bind(self).call(x)
+          result = original_method.bind(self).call(x)
           return result unless x.is_a?(String)
 
           resolved = MKXPCasefoldFS.resolve(x)
           return result unless resolved
 
           if result.nil?
-            retried = original.bind(self).call(resolved)
+            retried = original_method.bind(self).call(resolved)
             if retried.nil?
               result
             else
-              System.puts("[platform_compat] pbTryString casefold hit: #{x} -> #{resolved}") if defined?(System)
+              if defined?(System)
+                System.puts("[platform_compat] pbTryString casefold hit: #{x} -> #{resolved}")
+              end
               resolved
             end
           else
-            System.puts("[platform_compat] pbTryString normalized: #{x} -> #{resolved}") if defined?(System)
+            if defined?(System)
+              System.puts("[platform_compat] pbTryString normalized: #{x} -> #{resolved}")
+            end
             resolved
           end
         end
@@ -308,29 +317,34 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
         return if @_mkxp_wrapping_pbResolveBitmap
 
         @_mkxp_wrapping_pbResolveBitmap = true
-        original = instance_method(:pbResolveBitmap)
+        original_method = instance_method(:pbResolveBitmap)
 
         define_method(:pbResolveBitmap) do |x|
-          result = original.bind(self).call(x)
+          result = original_method.bind(self).call(x)
           resolved = MKXPCasefoldFS.resolve_bitmap(x)
           return result unless resolved
 
           if result.nil?
-            System.puts("[platform_compat] pbResolveBitmap casefold hit: #{x} -> #{resolved}") if defined?(System)
+            if defined?(System)
+              System.puts("[platform_compat] pbResolveBitmap casefold hit: #{x} -> #{resolved}")
+            end
           elsif result != resolved
-            System.puts("[platform_compat] pbResolveBitmap normalized: #{x} -> #{resolved}") if defined?(System)
+            if defined?(System)
+              System.puts("[platform_compat] pbResolveBitmap normalized: #{x} -> #{resolved}")
+            end
           end
           resolved
         end
 
         private :pbResolveBitmap
-      else
-        return
       end
     ensure
       @_mkxp_wrapping_pbTryString = false if name == :pbTryString
       @_mkxp_wrapping_pbResolveBitmap = false if name == :pbResolveBitmap
     end
+    # rubocop:enable Naming/VariableName
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    # rubocop:enable Lint/MissingSuper
   end
 
   System.puts '[platform_compat] pbTryString casefold hook armed' if defined?(System)
@@ -647,9 +661,11 @@ end
 # `@@send_string_calls` counter - is reset explicitly by entries
 # in `$__mkxp_reset_hooks`.
 $__mkxp_preload_keep_consts ||= []
+# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
 [:IOS, :DL].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
+# rubocop:enable Style/SymbolArray
 
 # --- Dir.chdir nil/empty-safety ---
 # Pokemon Essentials and some plugin scripts pass nil or "" to

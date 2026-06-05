@@ -116,7 +116,9 @@ unless $__mkxp_session_audit_installed
   end
 
   def __mkxp_audit_symbol_list(list)
+    # rubocop:disable Style/SymbolProc -- keep explicit block for Ruby 1.8.
     list.map { |name| name.to_sym }.sort
+    # rubocop:enable Style/SymbolProc
   end
 
   # Returns true when it's safe to remove `method_name` from

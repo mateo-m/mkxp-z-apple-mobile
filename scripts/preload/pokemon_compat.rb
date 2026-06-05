@@ -260,9 +260,11 @@ def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   end
 end
 
+# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
 disposed_safe_zero = [:x, :y, :z, :ox, :oy, :width, :height,
                       :opacity, :back_opacity, :contents_opacity]
 disposed_safe_false = [:visible]
+# rubocop:enable Style/SymbolArray
 
 [Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
   disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
@@ -310,9 +312,11 @@ end
 # state inside FmodEx (or its handle) is reset through other means
 # - here we just keep the namespace alive.
 $__mkxp_preload_keep_consts ||= []
+# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
 [:MkxpNullMouse, :FmodEx, :FmodExHandle].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
+# rubocop:enable Style/SymbolArray
 
 $__mkxp_reset_hooks ||= []
 $__mkxp_pokemon_compat_reset_hook_installed ||= false

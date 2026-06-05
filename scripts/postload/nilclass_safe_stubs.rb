@@ -61,7 +61,7 @@ class NilClass
     false
   end
 
-  def <=>(other)
+  def <=>(_other)
     0
   end
 
@@ -73,7 +73,7 @@ class NilClass
     false
   end
 
-  def >>(other)
+  def >>(_other)
     0
   end
 
