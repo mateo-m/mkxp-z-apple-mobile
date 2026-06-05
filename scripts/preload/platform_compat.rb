@@ -305,9 +305,7 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
               resolved
             end
           else
-            if defined?(System)
-              System.puts("[platform_compat] pbTryString normalized: #{x} -> #{resolved}")
-            end
+            System.puts("[platform_compat] pbTryString normalized: #{x} -> #{resolved}") if defined?(System)
             resolved
           end
         end
