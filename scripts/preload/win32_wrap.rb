@@ -807,9 +807,9 @@ end
 # can catch). `const_defined?` checks the constant table directly
 # without invoking `const_missing`, sidestepping the loop.
 $__mkxp_reset_hooks ||= []
-unless $__mkxp_reset_hooks.any? do |h|
-  h.respond_to?(:source_location) && h.source_location && h.source_location[0] == __FILE__
-end
+$__mkxp_win32_wrap_reset_hook_installed ||= false
+unless $__mkxp_win32_wrap_reset_hook_installed
+  $__mkxp_win32_wrap_reset_hook_installed = true
   $__mkxp_reset_hooks << lambda do
     if Object.const_defined?(:Win32API_Impl) &&
        Win32API_Impl.const_defined?(:MciState)

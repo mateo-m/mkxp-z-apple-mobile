@@ -149,6 +149,194 @@ module Kernel
   module_function :set_loop_points
 end
 
+# --- Case-insensitive file probes ---
+# Native mkxp bindings now handle the core Ruby File/Dir/require/load
+# casefold retries through the PhysFS-backed path cache. Keep only the
+# Ruby-side helpers still needed by higher-level script APIs.
+unless defined?(MKXPCasefoldFS)
+  module MKXPCasefoldFS
+    FILE_QUERY_METHODS = [
+      :exist?, :directory?, :file?, :zero?, :size?,
+      :readable?, :readable_real?, :world_readable?,
+      :writable?, :writable_real?, :world_writable?,
+      :executable?, :executable_real?,
+      :owned?, :grpowned?,
+      :blockdev?, :chardev?, :pipe?, :socket?, :symlink?,
+      :setuid?, :setgid?, :sticky?
+    ].freeze
+    FILE_VALUE_METHODS = [
+      :size, :atime, :ctime, :mtime, :birthtime,
+      :stat, :lstat, :ftype, :realpath, :readlink
+    ].freeze
+    FILE_READ_METHODS = [:read, :binread, :readlines, :foreach].freeze
+    GLOB_META_RE = /[*?\[\{]/.freeze
+
+    module_function
+
+    def resolve(path)
+      return nil unless path.is_a?(String)
+
+      resolved = MKXP.desensitize(path)
+      return nil if resolved.nil? || resolved == path
+
+      resolved
+    rescue StandardError
+      nil
+    end
+
+    def fallback(path)
+      resolved = resolve(path)
+      return false unless resolved
+
+      yield(resolved)
+    end
+
+    def resolve_parent(path)
+      return nil unless path.is_a?(String)
+
+      dirname = File.dirname(path)
+      return nil if dirname.nil? || dirname.empty? || dirname == '.'
+
+      resolved_dir = resolve(dirname)
+      return nil unless resolved_dir
+
+      basename = File.basename(path)
+      resolved_dir = resolved_dir.gsub(/[\\\/]\z/, '')
+      basename.empty? ? resolved_dir : "#{resolved_dir}/#{basename}"
+    rescue StandardError
+      nil
+    end
+
+    def rescue_existing_path(path)
+      resolved = resolve(path) || resolve_parent(path)
+      return nil unless resolved
+
+      yield(resolved)
+    end
+
+    def resolve_bitmap(path)
+      return nil unless path.is_a?(String)
+
+      base = path.gsub(/\.(bmp|png|gif|jpg|jpeg)$/i, '')
+      ['.png', '.gif'].each do |ext|
+        resolved = resolve(base + ext)
+        return resolved if resolved
+      end
+
+      nil
+    end
+
+    def remap_glob_pattern(pattern)
+      return nil unless pattern.is_a?(String)
+      return nil unless pattern =~ GLOB_META_RE
+
+      wildcard_index = pattern.index(GLOB_META_RE)
+      return nil unless wildcard_index
+
+      prefix = pattern[0...wildcard_index]
+      slash = [prefix.rindex('/'), prefix.rindex('\\')].compact.max
+      return nil unless slash
+
+      dirname = pattern[0...slash]
+      suffix = pattern[(slash + 1)..-1]
+      resolved_dir = resolve(dirname)
+      return nil unless resolved_dir
+
+      "#{resolved_dir.gsub(/[\\\/]\z/, '')}/#{suffix}"
+    rescue StandardError
+      nil
+    end
+
+    def remap_glob_arg(arg)
+      if arg.is_a?(Array)
+        changed = false
+        remapped = arg.map do |pattern|
+          replacement = remap_glob_pattern(pattern)
+          changed ||= !replacement.nil? && replacement != pattern
+          replacement || pattern
+        end
+        changed ? remapped : nil
+      else
+        remap_glob_pattern(arg)
+      end
+    end
+
+  end
+end
+
+# Pokemon Essentials' `pbResolveBitmap` relies on `pbTryString`, which probes a
+# candidate path and returns the ORIGINAL string on success. On Windows that is
+# fine because later opens are also case-insensitive; on iOS we need the real
+# mixed-case path for callers that keep using the returned filename.
+unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
+  class << Object
+    alias _mkxp_casefold_orig_method_added method_added
+
+    def method_added(name)
+      _mkxp_casefold_orig_method_added(name)
+
+      case name
+      when :pbTryString
+        return if @_mkxp_wrapping_pbTryString
+
+        @_mkxp_wrapping_pbTryString = true
+        original = instance_method(:pbTryString)
+
+        define_method(:pbTryString) do |x|
+          result = original.bind(self).call(x)
+          return result unless x.is_a?(String)
+
+          resolved = MKXPCasefoldFS.resolve(x)
+          return result unless resolved
+
+          if result.nil?
+            retried = original.bind(self).call(resolved)
+            if retried.nil?
+              result
+            else
+              System.puts("[platform_compat] pbTryString casefold hit: #{x} -> #{resolved}") if defined?(System)
+              resolved
+            end
+          else
+            System.puts("[platform_compat] pbTryString normalized: #{x} -> #{resolved}") if defined?(System)
+            resolved
+          end
+        end
+
+        private :pbTryString
+      when :pbResolveBitmap
+        return if @_mkxp_wrapping_pbResolveBitmap
+
+        @_mkxp_wrapping_pbResolveBitmap = true
+        original = instance_method(:pbResolveBitmap)
+
+        define_method(:pbResolveBitmap) do |x|
+          result = original.bind(self).call(x)
+          resolved = MKXPCasefoldFS.resolve_bitmap(x)
+          return result unless resolved
+
+          if result.nil?
+            System.puts("[platform_compat] pbResolveBitmap casefold hit: #{x} -> #{resolved}") if defined?(System)
+          elsif result != resolved
+            System.puts("[platform_compat] pbResolveBitmap normalized: #{x} -> #{resolved}") if defined?(System)
+          end
+          resolved
+        end
+
+        private :pbResolveBitmap
+      else
+        return
+      end
+    ensure
+      @_mkxp_wrapping_pbTryString = false if name == :pbTryString
+      @_mkxp_wrapping_pbResolveBitmap = false if name == :pbResolveBitmap
+    end
+  end
+
+  System.puts '[platform_compat] pbTryString casefold hook armed' if defined?(System)
+  System.puts '[platform_compat] pbResolveBitmap casefold hook armed' if defined?(System)
+end
+
 # --- Process spawning neutralization ---
 # fork()/exec() are forbidden on iOS and cause immediate SIGKILL.
 # Neutralize all process-spawning methods at the engine level.

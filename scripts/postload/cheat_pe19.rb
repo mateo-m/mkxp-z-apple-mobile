@@ -115,7 +115,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
         end
         return -1
       when 1
-        $Trainer.party.each(&:heal) if $Trainer && $Trainer.party
+        $Trainer.party.each { |pokemon| pokemon.heal } if $Trainer && $Trainer.party
         @cheat_window.active = false
         @cheat_window.visible = false
         return -1

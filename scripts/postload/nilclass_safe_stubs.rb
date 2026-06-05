@@ -25,15 +25,15 @@
 class NilClass
   # Numeric methods - return 0, -1, false, or the other arg so
   # arithmetic / comparison chains keep flowing.
-  def %(*)
+  def %(*_args)
     0
   end
 
-  def *(*)
+  def *(*_args)
     0
   end
 
-  def **(*)
+  def **(*_args)
     0
   end
 
@@ -41,39 +41,39 @@ class NilClass
     other
   end
 
-  def -(*)
+  def -(*_args)
     0
   end
 
-  def /(*)
+  def /(*_args)
     0
   end
 
-  def <(*)
+  def <(*_args)
     true
   end
 
-  def <<(*)
+  def <<(*_args)
     0
   end
 
-  def <=(*)
+  def <=(*_args)
     false
   end
 
-  def <=>(*)
+  def <=>(other)
     0
   end
 
-  def >(*)
+  def >(*_args)
     false
   end
 
-  def >=(*)
+  def >=(*_args)
     false
   end
 
-  def >>(*)
+  def >>(other)
     0
   end
 
@@ -93,7 +93,7 @@ class NilClass
     0
   end
 
-  def ceil(*)
+  def ceil(*_args)
     0
   end
 
@@ -119,15 +119,15 @@ class NilClass
     0
   end
 
-  def div(*)
+  def div(*_args)
     0
   end
 
-  def divmod(*)
+  def divmod(*_args)
     []
   end
 
-  def downto(*)
+  def downto(*_args)
     0
   end
 
@@ -135,11 +135,11 @@ class NilClass
     true
   end
 
-  def fdiv(*)
+  def fdiv(*_args)
     0.0
   end
 
-  def floor(*)
+  def floor(*_args)
     0
   end
 
@@ -183,7 +183,7 @@ class NilClass
     false
   end
 
-  def modulo(*)
+  def modulo(*_args)
     0
   end
 
@@ -207,7 +207,7 @@ class NilClass
     0
   end
 
-  def quo(*)
+  def quo(*_args)
     0.0
   end
 
@@ -227,15 +227,15 @@ class NilClass
     false
   end
 
-  def remainder(*)
+  def remainder(*_args)
     0
   end
 
-  def round(*)
+  def round(*_args)
     0
   end
 
-  def step(*)
+  def step(*_args)
     0
   end
 
@@ -243,7 +243,7 @@ class NilClass
     0
   end
 
-  def times(*)
+  def times(*_args)
     0
   end
 
@@ -251,11 +251,11 @@ class NilClass
     0
   end
 
-  def truncate(*)
+  def truncate(*_args)
     0
   end
 
-  def upto(*)
+  def upto(*_args)
     0
   end
 
@@ -263,7 +263,7 @@ class NilClass
     true
   end
 
-  def |(*)
+  def |(*_args)
     0
   end
 
@@ -289,11 +289,11 @@ class NilClass
     nil
   end
 
-  def casecmp(*)
+  def casecmp(*_args)
     -1
   end
 
-  def center(*)
+  def center(*_args)
     ''
   end
 
@@ -301,11 +301,11 @@ class NilClass
     ''
   end
 
-  def chomp(*)
+  def chomp(*_args)
     ''
   end
 
-  def chomp!(*)
+  def chomp!(*_args)
     ''
   end
 
@@ -329,23 +329,23 @@ class NilClass
     ''
   end
 
-  def concat(*)
+  def concat(*_args)
     ''
   end
 
-  def count(*)
+  def count(*_args)
     0
   end
 
-  def crypt(*)
+  def crypt(*_args)
     ''
   end
 
-  def delete(*)
+  def delete(*_args)
     ''
   end
 
-  def delete!(*)
+  def delete!(*_args)
     ''
   end
 
@@ -361,23 +361,23 @@ class NilClass
     ''
   end
 
-  def each(*)
+  def each(*_args)
     ''
   end
 
-  def each_byte(*)
+  def each_byte(*_args)
     ''
   end
 
-  def each_char(*)
+  def each_char(*_args)
     ''
   end
 
-  def each_codepoint(*)
+  def each_codepoint(*_args)
     ''
   end
 
-  def each_line(*)
+  def each_line(*_args)
     ''
   end
 
@@ -385,31 +385,31 @@ class NilClass
     true
   end
 
-  def encode(*)
+  def encode(*_args)
     ''
   end
 
-  def encode!(*)
+  def encode!(*_args)
     ''
   end
 
-  def end_with?(*)
+  def end_with?(*_args)
     false
   end
 
-  def force_encoding(*)
+  def force_encoding(*_args)
     ''
   end
 
-  def getbyte(*)
+  def getbyte(*_args)
     0
   end
 
-  def gsub(*)
+  def gsub(*_args)
     ''
   end
 
-  def gsub!(*)
+  def gsub!(*_args)
     ''
   end
 
@@ -417,15 +417,15 @@ class NilClass
     0
   end
 
-  def include?(*)
+  def include?(*_args)
     false
   end
 
-  def index(*)
+  def index(*_args)
     nil
   end
 
-  def insert(*)
+  def insert(*_args)
     ''
   end
 
@@ -437,11 +437,11 @@ class NilClass
     0
   end
 
-  def lines(*)
+  def lines(*_args)
     ''
   end
 
-  def ljust(*)
+  def ljust(*_args)
     ''
   end
 
@@ -453,7 +453,7 @@ class NilClass
     ''
   end
 
-  def match(*)
+  def match(*_args)
     nil
   end
 
@@ -461,11 +461,11 @@ class NilClass
     0
   end
 
-  def partition(*)
+  def partition(*_args)
     []
   end
 
-  def replace(*)
+  def replace(*_args)
     ''
   end
 
@@ -477,15 +477,15 @@ class NilClass
     ''
   end
 
-  def rindex(*)
+  def rindex(*_args)
     nil
   end
 
-  def rjust(*)
+  def rjust(*_args)
     ''
   end
 
-  def rpartition(*)
+  def rpartition(*_args)
     []
   end
 
@@ -497,11 +497,11 @@ class NilClass
     ''
   end
 
-  def scan(*)
+  def scan(*_args)
     []
   end
 
-  def setbyte(*)
+  def setbyte(*_args)
     0
   end
 
@@ -509,23 +509,23 @@ class NilClass
     0
   end
 
-  def slice(*)
+  def slice(*_args)
     ''
   end
 
-  def slice!(*)
+  def slice!(*_args)
     ''
   end
 
-  def split(*)
+  def split(*_args)
     []
   end
 
-  def squeeze(*)
+  def squeeze(*_args)
     ''
   end
 
-  def start_with?(*)
+  def start_with?(*_args)
     false
   end
 
@@ -537,15 +537,15 @@ class NilClass
     ''
   end
 
-  def sub(*)
+  def sub(*_args)
     ''
   end
 
-  def sub!(*)
+  def sub!(*_args)
     ''
   end
 
-  def sum(*)
+  def sum(*_args)
     0
   end
 
@@ -557,23 +557,23 @@ class NilClass
     ''
   end
 
-  def tr(*)
+  def tr(*_args)
     ''
   end
 
-  def tr!(*)
+  def tr!(*_args)
     ''
   end
 
-  def tr_s(*)
+  def tr_s(*_args)
     ''
   end
 
-  def tr_s!(*)
+  def tr_s!(*_args)
     ''
   end
 
-  def unpack(*)
+  def unpack(*_args)
     []
   end
 
