@@ -728,7 +728,16 @@ std::string FileSystem::normalize(const char *pathname, bool preferred,
 }
 
 bool FileSystem::exists(const char *filename) {
-  return PHYSFS_exists(normalize(filename, false, false).c_str());
+  std::string normalized = normalize(filename, false, false);
+
+  if (PHYSFS_exists(normalized.c_str()))
+    return true;
+
+  const char *resolved = desensitize(normalized.c_str());
+  if (resolved != normalized.c_str())
+    return PHYSFS_exists(resolved) != 0;
+
+  return false;
 }
 
 const char *FileSystem::desensitize(const char *filename) {
