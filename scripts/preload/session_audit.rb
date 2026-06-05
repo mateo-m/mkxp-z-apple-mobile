@@ -109,6 +109,18 @@ unless $__mkxp_session_audit_installed
   # namespaces into the safety check.
   $__MKXP_AUDIT_GUARDED_CLASSES = %w[Marshal Kernel Object].freeze
 
+  def __mkxp_audit_singleton_class(klass)
+    class << klass
+      self
+    end
+  end
+
+  def __mkxp_audit_symbol_list(list)
+    # rubocop:disable Style/SymbolProc -- keep explicit block for Ruby 1.8.
+    list.map { |name| name.to_sym }.sort
+    # rubocop:enable Style/SymbolProc
+  end
+
   # Returns true when it's safe to remove `method_name` from
   # `klass` (instance/private/singleton). For "guarded" classes
   # like `Object`/`Kernel`/`Marshal`, only Ruby-defined methods
@@ -121,7 +133,7 @@ unless $__mkxp_session_audit_installed
     m =
       case kind
       when :singleton then begin
-        klass.singleton_class.instance_method(method_name)
+        __mkxp_audit_singleton_class(klass).instance_method(method_name)
       rescue StandardError
         nil
       end
@@ -172,13 +184,13 @@ unless $__mkxp_session_audit_installed
       # on 1.8 requires the String form.
       state[:__classes__][name] = {
         :instance_methods => begin
-          klass.instance_methods(false).map(&:to_sym).sort
+          __mkxp_audit_symbol_list(klass.instance_methods(false))
         rescue StandardError
           []
         end,
         :private_instance_methods => (if klass.respond_to?(:private_instance_methods)
                                         begin
-                                          klass.private_instance_methods(false).map(&:to_sym).sort
+                                          __mkxp_audit_symbol_list(klass.private_instance_methods(false))
                                         rescue StandardError
                                           []
                                         end
@@ -186,7 +198,7 @@ unless $__mkxp_session_audit_installed
                                         []
                                       end),
         :singleton_methods => begin
-          klass.singleton_methods(false).map(&:to_sym).sort
+          __mkxp_audit_symbol_list(klass.singleton_methods(false))
         rescue StandardError
           []
         end,
@@ -363,7 +375,7 @@ unless $__mkxp_session_audit_installed
           next unless __mkxp_audit_safe_to_remove?(klass, m, :singleton)
 
           begin
-            klass.singleton_class.send(:remove_method, m)
+            __mkxp_audit_singleton_class(klass).send(:remove_method, m)
           rescue StandardError
             nil
           end

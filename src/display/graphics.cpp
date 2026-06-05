@@ -475,6 +475,7 @@ struct GraphicsPrivate {
     unsigned int presentSkipCounter = 0;
     
     double last_update;
+    double last_delta;
     
     
     FPSLimiter fpsLimiter;
@@ -496,8 +497,10 @@ struct GraphicsPrivate {
     std::vector<double> avgFPSData;
     double last_avg_update;
     SDL_mutex *avgFPSLock;
-    
+
     SDL_mutex *glResourceLock;
+    Uint32 glResourceLockOwner;
+    unsigned int glResourceLockDepth;
     bool multithreadedMode;
     
     /* Global list of all live Disposables
@@ -515,7 +518,8 @@ struct GraphicsPrivate {
     multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
-    last_update(0), last_avg_update(0), backingScaleFactor(1), integerScaleFactor(0, 0),
+    last_update(0), last_delta(0), last_avg_update(0), backingScaleFactor(1), integerScaleFactor(0, 0),
+    glResourceLockOwner(0), glResourceLockDepth(0),
     integerScaleActive(rtData->config.integerScaling.active),
     integerLastMileScaling(rtData->config.integerScaling.lastMileScaling) {
         avgFPSData = std::vector<double>();
@@ -1020,13 +1024,30 @@ struct GraphicsPrivate {
     
     void setLock(bool force = false) {
         if (!(force || multithreadedMode)) return;
+
+        Uint32 currentThread = SDL_ThreadID();
+        if (glResourceLockOwner == currentThread) {
+            ++glResourceLockDepth;
+            return;
+        }
         
         SDL_LockMutex(glResourceLock);
+        glResourceLockOwner = currentThread;
+        glResourceLockDepth = 1;
         graphicsGL_MakeCurrent(threadData->window, threadData->glContext);
     }
-    
+
     void releaseLock(bool force = false) {
         if (!(force || multithreadedMode)) return;
+
+        Uint32 currentThread = SDL_ThreadID();
+        if (glResourceLockOwner != currentThread || glResourceLockDepth == 0)
+            return;
+
+        if (--glResourceLockDepth > 0)
+            return;
+
+        glResourceLockOwner = 0;
         
         SDL_UnlockMutex(glResourceLock);
     }
@@ -1145,7 +1166,7 @@ Graphics::Graphics(RGSSThreadData *data) {
 Graphics::~Graphics() { delete p; }
 
 double Graphics::getDelta() {
-    return shState->runTime() - p->last_update;
+    return p->last_delta * 1000000.0;
 }
 
 double Graphics::lastUpdate() {
@@ -1158,7 +1179,15 @@ void Graphics::update(bool checkForShutdown) {
         return;
     }
     p->threadData->rqWindowAdjust.wait();
-    p->last_update = shState->runTime();
+    double now = shState->runTime();
+    if (p->last_update > 0) {
+        p->last_delta = now - p->last_update;
+    } else if (p->frameRate > 0) {
+        p->last_delta = 1000000.0 / p->frameRate;
+    } else {
+        p->last_delta = 0;
+    }
+    p->last_update = now;
     
     // update Input.repeat timing, rounding the framerate to the nearest 2
     {
@@ -1174,8 +1203,18 @@ void Graphics::update(bool checkForShutdown) {
     
     p->checkSyncLock();
 
-    if (p->frozen)
+    if (p->frozen) {
+        // RGSS scripts still call Graphics.update while the scene is frozen,
+        // especially for Ruby-driven transitions that animate over a frozen
+        // snapshot. Returning immediately here makes Graphics.delta_s collapse
+        // toward zero and those timers never advance on iOS.
+        p->fpsLimiter.delay();
+        p->blitFrozenSceneToScreen();
+        ++p->frameCount;
+        p->threadData->ethread->notifyFrame();
+        p->updateAvgFPS();
         return;
+    }
     
     if (p->fpsLimiter.frameSkipRequired()) {
         if (p->useFrameSkip) {

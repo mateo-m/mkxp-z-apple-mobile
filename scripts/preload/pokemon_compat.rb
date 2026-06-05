@@ -144,7 +144,7 @@ class FmodExHandle
   end
   # rubocop:enable Naming/AccessorMethodName
 
-  def set_loop_points(*); end
+  def set_loop_points(*_args); end
 
   def stop
     case @kind
@@ -162,7 +162,7 @@ module FmodEx
   # No-op init handshake. Some scripts call `FmodEx.init(channels)`
   # to set up a software channel pool; we ignore it because the
   # underlying engine handles channel allocation itself.
-  def init(*); end
+  def init(*_args); end
 
   # BGM
   def bgm_play(filename, volume = 100, pitch = 100, position = 0)
@@ -260,9 +260,11 @@ def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   end
 end
 
+# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
 disposed_safe_zero = [:x, :y, :z, :ox, :oy, :width, :height,
                       :opacity, :back_opacity, :contents_opacity]
 disposed_safe_false = [:visible]
+# rubocop:enable Style/SymbolArray
 
 [Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
   disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
@@ -279,12 +281,12 @@ class MkxpNullMouse
   # rubocop:disable Naming/PredicateMethod -- mocks Pokemon
   # Essentials' `Game_Mouse#method_missing` contract; the Ruby
   # method-missing protocol uses this exact name (no `?`).
-  def method_missing(*)
+  def method_missing(*_args)
     false
   end
   # rubocop:enable Naming/PredicateMethod
 
-  def respond_to_missing?(*)
+  def respond_to_missing?(*_args)
     true
   end
 
@@ -310,12 +312,16 @@ end
 # state inside FmodEx (or its handle) is reset through other means
 # - here we just keep the namespace alive.
 $__mkxp_preload_keep_consts ||= []
+# rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
 [:MkxpNullMouse, :FmodEx, :FmodExHandle].each do |c|
   $__mkxp_preload_keep_consts << c unless $__mkxp_preload_keep_consts.include?(c)
 end
+# rubocop:enable Style/SymbolArray
 
 $__mkxp_reset_hooks ||= []
-unless $__mkxp_reset_hooks.any? { |h| h.respond_to?(:source_location) && h.source_location[0] == __FILE__ }
+$__mkxp_pokemon_compat_reset_hook_installed ||= false
+unless $__mkxp_pokemon_compat_reset_hook_installed
+  $__mkxp_pokemon_compat_reset_hook_installed = true
   $__mkxp_reset_hooks << lambda do
     # Pokemon Essentials / Pokemon fangames globals.
     #

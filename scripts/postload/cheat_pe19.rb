@@ -115,7 +115,9 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
         end
         return -1
       when 1
-        $Trainer.party.each(&:heal) if $Trainer && $Trainer.party
+        # rubocop:disable Style/SymbolProc -- Ruby 1.8 can't parse `&:heal`.
+        $Trainer.party.each { |pokemon| pokemon.heal } if $Trainer && $Trainer.party
+        # rubocop:enable Style/SymbolProc
         @cheat_window.active = false
         @cheat_window.visible = false
         return -1
