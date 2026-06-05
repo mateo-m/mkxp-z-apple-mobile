@@ -76,6 +76,10 @@ public:
 
 	/* Does not perform extension supplementing */
 	bool exists(const char *filename);
+	bool directoryExists(const char *filename);
+	std::string resolvePath(const char *filename);
+	std::string resolvePathOrParent(const char *filename);
+	std::string resolveFeaturePath(const char *filename);
 
 	const char *desensitize(const char *filename);
 

@@ -38,6 +38,12 @@
 #include <ruby/thread.h>
 #endif
 
+static void mkxp_define_alias_once(VALUE klass, const char *aliasName,
+                                   const char *origName) {
+    if (rb_method_boundp(klass, rb_intern(aliasName), /*ex=*/0)) return;
+    rb_define_alias(klass, aliasName, origName);
+}
+
 static void fileIntFreeInstance(void *inst) {
     SDL_RWops *ops = static_cast<SDL_RWops *>(inst);
     
@@ -213,6 +219,157 @@ RB_METHOD(kernelSaveData) {
     
     return Qnil;
 }
+
+struct ProtectedCallArgs {
+    VALUE recv;
+    ID mid;
+    int argc;
+    const VALUE *argv;
+};
+
+static VALUE protectedFuncall2(VALUE arg) {
+    ProtectedCallArgs *args = reinterpret_cast<ProtectedCallArgs *>(arg);
+    return rb_funcall2(args->recv, args->mid, args->argc,
+                       const_cast<VALUE *>(args->argv));
+}
+
+static VALUE callAliasProtected(VALUE recv, const char *aliasName,
+                                int argc, const VALUE *argv, int *state) {
+    ProtectedCallArgs args = {recv, rb_intern(aliasName), argc, argv};
+    return rb_protect(protectedFuncall2, reinterpret_cast<VALUE>(&args), state);
+}
+
+static bool mkxpRetryableFileError(VALUE exc) {
+    return rb_obj_is_kind_of(exc, rb_eLoadError) ||
+           rb_obj_is_kind_of(exc, getRbData()->exc[ErrnoENOENT]);
+}
+
+static VALUE resolvedPathValue(const std::string &path) {
+    return rb_str_new(path.c_str(), path.size());
+}
+
+static VALUE callSingletonAlias(VALUE recv, const char *aliasName,
+                                int argc, const VALUE *argv) {
+    return rb_funcall2(recv, rb_intern(aliasName), argc,
+                       const_cast<VALUE *>(argv));
+}
+
+RB_METHOD_GUARD(fileExist) {
+    VALUE filename;
+    rb_scan_args(argc, argv, "1", &filename);
+    SafeStringValue(filename);
+
+    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_exist?", 1, &filename)))
+        return Qtrue;
+
+    if (shState->fileSystem().exists(RSTRING_PTR(filename)))
+        return Qtrue;
+
+    return Qfalse;
+}
+RB_METHOD_GUARD_END
+
+RB_METHOD_GUARD(fileDirectory) {
+    VALUE filename;
+    rb_scan_args(argc, argv, "1", &filename);
+    SafeStringValue(filename);
+
+    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_directory?", 1, &filename)))
+        return Qtrue;
+
+    if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
+        return Qtrue;
+
+    return Qfalse;
+}
+RB_METHOD_GUARD_END
+
+RB_METHOD_GUARD(fileFile) {
+    VALUE filename;
+    rb_scan_args(argc, argv, "1", &filename);
+    SafeStringValue(filename);
+
+    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_file?", 1, &filename)))
+        return Qtrue;
+
+    std::string resolved = shState->fileSystem().resolvePath(RSTRING_PTR(filename));
+    if (resolved.empty())
+        return Qfalse;
+
+    return shState->fileSystem().directoryExists(resolved.c_str()) ? Qfalse : Qtrue;
+}
+RB_METHOD_GUARD_END
+
+RB_METHOD_GUARD(dirExist) {
+    VALUE filename;
+    rb_scan_args(argc, argv, "1", &filename);
+    SafeStringValue(filename);
+
+    if (RTEST(callSingletonAlias(rb_cDir, "_mkxp_native_orig_exist?", 1, &filename)))
+        return Qtrue;
+
+    if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
+        return Qtrue;
+
+    return Qfalse;
+}
+RB_METHOD_GUARD_END
+
+RB_METHOD(kernelRequireCasefold) {
+    VALUE path;
+    rb_scan_args(argc, argv, "1", &path);
+    SafeStringValue(path);
+
+    int state = 0;
+    VALUE result = callAliasProtected(rb_mKernel, "_mkxp_native_require_alias", 1, &path, &state);
+    if (!state)
+        return result;
+
+    VALUE exc = rb_errinfo();
+    if (!mkxpRetryableFileError(exc))
+        rb_exc_raise(exc);
+
+    std::string resolved = shState->fileSystem().resolveFeaturePath(RSTRING_PTR(path));
+    if (resolved.empty())
+        rb_exc_raise(exc);
+
+    VALUE resolvedValue = resolvedPathValue(resolved);
+    rb_set_errinfo(Qnil);
+    result = callAliasProtected(rb_mKernel, "_mkxp_native_require_alias", 1, &resolvedValue, &state);
+    if (!state)
+        return result;
+
+    rb_exc_raise(rb_errinfo());
+}
+
+RB_METHOD(kernelLoadCasefold) {
+    VALUE path;
+    VALUE wrap = Qfalse;
+    rb_scan_args(argc, argv, "11", &path, &wrap);
+    SafeStringValue(path);
+
+    VALUE args[] = {path, wrap};
+    int state = 0;
+    VALUE result = callAliasProtected(rb_mKernel, "_mkxp_native_load_alias", ARRAY_SIZE(args), args, &state);
+    if (!state)
+        return result;
+
+    VALUE exc = rb_errinfo();
+    if (!mkxpRetryableFileError(exc))
+        rb_exc_raise(exc);
+
+    std::string resolved = shState->fileSystem().resolveFeaturePath(RSTRING_PTR(path));
+    if (resolved.empty())
+        rb_exc_raise(exc);
+
+    VALUE resolvedArgs[] = {resolvedPathValue(resolved), wrap};
+    rb_set_errinfo(Qnil);
+    result = callAliasProtected(rb_mKernel, "_mkxp_native_load_alias", ARRAY_SIZE(resolvedArgs), resolvedArgs, &state);
+    if (!state)
+        return result;
+
+    rb_exc_raise(rb_errinfo());
+}
 #if RAPI_FULL > 187
 #if RAPI_FULL < 270
 static VALUE stringForceUTF8(VALUE arg)
@@ -282,6 +439,24 @@ void fileIntBindingInit() {
 #endif
     _rb_define_method(klass, "binmode", fileIntBinmode);
     _rb_define_method(klass, "close", fileIntClose);
+
+    VALUE fileSC = rb_singleton_class(rb_cFile);
+    VALUE dirSC = rb_singleton_class(rb_cDir);
+    VALUE kernelSC = rb_singleton_class(rb_mKernel);
+
+    mkxp_define_alias_once(fileSC, "_mkxp_native_orig_exist?", "exist?");
+    mkxp_define_alias_once(fileSC, "_mkxp_native_orig_file?", "file?");
+    mkxp_define_alias_once(fileSC, "_mkxp_native_orig_directory?", "directory?");
+    mkxp_define_alias_once(dirSC, "_mkxp_native_orig_exist?", "exist?");
+    mkxp_define_alias_once(kernelSC, "_mkxp_native_require_alias", "require");
+    mkxp_define_alias_once(kernelSC, "_mkxp_native_load_alias", "load");
+
+    rb_define_singleton_method(rb_cFile, "exist?", RUBY_METHOD_FUNC(fileExist), -1);
+    rb_define_singleton_method(rb_cFile, "file?", RUBY_METHOD_FUNC(fileFile), -1);
+    rb_define_singleton_method(rb_cFile, "directory?", RUBY_METHOD_FUNC(fileDirectory), -1);
+    rb_define_singleton_method(rb_cDir, "exist?", RUBY_METHOD_FUNC(dirExist), -1);
+    _rb_define_module_function(rb_mKernel, "require", kernelRequireCasefold);
+    _rb_define_module_function(rb_mKernel, "load", kernelLoadCasefold);
     
     _rb_define_module_function(rb_mKernel, "load_data", kernelLoadData);
     _rb_define_module_function(rb_mKernel, "save_data", kernelSaveData);

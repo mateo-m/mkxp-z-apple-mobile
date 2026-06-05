@@ -740,6 +740,86 @@ bool FileSystem::exists(const char *filename) {
   return false;
 }
 
+bool FileSystem::directoryExists(const char *filename) {
+  std::string normalized = normalize(filename, false, false);
+  PHYSFS_Stat stat;
+
+  if (PHYSFS_stat(normalized.c_str(), &stat) &&
+      stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+    return true;
+
+  const char *resolved = desensitize(normalized.c_str());
+  if (resolved != normalized.c_str() && PHYSFS_stat(resolved, &stat) &&
+      stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+    return true;
+
+  return false;
+}
+
+std::string FileSystem::resolvePath(const char *filename) {
+  std::string normalized = normalize(filename, false, false);
+
+  if (PHYSFS_exists(normalized.c_str()))
+    return normalized;
+
+  const char *resolved = desensitize(normalized.c_str());
+  if (resolved != normalized.c_str() && PHYSFS_exists(resolved))
+    return resolved;
+
+  return std::string();
+}
+
+std::string FileSystem::resolvePathOrParent(const char *filename) {
+  std::string resolved = resolvePath(filename);
+  if (!resolved.empty())
+    return resolved;
+
+  std::string normalized = normalize(filename, false, false);
+  std::string::size_type slash = normalized.find_last_of('/');
+  if (slash == std::string::npos)
+    return std::string();
+
+  std::string parent = normalized.substr(0, slash);
+  if (parent.empty() || parent == ".")
+    return std::string();
+
+  std::string resolvedParent = resolvePath(parent.c_str());
+  if (resolvedParent.empty())
+    return std::string();
+
+  std::string base = normalized.substr(slash + 1);
+  if (base.empty())
+    return resolvedParent;
+
+  if (!resolvedParent.empty() && resolvedParent.back() != '/')
+    resolvedParent += '/';
+  resolvedParent += base;
+  return resolvedParent;
+}
+
+std::string FileSystem::resolveFeaturePath(const char *filename) {
+  std::string feature = normalize(filename, false, false);
+  if (feature.empty())
+    return std::string();
+
+  std::string resolved = resolvePath(feature.c_str());
+  if (!resolved.empty())
+    return resolved;
+
+  if (findExt(feature.c_str()))
+    return std::string();
+
+  static const char *suffixes[] = {".rb", ".so"};
+  for (size_t i = 0; i < ARRAY_SIZE(suffixes); ++i) {
+    std::string candidate = feature + suffixes[i];
+    resolved = resolvePath(candidate.c_str());
+    if (!resolved.empty())
+      return resolved;
+  }
+
+  return std::string();
+}
+
 const char *FileSystem::desensitize(const char *filename) {
   std::string fn_lower(filename);
     
