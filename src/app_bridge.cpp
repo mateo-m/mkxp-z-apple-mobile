@@ -147,6 +147,10 @@ static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
 static std::mutex s_managedConfigMutex;
 static std::string s_managedConfigDir;
 
+// Per-game UserData directory Empo sets before each session.
+static std::mutex s_saveDirMutex;
+static std::string s_saveDir;
+
 // Game-side text-input intent. Set when the engine processes
 // REQUEST_TEXTMODE(1) (game called `Input.text_input = true`),
 // cleared on REQUEST_TEXTMODE(0). Distinct from
@@ -448,6 +452,16 @@ const char *mkxp_getManagedConfigDir(void) {
     /* Pointer is valid until s_managedConfigDir is reassigned;
      * callers should copy into std::string if they need to keep it. */
     return s_managedConfigDir.c_str();
+}
+
+void mkxp_setUserDataDirectory(const char *path) {
+    std::lock_guard<std::mutex> lock(s_saveDirMutex);
+    s_saveDir = (path && *path) ? std::string(path) : std::string();
+}
+
+const char *mkxp_getUserDataDirectory(void) {
+    std::lock_guard<std::mutex> lock(s_saveDirMutex);
+    return s_saveDir.c_str();
 }
 
 int mkxp_isTextInputActive(void) {

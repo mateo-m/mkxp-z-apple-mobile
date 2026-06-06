@@ -542,7 +542,12 @@ void Config::readGameINI() {
     if (dataPathApp.empty())
         dataPathApp = game.title;
     
-    customDataPath = mkxp_fs::normalizePath(prefPath(dataPathOrg.c_str(), dataPathApp.c_str()).c_str(), 0, 1);
+    const char *userDataDirOverride = mkxp_getUserDataDirectory();
+    if (userDataDirOverride && *userDataDirOverride) {
+        customDataPath = mkxp_fs::normalizePath(userDataDirOverride, 0, 1);
+    } else {
+        customDataPath = mkxp_fs::normalizePath(prefPath(dataPathOrg.c_str(), dataPathApp.c_str()).c_str(), 0, 1);
+    }
     
     if (rgssVersion == 0) {
         /* Try to guess RGSS version based on Data/Scripts extension */

@@ -581,6 +581,10 @@ RB_METHOD(mkxpDelta) {
     return rb_float_new(shState->runTime());
 }
 
+/* System.data_directory - per-game writable directory. On iOS Empo
+   points this at `Documents/Games/<id>/UserData/` so saves and any
+   companion app-data files are visible in the Files app and stay
+   inside the imported game container. */
 RB_METHOD(mkxpDataDirectory) {
     RB_UNUSED_PARAM;
     
@@ -711,6 +715,10 @@ RB_METHOD(mkxpUseInGameKeyboard) {
     return rb_bool_new(mkxp_getUseInGameKeyboard());
 }
 
+/* System.data_directory - per-game writable directory. On iOS Empo
+   points this at `Documents/Games/<id>/UserData/` so saves and
+   companion app-data files are visible in the Files app and stay
+   inside the imported game container. */
 /* MKXP.managed_config_dir - host-managed per-game state directory
    (Documents/EmpoState/<id>/ on iOS). Postload scripts use this
    to drop runtime-detection marker files that survive across

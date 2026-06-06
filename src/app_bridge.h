@@ -138,6 +138,18 @@ void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 void        mkxp_setManagedConfigDir(const char *path);
 const char *mkxp_getManagedConfigDir(void);
 
+// Per-game UserData directory (UI -> Engine).
+//
+// On iOS, Empo stores game writable payload in
+// `Documents/Games/<id>/UserData/` so saves and companion files are
+// visible in the Files app and travel with the rest of the imported
+// container. Games that use app-data helpers
+// (`System.data_directory`, `MKXP.data_directory`, fake APPDATA env)
+// and games that use relative RGSS save filenames are both routed
+// here by the engine + preload compatibility layer.
+void        mkxp_setUserDataDirectory(const char *path);
+const char *mkxp_getUserDataDirectory(void);
+
 // Text-input bridge (UI <-> Engine).
 //
 // Games request text input via `Input.text_input = true`, which calls

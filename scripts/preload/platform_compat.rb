@@ -265,6 +265,55 @@ unless defined?(MKXPCasefoldFS)
   end
 end
 
+unless defined?(MKXPSaveFS)
+  module MKXPSaveFS
+    module_function
+
+    def root
+      return nil unless defined?(System) && System.respond_to?(:data_directory)
+
+      dir = System.data_directory.to_s
+      return nil if dir.empty?
+
+      dir.gsub(%r{[\\/]+\z}, '')
+    rescue StandardError
+      nil
+    end
+
+    def candidate?(path)
+      return false unless path.is_a?(String)
+
+      stripped = path.strip
+      return false if stripped.empty?
+      return false if stripped.start_with?('/', '~')
+      return false if stripped =~ %r{\A[A-Za-z]:[\\/]}
+      return false if stripped.include?('/') || stripped.include?('\\')
+
+      lower = stripped.downcase
+      return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
+      return true if lower.end_with?('.rxdata', '.rvdata', '.rvdata2')
+      return true if lower.end_with?('.bak')
+
+      false
+    end
+
+    def path_for(path)
+      return path unless candidate?(path)
+
+      base = root
+      return path unless base
+
+      "#{base}/#{path}"
+    end
+
+    def glob_for(pattern)
+      return nil unless candidate?(pattern)
+
+      path_for(pattern)
+    end
+  end
+end
+
 # Pokemon Essentials' `pbResolveBitmap` relies on `pbTryString`, which probes a
 # candidate path and returns the ORIGINAL string on success. On Windows that is
 # fine because later opens are also case-insensitive; on iOS we need the real
@@ -391,11 +440,20 @@ begin
 rescue StandardError
   # Dir.tmpdir can raise on locked-down sandboxes; fall back to /tmp.
 end
-userdata = "#{tmp}/UserData"
+save_root = nil
+begin
+  if defined?(System) && System.respond_to?(:data_directory)
+    root = System.data_directory.to_s
+    save_root = root unless root.empty?
+  end
+rescue StandardError
+  save_root = nil
+end
+userdata = save_root || "#{tmp}/UserData"
 ENV['TEMP'] ||= tmp
 ENV['TMP']  ||= tmp
-ENV['APPDATA']              ||= "#{userdata}/AppData"
-ENV['LOCALAPPDATA']         ||= "#{userdata}/AppData"
+ENV['APPDATA']              ||= userdata
+ENV['LOCALAPPDATA']         ||= userdata
 ENV['ALLUSERSPROFILE']      ||= userdata
 ENV['USERPROFILE']          ||= userdata
 ENV['HOMEDRIVE']            ||= ''
@@ -415,7 +473,7 @@ ENV['PROCESSOR_ARCHITECTURE'] ||= 'x86'
 ENV['PROCESSOR_IDENTIFIER'] ||= 'Intel64 Family6'
 ENV['PROCESSOR_LEVEL']      ||= '6'
 ENV['PROCESSOR_REVISION']   ||= '2a07'
-ENV['AV_APPDATA']           ||= "#{userdata}/AppData"
+ENV['AV_APPDATA']           ||= userdata
 
 # --- Float bitwise-op monkey-patches ---
 # RGSS scripts occasionally do `x ^ 2` when they mean `x ** 2` (a
@@ -544,6 +602,77 @@ module MKXP
       Kernel.puts(*args)
     end
   end
+end
+
+# --- Save-path remap into per-game UserData/ ---
+class << File
+  alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
+  alias _mkxp_orig_delete delete unless method_defined?(:_mkxp_orig_delete)
+  alias _mkxp_orig_rename rename unless method_defined?(:_mkxp_orig_rename)
+
+  def open(path, *args, &block)
+    _mkxp_orig_open(MKXPSaveFS.path_for(path), *args, &block)
+  end
+
+  def delete(*paths)
+    _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.path_for(path) })
+  end
+
+  def rename(from, to)
+    _mkxp_orig_rename(MKXPSaveFS.path_for(from), MKXPSaveFS.path_for(to))
+  end
+end
+
+module FileTest
+  class << self
+    alias _mkxp_orig_exist exist? unless method_defined?(:_mkxp_orig_exist)
+    alias _mkxp_orig_file file? unless method_defined?(:_mkxp_orig_file)
+    alias _mkxp_orig_directory directory? unless method_defined?(:_mkxp_orig_directory)
+
+    def exist?(path)
+      _mkxp_orig_exist(MKXPSaveFS.path_for(path))
+    end
+
+    def file?(path)
+      _mkxp_orig_file(MKXPSaveFS.path_for(path))
+    end
+
+    def directory?(path)
+      _mkxp_orig_directory(MKXPSaveFS.path_for(path))
+    end
+  end
+end
+
+class << Dir
+  alias _mkxp_orig_glob glob unless method_defined?(:_mkxp_orig_glob)
+
+  def glob(pattern, *args, &block)
+    remapped = MKXPSaveFS.glob_for(pattern)
+    result = _mkxp_orig_glob(remapped || pattern, *args, &block)
+    return result unless remapped && result.respond_to?(:map)
+
+    prefix = MKXPSaveFS.root
+    return result unless prefix
+
+    normalized_prefix = "#{prefix}/"
+    result.map do |entry|
+      entry.start_with?(normalized_prefix) ? entry.delete_prefix(normalized_prefix) : entry
+    end
+  end
+end
+
+module Kernel
+  alias _mkxp_orig_load_data load_data unless method_defined?(:_mkxp_orig_load_data)
+  alias _mkxp_orig_save_data save_data unless method_defined?(:_mkxp_orig_save_data)
+
+  def load_data(path, *args)
+    _mkxp_orig_load_data(MKXPSaveFS.path_for(path), *args)
+  end
+
+  def save_data(obj, path, *args)
+    _mkxp_orig_save_data(obj, MKXPSaveFS.path_for(path), *args)
+  end
+  module_function :load_data, :save_data
 end
 
 # --- Win32 library null-stub via const_missing ---
