@@ -175,13 +175,34 @@ unless defined?(MKXPCasefoldFS)
 
     module_function
 
+    def exists?(path)
+      File.exist?(path)
+    rescue StandardError
+      false
+    end
+
+    def desensitize(path)
+      return nil unless path.is_a?(String)
+
+      if defined?(System) && System.respond_to?(:desensitize)
+        return System.desensitize(path)
+      end
+      return MKXP.desensitize(path) if defined?(MKXP) && MKXP.respond_to?(:desensitize)
+
+      nil
+    rescue StandardError
+      nil
+    end
+
     def resolve(path)
       return nil unless path.is_a?(String)
 
-      resolved = MKXP.desensitize(path)
-      return nil if resolved.nil? || resolved == path
+      resolved = desensitize(path)
+      return nil if resolved.nil? || resolved.empty?
+      return resolved if resolved != path
+      return resolved if exists?(resolved)
 
-      resolved
+      nil
     rescue StandardError
       nil
     end
@@ -601,6 +622,10 @@ module MKXP
     else
       Kernel.puts(*args)
     end
+  end
+
+  def self.desensitize(path)
+    System.desensitize(path) if defined?(System)
   end
 end
 
