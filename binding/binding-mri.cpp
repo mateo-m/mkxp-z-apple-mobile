@@ -1862,9 +1862,50 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
 }
 
+// Best-effort human-readable detail for a Ruby exception. Pokemon
+// Essentials' EventScriptError stores its formatted script error in
+// @event_message and passes nil to Exception#initialize, so .message
+// is always empty even though the real text exists.
+static VALUE exceptionDetailMessage(VALUE exc) {
+    VALUE em = rb_iv_get(exc, "@event_message");
+    if (!NIL_P(em) && RB_TYPE_P(em, T_STRING) && RSTRING_LEN(em) > 0)
+        return em;
+
+    if (rb_respond_to(exc, rb_intern("event_message"))) {
+        em = rb_funcall(exc, rb_intern("event_message"), 0);
+        if (!NIL_P(em) && RB_TYPE_P(em, T_STRING) && RSTRING_LEN(em) > 0)
+            return em;
+    }
+
+    {
+        int state = 0;
+        rb_gv_set("$__mkxp_exc", exc);
+        VALUE detail = rb_eval_string_protect(
+            "begin; defined?(pbGetExceptionMessage) ? pbGetExceptionMessage($__mkxp_exc) : nil; "
+            "ensure; $__mkxp_exc = nil; end",
+            &state);
+        if (!state && !NIL_P(detail) && RB_TYPE_P(detail, T_STRING) &&
+            RSTRING_LEN(detail) > 0)
+            return detail;
+        if (state)
+            rb_set_errinfo(Qnil);
+    }
+
+    if (rb_respond_to(exc, rb_intern("full_message"))) {
+        VALUE fm = rb_funcall(exc, rb_intern("full_message"), 1, Qtrue);
+        if (!NIL_P(fm) && RB_TYPE_P(fm, T_STRING) && RSTRING_LEN(fm) > 0)
+            return fm;
+    }
+
+    VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
+    if (!NIL_P(msg) && RB_TYPE_P(msg, T_STRING) && RSTRING_LEN(msg) > 0)
+        return msg;
+    return rb_funcall(exc, rb_intern("to_s"), 0);
+}
+
 static void showExc(VALUE exc, const BacktraceData &btData) {
     VALUE bt = rb_funcall2(exc, rb_intern("backtrace"), 0, NULL);
-    VALUE msg = rb_funcall2(exc, rb_intern("message"), 0, NULL);
+    VALUE msg = exceptionDetailMessage(exc);
     VALUE bt0 = rb_ary_entry(bt, 0);
     VALUE name = rb_class_path(rb_obj_class(exc));
     
@@ -1926,9 +1967,10 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
     file.resize(strlen(file.c_str()));
     file = btData.scriptNames.value(file, file);
     
-    std::string ms(640, '\0');
-    snprintf(&ms[0], ms.size(), "Script '%s' line %s: %s occurred.\n\n%s",
-             file.c_str(), line, RSTRING_PTR(name), RSTRING_PTR(msg));
+    const char *msgStr = StringValueCStr(msg);
+    const char *nameStr = StringValueCStr(name);
+    std::string ms = std::string("Script '") + file + "' line " + line + ": " +
+                     nameStr + " occurred.\n\n" + (msgStr ? msgStr : "");
     
     logRubyError("FATAL", ms.c_str());
     showMsg(ms);

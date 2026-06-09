@@ -222,11 +222,23 @@ void EventThread::process(RGSSThreadData &rtData)
     
     while (true)
     {
+#if TARGET_OS_IPHONE
+        /* Timed waits keep the main run loop spinning so SwiftUI
+         * alerts stay tappable while the engine session is alive. */
+        const int waitRc = SDL_WaitEventTimeout(&event, 16);
+        if (waitRc == 0)
+            continue;
+        if (waitRc < 0) {
+            Debug() << "EventThread: Event error";
+            break;
+        }
+#else
         if (!SDL_WaitEvent(&event))
         {
             Debug() << "EventThread: Event error";
             break;
         }
+#endif
         
         /* Preselect and discard unwanted events here */
         switch (event.type)
@@ -783,24 +795,26 @@ void EventThread::requestSettingsMenu()
 void EventThread::showMessageBox(const char *body, int flags)
 {
     msgBoxDone.clear();
-    
+
     // mkxp has already been asked to quit.
     // Don't break things if the window wants to close
     if (shState->rtData().rqTerm)
         return;
-    
+
     SDL_Event event;
     event.user.code = flags;
     event.user.data1 = strdup(body);
     event.type = usrIdStart + REQUEST_MESSAGEBOX;
     SDL_PushEvent(&event);
-    
+
+#if !TARGET_OS_IPHONE
     /* Keep repainting screen while box is open */
-    try{
+    try {
         shState->graphics().repaintWait(msgBoxDone);
-    }catch(...){}
+    } catch (...) {}
     /* Prevent endless loops */
     resetInputStates();
+#endif
 }
 
 bool EventThread::getFullscreen() const

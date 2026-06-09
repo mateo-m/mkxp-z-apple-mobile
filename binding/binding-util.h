@@ -109,6 +109,7 @@
 #  define rb_utf8_str_new_cstr      rb_str_new2
 #  define rb_utf8_str_new           rb_str_new
 #  define rb_ary_new_capa           rb_ary_new2
+#  define rb_errinfo()              rb_gv_get("$!")
 #  define rb_set_errinfo(v)         rb_gv_set("$!", (v))
 #  ifndef RB_INTEGER_TYPE_P
 #    define RB_INTEGER_TYPE_P(v)    (FIXNUM_P(v) || (TYPE(v) == T_BIGNUM))
