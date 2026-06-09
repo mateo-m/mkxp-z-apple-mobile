@@ -40,7 +40,12 @@
 
 static void mkxp_define_alias_once(VALUE klass, const char *aliasName,
                                    const char *origName) {
-    if (rb_method_boundp(klass, rb_intern(aliasName), /*ex=*/0)) return;
+    ID aliasId = rb_intern(aliasName);
+    ID origId = rb_intern(origName);
+    if (rb_method_boundp(klass, aliasId, /*ex=*/0)) return;
+    // Ruby 1.8 has File.exist? but no Dir.exist? (added in 1.9).
+    // Skip aliasing when the VM never shipped the original method.
+    if (!rb_method_boundp(klass, origId, /*ex=*/0)) return;
     rb_define_alias(klass, aliasName, origName);
 }
 
@@ -254,12 +259,20 @@ static VALUE callSingletonAlias(VALUE recv, const char *aliasName,
                        const_cast<VALUE *>(argv));
 }
 
+static bool mkxp_try_singleton_alias(VALUE recv, const char *aliasName,
+                                   int argc, const VALUE *argv) {
+    VALUE sc = rb_singleton_class(recv);
+    if (!rb_method_boundp(sc, rb_intern(aliasName), /*ex=*/0))
+        return false;
+    return RTEST(callSingletonAlias(recv, aliasName, argc, argv));
+}
+
 RB_METHOD_GUARD(fileExist) {
     VALUE filename;
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_exist?", 1, &filename)))
+    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_exist?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().exists(RSTRING_PTR(filename)))
@@ -274,7 +287,7 @@ RB_METHOD_GUARD(fileDirectory) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_directory?", 1, &filename)))
+    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_directory?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
@@ -289,7 +302,7 @@ RB_METHOD_GUARD(fileFile) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (RTEST(callSingletonAlias(rb_cFile, "_mkxp_native_orig_file?", 1, &filename)))
+    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_file?", 1, &filename))
         return Qtrue;
 
     std::string resolved = shState->fileSystem().resolvePath(RSTRING_PTR(filename));
@@ -305,7 +318,7 @@ RB_METHOD_GUARD(dirExist) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (RTEST(callSingletonAlias(rb_cDir, "_mkxp_native_orig_exist?", 1, &filename)))
+    if (mkxp_try_singleton_alias(rb_cDir, "_mkxp_native_orig_exist?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
