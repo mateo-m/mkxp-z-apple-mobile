@@ -223,6 +223,12 @@ float       mkxp_getScreenScale(void);
 // groups the fields the host sets together on every launch. Individual
 // setters remain for mid-session toggles and legacy call sites.
 
+typedef enum {
+    MKXP_VALIGN_TOP        = 0,
+    MKXP_VALIGN_TOP_CENTER = 1,
+    MKXP_VALIGN_CENTER     = 2,
+} MKXPVerticalAlignment;
+
 typedef struct {
     const char *managedConfigDir;
     const char *userDataDirectory;
@@ -239,12 +245,6 @@ void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
 //   1. Add a field to MKXPSessionConfig
 //   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
 //   3. Wire GameSession.configureEngine() on the Swift side
-
-typedef enum {
-    MKXP_VALIGN_TOP        = 0,
-    MKXP_VALIGN_TOP_CENTER = 1,
-    MKXP_VALIGN_CENTER     = 2,
-} MKXPVerticalAlignment;
 
 void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
                                       bool postloadEnabled);
