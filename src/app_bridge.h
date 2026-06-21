@@ -229,23 +229,6 @@ typedef enum {
     MKXP_VALIGN_CENTER     = 2,
 } MKXPVerticalAlignment;
 
-typedef struct {
-    const char *managedConfigDir;
-    const char *userDataDirectory;
-    MKXPRubyVersion rubyVersion;
-    MKXPSyntaxTransformMode syntaxTransformMode;
-    MKXPVerticalAlignment verticalAlignment;
-    bool postloadEnabled;
-    bool useInGameKeyboard;
-} MKXPSessionConfig;
-
-void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
-
-// Adding a new per-boot setting:
-//   1. Add a field to MKXPSessionConfig
-//   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
-//   3. Wire GameSession.configureEngine() on the Swift side
-
 void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
                                       bool postloadEnabled);
 
@@ -300,6 +283,23 @@ typedef enum {
 
 void             mkxp_setActiveRubyVersion(MKXPRubyVersion version);
 MKXPRubyVersion  mkxp_getActiveRubyVersion(void);
+
+typedef struct {
+    const char *managedConfigDir;
+    const char *userDataDirectory;
+    MKXPRubyVersion rubyVersion;
+    MKXPSyntaxTransformMode syntaxTransformMode;
+    MKXPVerticalAlignment verticalAlignment;
+    bool postloadEnabled;
+    bool useInGameKeyboard;
+} MKXPSessionConfig;
+
+void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
+
+// Adding a new per-boot setting:
+//   1. Add a field to MKXPSessionConfig
+//   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
+//   3. Wire GameSession.configureEngine() on the Swift side
 
 // Force the Pokemon Essentials in-game keyboard scene, overriding
 // the iOS soft keyboard. Default false (soft keyboard). Flip on for
