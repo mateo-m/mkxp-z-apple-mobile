@@ -9,11 +9,13 @@
 
 #include "config.h"
 #include "sharedstate.h"
+#include "eventthread.h"
 #include "app_bridge.h"
 #include "binding-util.h"
 
 #include "util/debugwriter.h"
 #include "util/sdl-util.h"
+#include "util/util.h"
 #include "filesystem/filesystem.h"
 
 #include <string>
@@ -28,6 +30,12 @@ extern bool evalScript(VALUE string, const char *filename);
 namespace mkxp {
 namespace ScriptBootstrap {
 
+static VALUE g_topSelf = Qnil;
+
+void setEvalReceiver(void *self) {
+    g_topSelf = (VALUE)self;
+}
+
 struct EvalArg {
     VALUE string;
     VALUE filename;
@@ -35,13 +43,12 @@ struct EvalArg {
 
 static VALUE evalHelper(EvalArg *arg) {
     VALUE argv[] = {arg->string, Qnil, arg->filename};
-    return rb_funcall2(topSelf, rb_intern("eval"), ARRAY_SIZE(argv), argv);
+    return rb_funcall2(g_topSelf, rb_intern("eval"), ARRAY_SIZE(argv), argv);
 }
 
-bool evalRubyString(void *string, void *filename, int *state) {
+void evalRubyString(void *string, void *filename, int *state) {
     EvalArg arg = {(VALUE)string, (VALUE)filename};
     rb_protect((VALUE(*)(VALUE))evalHelper, (VALUE)&arg, state);
-    return state == nullptr || *state == 0;
 }
 
 static void runBundledScript(const char *subdir, const char *name, const char *logTag) {

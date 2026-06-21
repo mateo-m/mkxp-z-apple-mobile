@@ -1857,6 +1857,7 @@ static void mriBindingExecute() {
 
     topSelf = rgssVer == 1 ? Qnil : rb_eval_string("self");
     rb_gc_register_address(&topSelf);
+    mkxp::ScriptBootstrap::setEvalReceiver((void *)topSelf);
 
     /* RbData must be live before mriBindingInit: inputBindingInit on
      * RGSS3 writes getRbData()->buttoncodeHash. */

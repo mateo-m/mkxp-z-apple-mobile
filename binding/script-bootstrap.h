@@ -13,7 +13,10 @@ struct Config;
 namespace mkxp {
 namespace ScriptBootstrap {
 
-bool evalRubyString(void *string, void *filename, int *state);
+void evalRubyString(void *string, void *filename, int *state);
+
+/** Called from binding-mri after topSelf is initialized. */
+void setEvalReceiver(void *self);
 
 void loadEnginePreloads();
 void loadConfigPreloadScripts(const Config &conf);
