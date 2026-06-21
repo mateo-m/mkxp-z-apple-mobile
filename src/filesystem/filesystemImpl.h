@@ -22,6 +22,10 @@ std::string getCurrentDirectory();
     
 std::string normalizePath(const char *path, bool preferred, bool absolute);
 
+/* Collapse ./ and ../ in a game-relative path. Returns "." when the
+ * path denotes the current directory (e.g. ".", "./", "foo/.."). */
+std::string collapseRelativePath(const char *path);
+
 std::string getDefaultGameRoot();
 
 std::string getPathForAsset(const char *baseName, const char *ext);

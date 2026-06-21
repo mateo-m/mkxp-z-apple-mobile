@@ -722,9 +722,81 @@ void FileSystem::openReadRaw(SDL_RWops &ops, const char *filename,
     return;
 }
 
+namespace {
+
+bool isAbsolutePath(const char *path) {
+  if (!path || !path[0])
+    return false;
+  if (path[0] == '/')
+    return true;
+  return path[1] == ':';
+}
+
+} // namespace
+
+namespace filesystemImpl {
+
+std::string collapseRelativePath(const char *path) {
+  if (!path || !path[0])
+    return std::string();
+
+  std::string normalized;
+  normalized.reserve(strlen(path));
+  for (const char *p = path; *p; ++p)
+    normalized += (*p == '\\') ? '/' : *p;
+
+  std::vector<std::string> stack;
+  size_t i = 0;
+  const size_t n = normalized.size();
+  while (i < n) {
+    while (i < n && normalized[i] == '/')
+      ++i;
+    if (i >= n)
+      break;
+
+    size_t j = i;
+    while (j < n && normalized[j] != '/')
+      ++j;
+
+    const std::string part = normalized.substr(i, j - i);
+    i = j;
+
+    if (part == ".")
+      continue;
+
+    if (part == "..") {
+      if (!stack.empty() && stack.back() != "..")
+        stack.pop_back();
+      else
+        stack.push_back(part);
+      continue;
+    }
+
+    stack.push_back(part);
+  }
+
+  if (stack.empty())
+    return ".";
+
+  std::string result = stack.front();
+  for (size_t k = 1; k < stack.size(); ++k) {
+    result += '/';
+    result += stack[k];
+  }
+  return result;
+}
+
+} // namespace filesystemImpl
+
 std::string FileSystem::normalize(const char *pathname, bool preferred,
                             bool absolute) {
-    return filesystemImpl::normalizePath(pathname, preferred, absolute);
+  if (!pathname || !pathname[0])
+    return std::string();
+
+  if (!absolute && !isAbsolutePath(pathname))
+    return filesystemImpl::collapseRelativePath(pathname);
+
+  return filesystemImpl::normalizePath(pathname, preferred, absolute);
 }
 
 bool FileSystem::exists(const char *filename) {
