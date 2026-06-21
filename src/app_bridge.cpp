@@ -654,6 +654,18 @@ void mkxp_signalFrameRendered(void) {
 
 // Per-game settings
 
+void mkxp_applySessionConfig(const MKXPSessionConfig *config) {
+    if (!config) return;
+    if (config->managedConfigDir)
+        mkxp_setManagedConfigDir(config->managedConfigDir);
+    if (config->userDataDirectory)
+        mkxp_setUserDataDirectory(config->userDataDirectory);
+    mkxp_setActiveRubyVersion(config->rubyVersion);
+    mkxp_setSyntaxTransformMode(config->syntaxTransformMode);
+    mkxp_applyPerGameSettings(config->verticalAlignment, config->postloadEnabled);
+    mkxp_setUseInGameKeyboard(config->useInGameKeyboard);
+}
+
 void mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
                                bool postloadEnabled) {
     int oldAlign = s_verticalAlignment.exchange((int)verticalAlignment, std::memory_order_relaxed);

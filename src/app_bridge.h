@@ -219,11 +219,26 @@ float       mkxp_getScreenScale(void);
 // Per-game settings (UI -> Engine), set by selectGame() before
 // engine boot and read by the engine during the run.
 //
-// Adding a new setting:
-//   1. Add a parameter to mkxp_applyPerGameSettings()
-//   2. Add an atomic + getter in app_bridge.cpp
-//   3. Add the field to GameSettings.swift and wire it through
-//      AppState.selectGame()
+// Prefer `mkxp_applySessionConfig()` for pre-boot settings; it
+// groups the fields the host sets together on every launch. Individual
+// setters remain for mid-session toggles and legacy call sites.
+
+typedef struct {
+    const char *managedConfigDir;
+    const char *userDataDirectory;
+    MKXPRubyVersion rubyVersion;
+    MKXPSyntaxTransformMode syntaxTransformMode;
+    MKXPVerticalAlignment verticalAlignment;
+    bool postloadEnabled;
+    bool useInGameKeyboard;
+} MKXPSessionConfig;
+
+void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
+
+// Adding a new per-boot setting:
+//   1. Add a field to MKXPSessionConfig
+//   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
+//   3. Wire GameSession.configureEngine() on the Swift side
 
 typedef enum {
     MKXP_VALIGN_TOP        = 0,
