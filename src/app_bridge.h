@@ -326,6 +326,20 @@ void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);
 
 void        mkxp_setErrorMessage(const char *message);
 
+/* Present an error in the host UI and block the calling thread until
+ * the user dismisses the alert. iOS only; no-op elsewhere. */
+void        mkxp_presentErrorAndWait(const char *message);
+
+/* Called by the host UI when the user dismisses an error alert that
+ * may be blocking an engine thread in mkxp_presentErrorAndWait(). */
+void        mkxp_signalErrorDismissed(void);
+
+/* Report a fatal error to the host UI, debug log, and termination
+ * path. Safe from any thread once the bridge is live. */
+void        mkxp_reportFatalError(const char *message);
+
+void        mkxp_installFatalErrorHandlers(void);
+
 typedef void (*mkxp_ErrorMessageCallback)(const char *message, void *userdata);
 void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata);
 

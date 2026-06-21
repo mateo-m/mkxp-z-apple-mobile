@@ -36,6 +36,7 @@
 #include <climits>
 
 #include "app_bridge.h"
+#include "ios_fatal_report.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <EGL/egl.h>
 #include <SDL_syswm.h>
@@ -176,7 +177,38 @@ void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
  * `ruby_cleanup`, so even if the persistent-thread architecture
  * worked we couldn't ruby_init twice in one process. Single-shot
  * matches what actually happens at runtime. */
-int rgssThreadFun(void *userdata) {
+static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
+static void rgssThreadShutdown(RGSSThreadData *threadData);
+
+extern "C" void mkxp_noteRgssThreadFailure(void *userdata, const char *message) {
+  if (!userdata)
+    return;
+  const char *detail =
+      message ? message : "An unexpected error occurred.";
+#if TARGET_OS_IPHONE
+  mkxp_presentErrorAndWait(detail);
+#endif
+  rgssThreadError(static_cast<RGSSThreadData *>(userdata), detail);
+}
+
+extern "C" void mkxp_rgssThreadShutdownAfterFailure(void *userdata) {
+  if (!userdata)
+    return;
+  rgssThreadShutdown(static_cast<RGSSThreadData *>(userdata));
+}
+
+static void rgssThreadShutdown(RGSSThreadData *threadData) {
+  ALCcontext *alcCtx = threadData->alcCtx;
+  if (SharedState::instance) {
+    shState->graphics().detachAllDisposables();
+    alcMakeContextCurrent(alcCtx);
+    SharedState::finiInstance();
+  }
+  mkxpGL_MakeCurrent(threadData->window, NULL);
+  alcMakeContextCurrent(NULL);
+}
+
+static int rgssThreadFunImpl(void *userdata) {
   RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
 
   mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
@@ -190,12 +222,7 @@ int rgssThreadFun(void *userdata) {
   ALCcontext *alcCtx = threadData->alcCtx;
   alcMakeContextCurrent(alcCtx);
 
-  try {
-    SharedState::initInstance(threadData);
-  } catch (const Exception &exc) {
-    rgssThreadError(threadData, exc.msg);
-    return 0;
-  }
+  SharedState::initInstance(threadData);
 
   mkxp_setGameReady();
 
@@ -227,24 +254,20 @@ int rgssThreadFun(void *userdata) {
    * exported by their merged .o files. */
   getActiveScriptBinding()->execute();
 
-  /* Detach disposables before destroying SharedState. */
-  shState->graphics().detachAllDisposables();
+  rgssThreadShutdown(threadData);
 
   threadData->rqTermAck.set();
   threadData->ethread->requestTerminate();
 
-  /* Ensure the OpenAL context is current before tearing down Audio.
-   * mkxp_checkPause() never nulls the context, so this is a no-op
-   * in normal operation; kept as a safety net. */
-  alcMakeContextCurrent(alcCtx);
-
-  SharedState::finiInstance();
-
-  /* Release contexts so the main thread can safely tear down. */
-  mkxpGL_MakeCurrent(threadData->window, NULL);
-  alcMakeContextCurrent(NULL);
-
   return 0;
+}
+
+int rgssThreadFun(void *userdata) {
+#if TARGET_OS_IPHONE
+  return mkxp_guardedRgssThreadMain(userdata, rgssThreadFunImpl);
+#else
+  return rgssThreadFunImpl(userdata);
+#endif
 }
 
 static void printRgssVersion(int ver) {
@@ -318,13 +341,20 @@ static void initSyntaxTransform(Config &conf) {
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
   rtData->rgssErrorMsg = msg;
+#if !TARGET_OS_IPHONE
+  mkxp_setErrorMessage(msg.c_str());
+#endif
   rtData->ethread->requestTerminate();
   rtData->rqTermAck.set();
 }
 
 static void showInitError(const std::string &msg) {
   Debug() << msg;
+#if TARGET_OS_IPHONE
+  mkxp_reportFatalError(msg.c_str());
+#else
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "mkxp-z", msg.c_str(), 0);
+#endif
 }
 
 // Initialize SDL and its subsidiary libs in the order they depend on
@@ -481,6 +511,9 @@ private:
 };
 
 bool EngineHost::init(int argc, char *argv[]) {
+#if TARGET_OS_IPHONE
+  mkxp_installFatalErrorHandlers();
+#endif
   /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
    * creates a window that would cover the Library UI, so we wait
    * for the user to pick a game first. */
@@ -595,7 +628,9 @@ void EngineHost::runSession(int argc, char *argv[]) {
 
   if (!rtData.rgssErrorMsg.empty()) {
     Debug() << rtData.rgssErrorMsg;
+#if !TARGET_OS_IPHONE
     mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
+#endif
   }
 
   if (rgssThread_) {
@@ -642,12 +677,21 @@ int main(int argc, char *argv[]) {
     return 0;
   } catch (const Exception &exc) {
     Debug() << "FATAL uncaught Exception:" << exc.msg;
+#if TARGET_OS_IPHONE
+    mkxp_reportFatalError(exc.msg.c_str());
+#endif
     return 1;
   } catch (const std::exception &e) {
     Debug() << "FATAL uncaught std::exception:" << e.what();
+#if TARGET_OS_IPHONE
+    mkxp_reportFatalError(e.what());
+#endif
     return 1;
   } catch (...) {
     Debug() << "FATAL unknown exception caught";
+#if TARGET_OS_IPHONE
+    mkxp_reportFatalError("An unexpected engine error occurred.");
+#endif
     return 1;
   }
 }

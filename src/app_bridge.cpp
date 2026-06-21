@@ -170,6 +170,13 @@ static std::mutex s_errorMsgMutex;
 static std::string s_errorMessage;
 static BridgeCallback<mkxp_ErrorMessageCallback> s_errorMsgCb;
 
+#if TARGET_OS_IPHONE
+static std::mutex s_errorDismissMutex;
+static std::condition_variable s_errorDismissCV;
+static std::atomic<bool> s_errorDismissed{false};
+static std::atomic<bool> s_errorAwaitingDismiss{false};
+#endif
+
 // Pause / Resume state.
 static std::atomic<bool> s_pauseRequested{false};
 static std::atomic<bool> s_paused{false};
@@ -545,8 +552,58 @@ void mkxp_setErrorMessage(const char *message) {
     }
 }
 
+#if TARGET_OS_IPHONE
+void mkxp_presentErrorAndWait(const char *message) {
+    if (!message || !message[0])
+        return;
+
+    s_errorDismissed.store(false, std::memory_order_release);
+    s_errorAwaitingDismiss.store(true, std::memory_order_release);
+    mkxp_setErrorMessage(message);
+
+    std::unique_lock<std::mutex> lock(s_errorDismissMutex);
+    s_errorDismissCV.wait(lock, [] {
+        return s_errorDismissed.load(std::memory_order_acquire);
+    });
+    s_errorAwaitingDismiss.store(false, std::memory_order_release);
+}
+
+void mkxp_signalErrorDismissed(void) {
+    if (!s_errorAwaitingDismiss.load(std::memory_order_acquire))
+        return;
+    s_errorDismissed.store(true, std::memory_order_release);
+    s_errorDismissCV.notify_all();
+}
+#else
+void mkxp_presentErrorAndWait(const char *message) {
+    mkxp_setErrorMessage(message);
+}
+
+void mkxp_signalErrorDismissed(void) {}
+#endif
+
+void mkxp_reportFatalError(const char *message) {
+    const char *detail =
+        (message && message[0]) ? message : "An unexpected error occurred.";
+    mkxp_debugLog("FATAL", "app_bridge.cpp", detail);
+#if TARGET_OS_IPHONE
+    mkxp_presentErrorAndWait(detail);
+#else
+    mkxp_setErrorMessage(detail);
+#endif
+    mkxp_requestTerminate();
+}
+
 void mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata) {
     s_errorMsgCb.set(cb, userdata);
+    std::string pending;
+    {
+        std::lock_guard<std::mutex> lock(s_errorMsgMutex);
+        pending = s_errorMessage;
+    }
+    if (!pending.empty()) {
+        s_errorMsgCb.fire(pending.c_str());
+    }
 }
 
 // Pause / Resume

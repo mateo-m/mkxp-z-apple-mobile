@@ -882,6 +882,8 @@ struct GraphicsPrivate {
         threadData->ethread->notifyFrame();
 
         if (mkxp_isGLContextBroken()) {
+            mkxp_setErrorMessage(
+                "The graphics context crashed. Close Empo from the app switcher and reopen it.");
             shutdown();
             return;
         }
@@ -1175,6 +1177,8 @@ double Graphics::lastUpdate() {
 
 void Graphics::update(bool checkForShutdown) {
     if (mkxp_isGLContextBroken()) {
+        mkxp_setErrorMessage(
+            "The graphics context crashed. Close Empo from the app switcher and reopen it.");
         shState->checkShutdown();
         return;
     }

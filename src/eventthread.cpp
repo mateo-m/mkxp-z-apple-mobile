@@ -801,13 +801,20 @@ void EventThread::showMessageBox(const char *body, int flags)
     if (shState->rtData().rqTerm)
         return;
 
+#if TARGET_OS_IPHONE
+    /* Block until the user dismisses the host alert. Without this,
+     * the RGSS thread tears down GL/Ruby while SwiftUI is still
+     * presenting the error and the process crashes on device. */
+    if (body && body[0])
+        mkxp_presentErrorAndWait(body);
+    return;
+#else
     SDL_Event event;
     event.user.code = flags;
     event.user.data1 = strdup(body);
     event.type = usrIdStart + REQUEST_MESSAGEBOX;
     SDL_PushEvent(&event);
 
-#if !TARGET_OS_IPHONE
     /* Keep repainting screen while box is open */
     try {
         shState->graphics().repaintWait(msgBoxDone);
