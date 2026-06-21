@@ -52,6 +52,7 @@
 
 #include "app_bridge.h"
 #include "util/rapidcsv.h"
+#include "script-bootstrap.h"
 
 extern "C" {
 #include <ruby.h>
@@ -1228,8 +1229,8 @@ static VALUE evalHelper(evalArg *arg) {
 }
 
 static VALUE evalString(VALUE string, VALUE filename, int *state) {
-    evalArg arg = {string, filename};
-    return rb_protect((VALUE(*)(VALUE))evalHelper, (VALUE)&arg, state);
+    mkxp::ScriptBootstrap::evalRubyString((void *)string, (void *)filename, state);
+    return Qnil;
 }
 
 static void runCustomScript(const std::string &filename) {
@@ -1489,89 +1490,8 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
     
     
-    /* Execute engine-bundled preload scripts (platform compatibility layer) */
-    {
-        const char *enginePreloads[] = {
-            "platform_compat",
-            "pokemon_compat",
-            "win32_wrap",
-            // Encoding-aware methods that override win32_wrap stubs.
-            // Uses Encoding::*, force_encoding, unpack1; all Ruby
-            // 1.9+ APIs. Ruby 1.8's parser refuses to compile the
-            // file. Multi-Ruby (mkxp18-merged) compiles binding-mri
-            // against Ruby 1.8 headers which makes RUBY_API_VERSION_*
-            // resolve to 1.8 here, so the encoding addon is skipped
-            // on the 1.8 path. RGSS1/RGSS2 games run with the
-            // ASCII-only Win32API stubs from win32_wrap.rb; they
-            // mostly only exercise window-size / fullscreen probes
-            // which work fine without UTF-16 conversion.
-#if RUBY_API_VERSION_MAJOR > 1 || \
-    (RUBY_API_VERSION_MAJOR == 1 && RUBY_API_VERSION_MINOR >= 9)
-            "win32_wrap_encoding",
-#endif
-            "mkxp_wrap",
-            "http_compat",
-            nullptr
-        };
-        
-        for (int p = 0; enginePreloads[p]; ++p) {
-            mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
-                          (std::string("loading ") + enginePreloads[p]).c_str());
-            try {
-                std::string script = mkxp_fs::contentsOfAssetAsString(
-                    (std::string("Preload/") + enginePreloads[p]).c_str(), "rb");
-                if (script.empty()) {
-                    mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
-                                  (std::string("EMPTY content for ") + enginePreloads[p]).c_str());
-                    continue;
-                }
-                mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
-                              (std::string(enginePreloads[p]) + " loaded "
-                               + std::to_string(script.size()) + " bytes").c_str());
-                VALUE scriptStr = rb_utf8_str_new_cstr(script.c_str());
-                VALUE fname = rb_utf8_str_new_cstr(enginePreloads[p]);
-                int state;
-                evalString(scriptStr, fname, &state);
-                if (state) {
-#if RAPI_FULL > 187
-                    VALUE exc = rb_errinfo();
-#else
-                    VALUE exc = rb_gv_get("$!");
-#endif
-                    if (exc != Qnil) {
-                        VALUE excClass = rb_class_name(rb_class_of(exc));
-                        VALUE excMsg = rb_funcall(exc, rb_intern("message"), 0);
-                        std::string detail = std::string("FAILED ") + enginePreloads[p]
-                                           + ": " + StringValueCStr(excClass)
-                                           + ": " + StringValueCStr(excMsg);
-                        mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]", detail.c_str());
-                        Debug() << "Error in engine preload" << enginePreloads[p];
-#if RAPI_FULL > 187
-                        rb_set_errinfo(Qnil);
-#else
-                        rb_set_errinfo(Qnil);
-#endif
-                    }
-                } else {
-                    mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
-                                  (std::string("OK ") + enginePreloads[p]).c_str());
-                }
-            } catch (...) {
-                mkxp_debugLog("PRELOAD", "binding-mri.cpp [C++]",
-                              (std::string("CXX EXC ") + enginePreloads[p]).c_str());
-                Debug() << "Failed to load engine preload:" << enginePreloads[p];
-            }
-        }
-    }
-    
-    /* Execute preloaded scripts */
-    for (std::vector<std::string>::const_iterator i = conf.preloadScripts.begin();
-         i != conf.preloadScripts.end(); ++i)
-    {
-        if (shState->rtData().rqTerm)
-            break;
-        runCustomScript(*i);
-    }
+    mkxp::ScriptBootstrap::loadEnginePreloads();
+    mkxp::ScriptBootstrap::loadConfigPreloadScripts(conf);
     
     VALUE exc = rb_gv_get("$!");
     if (exc != Qnil)
@@ -1582,151 +1502,9 @@ static void runRMXPScripts(BacktraceData &btData) {
             if (shState->rtData().rqTerm)
                 break;
             
-            /* Run postload scripts right before the last game script (Main).
-               At this point all game classes/modules are defined, so scripts
-               like pokeinput.rb can check $PokemonSystem and override Input
-               methods that were replaced by the game. */
-            if (i == scriptCount - 1 && mkxp_getPostloadEnabled()) {
-                const char *enginePostloads[] = {
-                    "rgss_plugin_stubs",
-                    "pokemon_input",
-                    "pokemon_online_stubs",
-                    "pokemon_tilemap_fix",
-                    "pokemon_graphics_compat",
-                    "nilclass_safe_stubs",
-                    "pokemon_windowskin_fix",
-                    "hmode7_shim",
-                    nullptr
-                };
-                
-                for (int p = 0; enginePostloads[p]; ++p) {
-                    mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
-                                  (std::string("loading ") + enginePostloads[p]).c_str());
-                    try {
-                        std::string pscript = mkxp_fs::contentsOfAssetAsString(
-                            (std::string("Postload/") + enginePostloads[p]).c_str(), "rb");
-                        VALUE pscriptStr = rb_utf8_str_new_cstr(pscript.c_str());
-                        VALUE pfname = rb_utf8_str_new_cstr(enginePostloads[p]);
-                        int pstate;
-                        evalString(pscriptStr, pfname, &pstate);
-                        if (pstate) {
-#if RAPI_FULL > 187
-                            VALUE pexc = rb_errinfo();
-#else
-                            VALUE pexc = rb_gv_get("$!");
-#endif
-                            if (pexc != Qnil) {
-                                VALUE excClass = rb_class_name(rb_class_of(pexc));
-                                VALUE excMsg = rb_funcall(pexc, rb_intern("message"), 0);
-                                std::string detail = std::string("FAILED ") + enginePostloads[p]
-                                                   + ": " + StringValueCStr(excClass)
-                                                   + ": " + StringValueCStr(excMsg);
-                                mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]", detail.c_str());
-                                Debug() << "Error in engine postload" << enginePostloads[p];
-#if RAPI_FULL > 187
-                                rb_set_errinfo(Qnil);
-#else
-                                rb_set_errinfo(Qnil);
-#endif
-                            }
-                        } else {
-                            mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
-                                          (std::string("OK ") + enginePostloads[p]).c_str());
-                        }
-                    } catch (...) {
-                        mkxp_debugLog("POSTLOAD", "binding-mri.cpp [C++]",
-                                      (std::string("CXX EXC ") + enginePostloads[p]).c_str());
-                        Debug() << "Failed to load engine postload:" << enginePostloads[p];
-                    }
-                }
-
-                /* Cheat menu dispatch.
-                   Pick the right JoiPlay-derived cheat script based on the
-                   RGSS version the game targets and whether Pokemon
-                   Essentials is detected. Load only one: the scripts
-                   each define Scene_Cheat / aliases on Game_Player, so
-                   loading multiple would overwrite each other's hooks. */
-                {
-                    int cheatRgssVer = shState->rtData().config.rgssVersion;
-                    bool isPE = false;
-                    {
-                        int st = 0;
-                        VALUE pe = rb_eval_string_protect(
-                            "Object.const_defined?(:GameData) || Object.const_defined?(:PBItems)",
-                            &st);
-                        if (!st && pe != Qnil && pe != Qfalse) isPE = true;
-                    }
-
-                    const char *cheatScript = nullptr;
-                    if (isPE) {
-                        cheatScript = "cheat_pe19";
-                    } else if (cheatRgssVer == 1) {
-                        cheatScript = "cheat_rpgmxp";
-                    } else if (cheatRgssVer == 2) {
-                        cheatScript = "cheat_rpgmvx";
-                    } else if (cheatRgssVer >= 3) {
-                        cheatScript = "cheat_rpgmvxace";
-                    }
-
-                    if (cheatScript) {
-                        try {
-                            std::string pscript = mkxp_fs::contentsOfAssetAsString(
-                                (std::string("Postload/") + cheatScript).c_str(), "rb");
-                            VALUE pscriptStr = rb_utf8_str_new_cstr(pscript.c_str());
-                            VALUE pfname = rb_utf8_str_new_cstr(cheatScript);
-                            int pstate;
-                            evalString(pscriptStr, pfname, &pstate);
-                            if (pstate) {
-#if RAPI_FULL > 187
-                                VALUE pexc = rb_errinfo();
-#else
-                                VALUE pexc = rb_gv_get("$!");
-#endif
-                                if (pexc != Qnil) {
-                                    Debug() << "Error in cheat postload" << cheatScript;
-                                    rb_set_errinfo(Qnil);
-                                }
-                            }
-
-                            /* Install a Ruby-side poller that mirrors the
-                               bridge flag into $CHEATS each time Input is
-                               updated. This lets the iOS toolbar toggle
-                               take effect mid-game without re-entering
-                               the scripts. */
-                            int pollState = 0;
-                            rb_eval_string_protect(
-                                "$CHEATS = MKXP.cheats_enabled?\n"
-                                "module Input\n"
-                                "  unless respond_to?(:_mkxp_cheat_orig_update)\n"
-                                "    class << self\n"
-                                "      alias_method :_mkxp_cheat_orig_update, :update\n"
-                                "    end\n"
-                                "    def self.update\n"
-                                "      _mkxp_cheat_orig_update\n"
-                                "      $CHEATS = MKXP.cheats_enabled?\n"
-                                "    end\n"
-                                "  end\n"
-                                "end\n",
-                                &pollState);
-                            if (pollState) {
-#if RAPI_FULL > 187
-                                VALUE pollExc = rb_errinfo();
-#else
-                                VALUE pollExc = rb_gv_get("$!");
-#endif
-                                if (pollExc != Qnil) {
-                                    VALUE msg = rb_funcall(pollExc, rb_intern("message"), 0);
-                                    Debug() << "Error installing cheat-poller:" << StringValueCStr(msg);
-                                    rb_set_errinfo(Qnil);
-                                } else {
-                                    Debug() << "Error installing cheat-poller";
-                                }
-                            }
-                        } catch (...) {
-                            Debug() << "Failed to load cheat postload:" << cheatScript;
-                        }
-                    }
-                }
+            if (i == scriptCount - 1) {
+                mkxp::ScriptBootstrap::loadEnginePostloadsBeforeMain();
+                mkxp::ScriptBootstrap::loadCheatPostloadAndPoller();
             }
             
             VALUE script = rb_ary_entry(scriptArray, i);
