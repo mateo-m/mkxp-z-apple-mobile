@@ -30,10 +30,12 @@ if defined?(HTTPLite)
         alias __mkxp_native_post post
         alias __mkxp_native_post_body post_body
 
+        # rubocop:disable Lint/RescueException -- JoiPlay returns "" on any binding error, not just StandardError
         def get(*args)
           __mkxp_native_get(*args)
         rescue Exception => e
           raise unless __mkxp_http_error?(e)
+
           __mkxp_empty_response('GET', args[0], e)
         end
 
@@ -41,6 +43,7 @@ if defined?(HTTPLite)
           __mkxp_native_post(*args)
         rescue Exception => e
           raise unless __mkxp_http_error?(e)
+
           __mkxp_empty_response('POST', args[0], e)
         end
 
@@ -48,8 +51,10 @@ if defined?(HTTPLite)
           __mkxp_native_post_body(*args)
         rescue Exception => e
           raise unless __mkxp_http_error?(e)
+
           __mkxp_empty_response('POST', args[0], e)
         end
+        # rubocop:enable Lint/RescueException
 
         private
 

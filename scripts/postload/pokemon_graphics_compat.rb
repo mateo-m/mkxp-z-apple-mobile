@@ -55,14 +55,17 @@ module MkxpPokemonGraphicsCompat
 
     PokeBattle_BallAnimationMixin.module_eval do
       unless method_defined?(:__mkxp_ball_tracks_hand_with_bitmap)
-        alias __mkxp_ball_tracks_hand_with_bitmap ballTracksHand
+        alias_method :__mkxp_ball_tracks_hand_with_bitmap, :ballTracksHand
       end
 
+      # rubocop:disable Naming/MethodParameterName, Naming/VariableName -- PE mixin API
       def ballTracksHand(ball, traSprite, safariThrow = false)
         bitmap = traSprite.bitmap if traSprite
         return [-6, 202] if bitmap.nil?
+
         __mkxp_ball_tracks_hand_with_bitmap(ball, traSprite, safariThrow)
       end
+      # rubocop:enable Naming/MethodParameterName, Naming/VariableName
     end
   end
 end
@@ -91,7 +94,8 @@ if defined?(GameData::TrainerType) && GameData::TrainerType.respond_to?(:check_f
           alias __mkxp_case_sensitive_check_file check_file
         end
 
-        def check_file(tr_type, path, optional_suffix = "", suffix = "")
+        # rubocop:disable Metrics/AbcSize -- candidate path fan-out for case-insensitive trainer sprites
+        def check_file(tr_type, path, optional_suffix = '', suffix = '')
           ret = __mkxp_case_sensitive_check_file(tr_type, path, optional_suffix, suffix)
           return ret if ret
 
@@ -100,11 +104,11 @@ if defined?(GameData::TrainerType) && GameData::TrainerType.respond_to?(:check_f
 
           candidates = []
           if optional_suffix && !optional_suffix.empty?
-            candidates << path + tr_type_data.id.to_s + optional_suffix + suffix
-            candidates << path + sprintf("%03d", tr_type_data.id_number) + optional_suffix + suffix
+            candidates << (path + tr_type_data.id.to_s + optional_suffix + suffix)
+            candidates << (path + format('%03d', tr_type_data.id_number) + optional_suffix + suffix)
           end
-          candidates << path + tr_type_data.id.to_s + suffix
-          candidates << path + sprintf("%03d", tr_type_data.id_number) + suffix
+          candidates << (path + tr_type_data.id.to_s + suffix)
+          candidates << (path + format('%03d', tr_type_data.id_number) + suffix)
 
           candidates.each do |candidate|
             resolved = __mkxp_case_insensitive_bitmap(candidate)
@@ -112,16 +116,18 @@ if defined?(GameData::TrainerType) && GameData::TrainerType.respond_to?(:check_f
           end
           nil
         end
+        # rubocop:enable Metrics/AbcSize
 
         def __mkxp_case_insensitive_bitmap(candidate)
           dir = File.dirname(candidate)
           base = File.basename(candidate).downcase
 
           Dir.foreach(dir) do |entry|
-            next if entry == "." || entry == ".."
+            next if ['.', '..'].include?(entry)
+
             name = File.basename(entry, File.extname(entry)).downcase
             ext = File.extname(entry).downcase
-            if name == base && [".png", ".gif"].include?(ext)
+            if name == base && ['.png', '.gif'].include?(ext)
               return File.join(dir, File.basename(entry, File.extname(entry)))
             end
           end

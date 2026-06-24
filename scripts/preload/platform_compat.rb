@@ -184,9 +184,7 @@ unless defined?(MKXPCasefoldFS)
     def desensitize(path)
       return nil unless path.is_a?(String)
 
-      if defined?(System) && System.respond_to?(:desensitize)
-        return System.desensitize(path)
-      end
+      return System.desensitize(path) if defined?(System) && System.respond_to?(:desensitize)
       return MKXP.desensitize(path) if defined?(MKXP) && MKXP.respond_to?(:desensitize)
 
       nil
