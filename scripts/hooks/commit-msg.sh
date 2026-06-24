@@ -1,5 +1,4 @@
 #!/bin/sh
-# commit-msg: single-line subject only, no co-author trailers.
 
 set -e
 
