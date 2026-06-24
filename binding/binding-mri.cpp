@@ -108,8 +108,6 @@ extern const char module_rpg1[];
 extern const char module_rpg2[];
 extern const char module_rpg3[];
 
-static VALUE topSelf;
-
 static void mriBindingExecute();
 static void mriBindingTerminate();
 static void mriBindingReset();
@@ -1218,45 +1216,11 @@ static bool processReset(bool rubyExc) {
 	return 0;
 }
 
-struct evalArg {
-    VALUE string;
-    VALUE filename;
-};
-
-static VALUE evalHelper(evalArg *arg) {
-    VALUE argv[] = {arg->string, Qnil, arg->filename};
-    return rb_funcall2(topSelf, rb_intern("eval"), ARRAY_SIZE(argv), argv);
-}
-
-static VALUE evalString(VALUE string, VALUE filename, int *state) {
-    mkxp::ScriptBootstrap::evalRubyString((void *)string, (void *)filename, state);
-    return Qnil;
-}
-
-static void runCustomScript(const std::string &filename) {
-    std::string scriptData;
-    
-    if (!readFileSDL(filename.c_str(), scriptData)) {
-        showMsg(std::string("Unable to open '") + filename + "'");
-        return;
-    }
-    
-    evalString(mkxp_str_new(scriptData.c_str(), scriptData.size()),
-               mkxp_str_new(filename.c_str(), filename.size()), NULL);
-}
 
 RB_METHOD_GUARD(mriRgssMain) {
     RB_UNUSED_PARAM;
 
-    /* Execute postload scripts */
-    const Config &conf = shState->rtData().config;
-    for (std::vector<std::string>::const_iterator i = conf.postloadScripts.begin();
-        i != conf.postloadScripts.end(); ++i)
-    {
-        if (shState->rtData().rqTerm)
-            break;
-        runCustomScript(*i);
-    }
+    mkxp::ScriptBootstrap::loadConfigPostloadScripts(shState->rtData().config);
 
     while (true) {
         VALUE exc = Qnil;
@@ -1334,9 +1298,8 @@ struct BacktraceData {
 bool evalScript(VALUE string, const char *filename)
 {
     int state;
-    evalString(string, mkxp_str_new_cstr(filename), &state);
-    if (state) return false;
-    return true;
+    mkxp::ScriptBootstrap::evalRubyString((void *)string, (void *)filename, &state);
+    return state == 0;
 }
 
 
@@ -1562,7 +1525,7 @@ static void runRMXPScripts(BacktraceData &btData) {
                 };
                 SyntaxTransformGuard guard;
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-                evalString(string, fname, &state);
+                mkxp::ScriptBootstrap::evalRubyString((void *)string, (void *)fname, &state);
             }
 
             /* On iOS, native DLL/library loading (LoadError) and missing
@@ -1855,9 +1818,8 @@ static void mriBindingExecute() {
     rb_gv_set("$KCODE", rb_str_new_cstr("UTF8"));
     rb_gv_set("$-K", rb_str_new_cstr("UTF8"));
 
-    topSelf = rgssVer == 1 ? Qnil : rb_eval_string("self");
-    rb_gc_register_address(&topSelf);
-    mkxp::ScriptBootstrap::setEvalReceiver((void *)topSelf);
+    mkxp::ScriptBootstrap::setEvalReceiver(
+        (void *)(rgssVer == 1 ? Qnil : rb_eval_string("self")));
 
     /* RbData must be live before mriBindingInit: inputBindingInit on
      * RGSS3 writes getRbData()->buttoncodeHash. */
@@ -1902,7 +1864,7 @@ static void mriBindingExecute() {
     
     std::string &customScript = conf.customScript;
     if (!customScript.empty()) {
-        runCustomScript(customScript);
+        mkxp::ScriptBootstrap::runConfigScript(customScript, true);
     } else {
         runRMXPScripts(btData);
     }

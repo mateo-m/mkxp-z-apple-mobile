@@ -3,30 +3,10 @@
 # Auto-loaded before game scripts to ensure compatibility.
 # Game-specific patches live in separate files (e.g. pokemon_compat.rb).
 
-# DEBUG: marker BEFORE require so we can tell whether the script
-# even starts evaluating, vs failing at the require call.
-begin
-  if defined?(System) && System.respond_to?(:puts)
-    System.puts "[platform_compat] preload TOP (Ruby #{RUBY_VERSION})"
-  end
-rescue StandardError => e
-  # System.puts itself missing? Fall back to stderr (which the engine
-  # captures into the session log).
-  warn "[platform_compat] System.puts unavailable: #{e.class}: #{e.message}"
-end
-
-# Try the require under exception handling so a failure doesn't
-# abort the whole preload silently.
 begin
   require 'zlib'
-  if defined?(System)
-    has_zlib = $LOADED_FEATURES.any? { |f| f.include?('zlib') }
-    System.puts "[platform_compat] require 'zlib' OK ($LOADED_FEATURES has zlib? #{has_zlib})"
-  end
-rescue LoadError => e
-  System.puts "[platform_compat] require 'zlib' FAILED: #{e.message}" if defined?(System)
-rescue StandardError => e
-  System.puts "[platform_compat] require 'zlib' EXC: #{e.class}: #{e.message}" if defined?(System)
+rescue LoadError
+  # zlib is optional for some vintage games; preload continues without it.
 end
 
 # --- JoiPlay-compat signal ---
