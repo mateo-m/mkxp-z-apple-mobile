@@ -25,8 +25,6 @@ extern "C" {
 #include <ruby.h>
 }
 
-extern bool evalScript(VALUE string, const char *filename);
-
 namespace mkxp {
 namespace ScriptBootstrap {
 
@@ -34,6 +32,7 @@ static VALUE g_topSelf = Qnil;
 
 void setEvalReceiver(void *self) {
     g_topSelf = (VALUE)self;
+    rb_gc_register_address(&g_topSelf);
 }
 
 struct EvalArg {
@@ -111,10 +110,14 @@ void loadEnginePreloads() {
         runBundledScript("Preload", enginePreloads[p], "PRELOAD");
 }
 
-static void runCustomScript(const std::string &filename) {
+static void runConfigScriptFromDisk(const std::string &filename, bool showDialogOnMissing) {
     std::string scriptData;
     if (!readFileSDL(filename.c_str(), scriptData)) {
-        Debug() << "Unable to open '" << filename << "'";
+        if (showDialogOnMissing)
+            shState->eThread().showMessageBox(
+                (std::string("Unable to open '") + filename + "'").c_str());
+        else
+            Debug() << "Unable to open '" << filename << "'";
         return;
     }
     evalRubyString(
@@ -123,13 +126,27 @@ static void runCustomScript(const std::string &filename) {
         nullptr);
 }
 
+void runConfigScript(const std::string &path, bool showDialogOnMissing) {
+    runConfigScriptFromDisk(path, showDialogOnMissing);
+}
+
 void loadConfigPreloadScripts(const Config &conf) {
     for (std::vector<std::string>::const_iterator i = conf.preloadScripts.begin();
          i != conf.preloadScripts.end(); ++i)
     {
         if (shState->rtData().rqTerm)
             break;
-        runCustomScript(*i);
+        runConfigScriptFromDisk(*i, false);
+    }
+}
+
+void loadConfigPostloadScripts(const Config &conf) {
+    for (std::vector<std::string>::const_iterator i = conf.postloadScripts.begin();
+         i != conf.postloadScripts.end(); ++i)
+    {
+        if (shState->rtData().rqTerm)
+            break;
+        runConfigScriptFromDisk(*i, true);
     }
 }
 

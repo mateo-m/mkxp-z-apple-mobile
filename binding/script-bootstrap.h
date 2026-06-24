@@ -15,11 +15,15 @@ namespace ScriptBootstrap {
 
 void evalRubyString(void *string, void *filename, int *state);
 
-/** Called from binding-mri after topSelf is initialized. */
+/** Called from binding-mri after the eval receiver is initialized. */
 void setEvalReceiver(void *self);
+
+/** Load a user-supplied script path from disk. */
+void runConfigScript(const std::string &path, bool showDialogOnMissing);
 
 void loadEnginePreloads();
 void loadConfigPreloadScripts(const Config &conf);
+void loadConfigPostloadScripts(const Config &conf);
 void loadEnginePostloadsBeforeMain();
 void loadCheatPostloadAndPoller();
 
