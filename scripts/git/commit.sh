@@ -1,6 +1,4 @@
 #!/bin/sh
-# Create a signed, single-line commit from staged changes.
-# Use this instead of `git commit` when Co-authored-by trailers would be injected.
 
 set -e
 
