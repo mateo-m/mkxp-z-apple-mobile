@@ -145,11 +145,11 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
     def updateMaps
       if Input.trigger?(Input::HOME) && $CHEATS
         $game_temp.menu_calling = false if $game_temp
-        $game_temp.in_menu = true if $game_temp
+        $game_temp.in_menu = true if $game_temp && $game_temp.respond_to?(:in_menu=)
         $game_player.straighten if $game_player
         $game_map.update if $game_map
         Scene_Cheat.new.main
-        $game_temp.in_menu = false if $game_temp
+        $game_temp.in_menu = false if $game_temp && $game_temp.respond_to?(:in_menu=)
       end
       cheatUpdateMaps
     end
