@@ -48,6 +48,66 @@ module Graphics
   end
 end
 
+# Some fangame plugins (e.g. Pokemon Void Character Select) assign
+# a resolved filename string directly to Sprite#bitmap= and call
+# .width / .height on the same path string. Coerce at the setter;
+# Graphics/ path strings expose bitmap dimensions on demand.
+module MkxpGraphicsPathString
+  GRAPHICS_RE = /\AGraphics\//.freeze
+
+  def width
+    unless self =~ GRAPHICS_RE
+      raise NoMethodError, "undefined method `width' for #{inspect}"
+    end
+
+    Bitmap.new(self).width
+  end
+
+  def height
+    unless self =~ GRAPHICS_RE
+      raise NoMethodError, "undefined method `height' for #{inspect}"
+    end
+
+    Bitmap.new(self).height
+  end
+end
+
+class String
+  prepend MkxpGraphicsPathString unless ancestors.include?(MkxpGraphicsPathString)
+end
+
+module MkxpBitmapPathCoercion
+  def bitmap=(value)
+    super(MkxpBitmapPathCoercion.coerce(value))
+  end
+
+  module_function
+
+  def coerce(value)
+    if value.nil?
+      nil
+    elsif value.is_a?(Bitmap)
+      value
+    elsif value.is_a?(String)
+      return nil if value.empty?
+
+      Bitmap.new(value)
+    else
+      value
+    end
+  end
+
+  def patch(klass)
+    return unless defined?(klass) && klass.is_a?(Class)
+    return if klass.ancestors.include?(MkxpBitmapPathCoercion)
+
+    klass.prepend(MkxpBitmapPathCoercion)
+  end
+end
+
+MkxpBitmapPathCoercion.patch(Sprite) if defined?(Sprite)
+MkxpBitmapPathCoercion.patch(Plane) if defined?(Plane)
+
 module MkxpPokemonGraphicsCompat
   def self.patch_ball_animation_mixin
     return unless defined?(PokeBattle_BallAnimationMixin)

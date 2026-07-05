@@ -102,6 +102,7 @@ extern VALUE *rb_gc_stack_start;
 #include <SDL_cpuinfo.h>
 #include <SDL_filesystem.h>
 #include <SDL_loadso.h>
+#include <SDL_messagebox.h>
 #include <SDL_power.h>
 
 extern const char module_rpg1[];
@@ -371,9 +372,6 @@ static void mriBindingInit() {
         _rb_define_module_function(rb_mKernel, "rgss_main", mriRgssMain);
         _rb_define_module_function(rb_mKernel, "rgss_stop", mriRgssStop);
         
-        _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
-        _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
-        
         rb_define_global_const("RGSS_VERSION", mkxp_str_new_cstr("3.0.1"));
     } else {
         // print -> debug log (NOT a dialog; see mkxpKernelPrint).
@@ -387,6 +385,12 @@ static void mriBindingInit() {
                                "_mkxp_kernel_caller_alias", "caller");
         _rb_define_module_function(rb_mKernel, "caller", _kernelCaller);
     }
+
+    // PE 20+ fangames call msgbox even when detected as RGSS1
+    // (Scripts.rxdata). Bind on every RGSS version so boot notices
+    // and pbCriticalCode error dialogs work.
+    _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
+    _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
     
     if (rgssVer == 1)
         rb_eval_string(module_rpg1);
@@ -508,7 +512,11 @@ static void printP(int argc, VALUE *argv, const char *convMethod,
             rb_str_buf_cat2(dispString, sep);
     }
     
-    showMsg(RSTRING_PTR(dispString));
+    /* Deliberate game dialog (msgbox / p), not an error: the
+     * INFORMATION flag routes it to the host's info channel so
+     * the alert doesn't carry "restart Empo" framing. */
+    shState->eThread().showMessageBox(RSTRING_PTR(dispString),
+                                      SDL_MESSAGEBOX_INFORMATION);
 }
 
 

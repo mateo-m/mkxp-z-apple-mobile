@@ -343,6 +343,25 @@ void        mkxp_installFatalErrorHandlers(void);
 typedef void (*mkxp_ErrorMessageCallback)(const char *message, void *userdata);
 void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata);
 
+// Info-message routing (Engine -> UI). Games call `msgbox` / `p`
+// deliberately to show a notice (PE 20+ version banners, plugin
+// dialogs) and then keep running. This is NOT an error: the UI
+// should present a plain dismissible alert without "restart Empo"
+// framing. Blocks the engine thread until the user dismisses,
+// mirroring mkxp_presentErrorAndWait.
+
+/* Present an informational message in the host UI and block the
+ * calling thread until the user dismisses it. iOS only; fires the
+ * info callback without blocking elsewhere. */
+void        mkxp_presentInfoAndWait(const char *message);
+
+/* Called by the host UI when the user dismisses an info alert that
+ * may be blocking an engine thread in mkxp_presentInfoAndWait(). */
+void        mkxp_signalInfoDismissed(void);
+
+typedef void (*mkxp_InfoMessageCallback)(const char *message, void *userdata);
+void        mkxp_setInfoMessageCallback(mkxp_InfoMessageCallback cb, void *userdata);
+
 // Pause / Resume (UI <-> Engine).
 //   1. UI calls `mkxp_requestPause()`
 //   2. Engine's `mkxp_checkPause()` (called from Graphics blocking

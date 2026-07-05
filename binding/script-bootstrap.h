@@ -8,6 +8,8 @@
 #ifndef MKXP_SCRIPT_BOOTSTRAP_H
 #define MKXP_SCRIPT_BOOTSTRAP_H
 
+#include <string>
+
 struct Config;
 
 namespace mkxp {

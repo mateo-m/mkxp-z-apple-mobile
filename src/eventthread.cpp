@@ -804,9 +804,19 @@ void EventThread::showMessageBox(const char *body, int flags)
 #if TARGET_OS_IPHONE
     /* Block until the user dismisses the host alert. Without this,
      * the RGSS thread tears down GL/Ruby while SwiftUI is still
-     * presenting the error and the process crashes on device. */
-    if (body && body[0])
-        mkxp_presentErrorAndWait(body);
+     * presenting the error and the process crashes on device.
+     *
+     * SDL_MESSAGEBOX_INFORMATION marks deliberate game dialogs
+     * (Kernel#msgbox / #p) - route those through the info channel
+     * so the host presents them without error framing. Everything
+     * else (exceptions, script-load failures) stays on the error
+     * channel. */
+    if (body && body[0]) {
+        if (flags & SDL_MESSAGEBOX_INFORMATION)
+            mkxp_presentInfoAndWait(body);
+        else
+            mkxp_presentErrorAndWait(body);
+    }
     return;
 #else
     SDL_Event event;

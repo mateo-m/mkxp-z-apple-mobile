@@ -15,6 +15,25 @@
 # Scene_Map save-preview rewrites (the games we've tested take
 # the default path fine).
 
+# PE 20+ routes boot/version notices through Game.msgbox (Win32
+# API on desktop). mkxp-z only binds Kernel.msgbox under RGSS3;
+# PE20 titles that still ship Scripts.rxdata (RGSS1 detection)
+# need a portable shim. Fall back to Kernel.p (native dialog on
+# RGSS1/2) or debug-log via System.puts as last resort.
+if defined?(Game) && !Game.respond_to?(:msgbox)
+  class << Game
+    def msgbox(*args)
+      if Kernel.respond_to?(:msgbox)
+        Kernel.msgbox(*args)
+      elsif Kernel.respond_to?(:p)
+        Kernel.p(*args)
+      elsif defined?(System) && System.respond_to?(:puts)
+        System.puts(args.map(&:to_s).join(''))
+      end
+    end
+  end
+end
+
 # --- MapSaver (TH::Map_Saver) neutralization ---
 # Some games bind a hotkey to snapshot the current map or screen
 # to a PNG on disk. Define the class with no-op methods so the

@@ -131,6 +131,11 @@ struct BridgeCallback {
         std::lock_guard<std::mutex> lock(slotMutex);
         slot.reset();
     }
+
+    bool isSet() noexcept {
+        auto s = snapshot();
+        return s && s->fn;
+    }
 };
 
 // Key event callback: engine -> UI notification for hardware key events.
@@ -170,11 +175,21 @@ static std::mutex s_errorMsgMutex;
 static std::string s_errorMessage;
 static BridgeCallback<mkxp_ErrorMessageCallback> s_errorMsgCb;
 
+// Info message routing: engine -> UI. Deliberate game dialogs
+// (msgbox / p) that are not errors; separate channel so the host
+// can present them without error framing.
+static BridgeCallback<mkxp_InfoMessageCallback> s_infoMsgCb;
+
 #if TARGET_OS_IPHONE
 static std::mutex s_errorDismissMutex;
 static std::condition_variable s_errorDismissCV;
 static std::atomic<bool> s_errorDismissed{false};
 static std::atomic<bool> s_errorAwaitingDismiss{false};
+
+static std::mutex s_infoDismissMutex;
+static std::condition_variable s_infoDismissCV;
+static std::atomic<bool> s_infoDismissed{false};
+static std::atomic<bool> s_infoAwaitingDismiss{false};
 #endif
 
 // Pause / Resume state.
@@ -574,13 +589,53 @@ void mkxp_signalErrorDismissed(void) {
     s_errorDismissed.store(true, std::memory_order_release);
     s_errorDismissCV.notify_all();
 }
+
+void mkxp_presentInfoAndWait(const char *message) {
+    if (!message || !message[0])
+        return;
+
+    // No host listener registered: fall back to the error channel
+    // so the message is never silently swallowed.
+    if (!s_infoMsgCb.isSet()) {
+        mkxp_presentErrorAndWait(message);
+        return;
+    }
+
+    s_infoDismissed.store(false, std::memory_order_release);
+    s_infoAwaitingDismiss.store(true, std::memory_order_release);
+    s_infoMsgCb.fire(message);
+
+    std::unique_lock<std::mutex> lock(s_infoDismissMutex);
+    s_infoDismissCV.wait(lock, [] {
+        return s_infoDismissed.load(std::memory_order_acquire);
+    });
+    s_infoAwaitingDismiss.store(false, std::memory_order_release);
+}
+
+void mkxp_signalInfoDismissed(void) {
+    if (!s_infoAwaitingDismiss.load(std::memory_order_acquire))
+        return;
+    s_infoDismissed.store(true, std::memory_order_release);
+    s_infoDismissCV.notify_all();
+}
 #else
 void mkxp_presentErrorAndWait(const char *message) {
     mkxp_setErrorMessage(message);
 }
 
 void mkxp_signalErrorDismissed(void) {}
+
+void mkxp_presentInfoAndWait(const char *message) {
+    if (message && message[0])
+        s_infoMsgCb.fire(message);
+}
+
+void mkxp_signalInfoDismissed(void) {}
 #endif
+
+void mkxp_setInfoMessageCallback(mkxp_InfoMessageCallback cb, void *userdata) {
+    s_infoMsgCb.set(cb, userdata);
+}
 
 void mkxp_reportFatalError(const char *message) {
     const char *detail =

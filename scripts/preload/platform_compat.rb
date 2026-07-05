@@ -367,20 +367,26 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
 
         define_method(:pbResolveBitmap) do |*args|
           result = original_method.bind(self).call(*args)
+          return result if result.is_a?(Bitmap)
+
           x = args[0]
           resolved = MKXPCasefoldFS.resolve_bitmap(x)
-          return result unless resolved
+          path = resolved || result
+          return nil if path.nil?
+          return nil if path.is_a?(String) && path.empty?
 
-          if result.nil?
-            if defined?(System)
-              System.puts("[platform_compat] pbResolveBitmap casefold hit: #{x} -> #{resolved}")
-            end
-          elsif result != resolved
-            if defined?(System)
-              System.puts("[platform_compat] pbResolveBitmap normalized: #{x} -> #{resolved}")
+          if resolved
+            if result.nil?
+              if defined?(System)
+                System.puts("[platform_compat] pbResolveBitmap casefold hit: #{x} -> #{resolved}")
+              end
+            elsif result != resolved
+              if defined?(System)
+                System.puts("[platform_compat] pbResolveBitmap normalized: #{x} -> #{resolved}")
+              end
             end
           end
-          resolved
+          path
         end
         ruby2_keywords(:pbResolveBitmap) if respond_to?(:ruby2_keywords, true)
 
