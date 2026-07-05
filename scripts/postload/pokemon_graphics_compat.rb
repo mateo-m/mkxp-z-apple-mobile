@@ -53,20 +53,16 @@ end
 # .width / .height on the same path string. Coerce at the setter;
 # Graphics/ path strings expose bitmap dimensions on demand.
 module MkxpGraphicsPathString
-  GRAPHICS_RE = /\AGraphics\//.freeze
+  GRAPHICS_RE = %r{\AGraphics/}.freeze
 
   def width
-    unless self =~ GRAPHICS_RE
-      raise NoMethodError, "undefined method `width' for #{inspect}"
-    end
+    raise NoMethodError, "undefined method `width' for #{inspect}" unless self =~ GRAPHICS_RE
 
     Bitmap.new(self).width
   end
 
   def height
-    unless self =~ GRAPHICS_RE
-      raise NoMethodError, "undefined method `height' for #{inspect}"
-    end
+    raise NoMethodError, "undefined method `height' for #{inspect}" unless self =~ GRAPHICS_RE
 
     Bitmap.new(self).height
   end
@@ -84,17 +80,11 @@ module MkxpBitmapPathCoercion
   module_function
 
   def coerce(value)
-    if value.nil?
-      nil
-    elsif value.is_a?(Bitmap)
-      value
-    elsif value.is_a?(String)
-      return nil if value.empty?
+    return nil if value.nil?
+    return value unless value.is_a?(String)
+    return nil if value.empty?
 
-      Bitmap.new(value)
-    else
-      value
-    end
+    Bitmap.new(value)
   end
 
   def patch(klass)

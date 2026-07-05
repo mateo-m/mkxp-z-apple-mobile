@@ -28,7 +28,7 @@ if defined?(Game) && !Game.respond_to?(:msgbox)
       elsif Kernel.respond_to?(:p)
         Kernel.p(*args)
       elsif defined?(System) && System.respond_to?(:puts)
-        System.puts(args.map(&:to_s).join(''))
+        System.puts(args.join)
       end
     end
   end
