@@ -68,8 +68,12 @@ module MkxpGraphicsPathString
   end
 end
 
-class String
-  prepend MkxpGraphicsPathString unless ancestors.include?(MkxpGraphicsPathString)
+if String.respond_to?(:prepend, true)
+  String.prepend MkxpGraphicsPathString unless String.ancestors.include?(MkxpGraphicsPathString)
+else
+  # Module#prepend is Ruby 2.0+. width/height are new methods on
+  # String, so include is equivalent on 1.8/1.9 VX/VX Ace games.
+  String.send(:include, MkxpGraphicsPathString) unless String.ancestors.include?(MkxpGraphicsPathString)
 end
 
 module MkxpBitmapPathCoercion
@@ -89,9 +93,22 @@ module MkxpBitmapPathCoercion
 
   def patch(klass)
     return unless defined?(klass) && klass.is_a?(Class)
-    return if klass.ancestors.include?(MkxpBitmapPathCoercion)
 
-    klass.prepend(MkxpBitmapPathCoercion)
+    if klass.respond_to?(:prepend, true)
+      return if klass.ancestors.include?(MkxpBitmapPathCoercion)
+
+      klass.prepend(MkxpBitmapPathCoercion)
+    else
+      marker = :__mkxp_coerced_bitmap_set
+      return if klass.instance_methods.include?(marker)
+
+      klass.class_eval do
+        alias_method marker, :bitmap=
+        define_method(:bitmap=) do |value|
+          send(marker, MkxpBitmapPathCoercion.coerce(value))
+        end
+      end
+    end
   end
 end
 
