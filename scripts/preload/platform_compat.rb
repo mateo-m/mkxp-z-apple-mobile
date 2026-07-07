@@ -268,27 +268,42 @@ unless defined?(MKXPSaveFS)
   module MKXPSaveFS
     module_function
 
+    # Canonical save-directory names: Save, SaveData, Save Data (tab allowed).
+    SAVE_DIR_FRAGMENT = 'Save(?:[ \t]?Data)?'.freeze
+    SAVE_SUBDIR_RE = %r{\A(?:\./)?(?:#{SAVE_DIR_FRAGMENT})/?\z}i.freeze
+    SAVE_SUBDIR_GLOB_RE = %r{\A(#{SAVE_DIR_FRAGMENT})(/.+)\z}i.freeze
+    ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
+
     def root
+      return @mkxp_save_root_memo if defined?(@mkxp_save_root_memo) && @mkxp_save_root_memo
+
       return nil unless defined?(System) && System.respond_to?(:data_directory)
 
       dir = System.data_directory.to_s
       return nil if dir.empty?
 
-      dir.gsub(%r{[\\/]+\z}, '')
+      @mkxp_save_root_memo = dir.gsub(%r{[\\/]+\z}, '')
     rescue StandardError
       nil
     end
 
-    def candidate?(path)
-      return false unless path.is_a?(String)
+    def normalize_path(path)
+      path.strip.gsub('\\', '/')
+    end
 
-      stripped = path.strip
-      return false if stripped.empty?
-      return false if stripped.start_with?('/', '~')
-      return false if stripped =~ %r{\A[A-Za-z]:[\\/]}
-      return false if stripped.include?('/') || stripped.include?('\\')
+    def normalize_save_dir_token(name)
+      name.downcase.gsub("\t", ' ')
+    end
 
-      lower = stripped.downcase
+    def save_dir_name?(name)
+      case normalize_save_dir_token(name)
+      when 'save', 'save data', 'savedata' then true
+      else false
+      end
+    end
+
+    def save_filename?(name)
+      lower = name.downcase
       return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
       return true if lower.end_with?('.rxdata', '.rvdata', '.rvdata2')
       return true if lower.end_with?('.bak')
@@ -296,19 +311,180 @@ unless defined?(MKXPSaveFS)
       false
     end
 
+    def save_directory_path?(path)
+      return false unless path.is_a?(String)
+
+      normalize_path(path) =~ SAVE_SUBDIR_RE
+    end
+
+    def engine_internal_entry?(name)
+      return false unless name.is_a?(String)
+
+      name =~ ENGINE_DIR_ENTRY_RE
+    end
+
+    def filter_dir_entries(entries)
+      return entries unless entries.respond_to?(:reject)
+
+      entries.reject { |entry| engine_internal_entry?(entry) }
+    end
+
+    # Bare save filenames only (legacy behaviour).
+    def candidate?(path)
+      return false unless path.is_a?(String)
+
+      stripped = normalize_path(path)
+      return false if stripped.empty?
+      return false if stripped.start_with?('/', '~')
+      return false if stripped =~ /\A[A-Za-z]:/
+      return false if stripped.include?('/')
+
+      save_filename?(stripped)
+    end
+
+    def save_relative_path?(path)
+      return false unless path.is_a?(String)
+
+      stripped = normalize_path(path)
+      return false if stripped.empty?
+      return false if stripped.start_with?('/', '~')
+      return false if stripped =~ /\A[A-Za-z]:/
+
+      parts = stripped.split('/')
+      return true if parts.length == 1 && (save_filename?(parts[0]) || save_dir_name?(parts[0]))
+      return true if parts.length >= 2 && save_dir_name?(parts[0])
+
+      false
+    end
+
+    def needs_save_remap?(normalized, base)
+      return true if save_relative_path?(normalized)
+      return true if base && normalized.start_with?("#{base}/")
+
+      false
+    end
+
+    def flatten_save_relative(relative)
+      parts = relative.split('/')
+      if parts.length == 1
+        return '' if save_dir_name?(parts[0])
+
+        return parts[0]
+      end
+      return parts[1..-1].join('/') if save_dir_name?(parts[0])
+
+      relative
+    end
+
+    def orig_exist?(path)
+      return FileTest._mkxp_orig_exist(path) if defined?(FileTest) && FileTest.respond_to?(:_mkxp_orig_exist)
+      return File._mkxp_orig_exist(path) if File.respond_to?(:_mkxp_orig_exist)
+
+      false
+    rescue StandardError
+      false
+    end
+
+    def remap_to_userdata(normalized, base)
+      if normalized.start_with?("#{base}/")
+        tail = normalized[(base.length + 1)..-1]
+        flattened = flatten_save_relative(tail)
+        return base if flattened.empty?
+
+        return "#{base}/#{flattened}"
+      end
+
+      if save_relative_path?(normalized)
+        flattened = flatten_save_relative(normalized)
+        return base if flattened.empty?
+
+        return "#{base}/#{flattened}"
+      end
+
+      nil
+    end
+
+    # Remap Windows-style save paths into per-game UserData/. When the
+    # remapped file is missing but the original relative path exists under
+    # Game/ (shipped starter saves), fall back to the original path.
     def path_for(path)
-      return path unless candidate?(path)
+      return path unless path.is_a?(String)
+
+      stripped = path.strip
+      return path if stripped.empty?
+
+      normalized = normalize_path(stripped)
+      return path if normalized =~ /\A[A-Za-z]:/
 
       base = root
       return path unless base
+      return path unless needs_save_remap?(normalized, base)
 
-      "#{base}/#{path}"
+      remapped = remap_to_userdata(normalized, base)
+      return path unless remapped
+
+      return remapped if orig_exist?(remapped)
+      return normalized if orig_exist?(normalized)
+
+      remapped
+    rescue StandardError
+      path
     end
 
     def glob_for(pattern)
-      return nil unless candidate?(pattern)
+      return nil unless pattern.is_a?(String)
 
-      path_for(pattern)
+      base = root
+      return nil unless base
+
+      normalized = normalize_path(pattern)
+      return nil if normalized.empty?
+
+      if (match = SAVE_SUBDIR_GLOB_RE.match(normalized))
+        tail = match[2].sub(%r{\A/}, '')
+        return "#{base}/#{tail}"
+      end
+
+      return "#{base}/#{normalized}" if candidate?(normalized)
+
+      nil
+    end
+
+    def dir_target(path)
+      return nil unless path.is_a?(String)
+
+      base = root
+      return base if base && save_directory_path?(path)
+
+      nil
+    end
+
+    def normalize_glob_results(result, pattern)
+      return result unless result.respond_to?(:map)
+
+      base = root
+      return result unless base
+
+      normalized_pattern = normalize_path(pattern)
+      save_subdir = SAVE_SUBDIR_GLOB_RE.match(normalized_pattern)
+      normalized_prefix = "#{base}/"
+      dir_prefix = save_subdir ? save_subdir[1] : nil
+
+      mapped = result.map do |entry|
+        rel = if entry.start_with?(normalized_prefix)
+                entry[normalized_prefix.length..-1] || entry
+              else
+                entry
+              end
+        next nil if engine_internal_entry?(rel)
+
+        if dir_prefix
+          "#{dir_prefix}/#{rel}"
+        else
+          rel
+        end
+      end
+      mapped.compact
     end
   end
 end
@@ -614,13 +790,28 @@ module MKXP
 end
 
 # --- Save-path remap into per-game UserData/ ---
+# IO.read / File.read are intentionally not hooked; no observed game reads
+# saves through them. load_data / save_data / File.open cover the paths we see.
 class << File
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_delete delete unless method_defined?(:_mkxp_orig_delete)
   alias _mkxp_orig_rename rename unless method_defined?(:_mkxp_orig_rename)
+  alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
+  alias _mkxp_orig_exist exist? unless method_defined?(:_mkxp_orig_exist)
+  alias _mkxp_orig_exists exists? unless method_defined?(:_mkxp_orig_exists)
+  alias _mkxp_orig_file file? unless method_defined?(:_mkxp_orig_file)
+  alias _mkxp_orig_directory directory? unless method_defined?(:_mkxp_orig_directory)
+  alias _mkxp_orig_size size unless method_defined?(:_mkxp_orig_size)
+  alias _mkxp_orig_size? size? unless method_defined?(:_mkxp_orig_size?)
+  alias _mkxp_orig_zero? zero? unless method_defined?(:_mkxp_orig_zero?)
+  alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
   def open(path, *args, &block)
     _mkxp_orig_open(MKXPSaveFS.path_for(path), *args, &block)
+  end
+
+  def new(path, *args)
+    _mkxp_orig_new(MKXPSaveFS.path_for(path), *args)
   end
 
   def delete(*paths)
@@ -629,6 +820,38 @@ class << File
 
   def rename(from, to)
     _mkxp_orig_rename(MKXPSaveFS.path_for(from), MKXPSaveFS.path_for(to))
+  end
+
+  def exist?(path)
+    _mkxp_orig_exist(MKXPSaveFS.path_for(path))
+  end
+
+  def exists?(path)
+    _mkxp_orig_exists(MKXPSaveFS.path_for(path))
+  end
+
+  def file?(path)
+    _mkxp_orig_file(MKXPSaveFS.path_for(path))
+  end
+
+  def directory?(path)
+    _mkxp_orig_directory(MKXPSaveFS.path_for(path))
+  end
+
+  def size(path)
+    _mkxp_orig_size(MKXPSaveFS.path_for(path))
+  end
+
+  def size?(path)
+    _mkxp_orig_size?(MKXPSaveFS.path_for(path))
+  end
+
+  def zero?(path)
+    _mkxp_orig_zero?(MKXPSaveFS.path_for(path))
+  end
+
+  def mtime(path)
+    _mkxp_orig_mtime(MKXPSaveFS.path_for(path))
   end
 end
 
@@ -654,19 +877,58 @@ end
 
 class << Dir
   alias _mkxp_orig_glob glob unless method_defined?(:_mkxp_orig_glob)
+  alias _mkxp_orig_entries entries unless method_defined?(:_mkxp_orig_entries)
+  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
+  if (method_defined?(:exist?) || private_method_defined?(:exist?)) && !method_defined?(:_mkxp_orig_exist)
+    alias _mkxp_orig_exist exist?
+  end
+  alias _mkxp_orig_mkdir mkdir unless method_defined?(:_mkxp_orig_mkdir)
 
   def glob(pattern, *args, &block)
     remapped = MKXPSaveFS.glob_for(pattern)
     result = _mkxp_orig_glob(remapped || pattern, *args, &block)
-    return result unless remapped && result.respond_to?(:map)
+    return result unless remapped
 
-    prefix = MKXPSaveFS.root
-    return result unless prefix
+    MKXPSaveFS.normalize_glob_results(result, pattern)
+  end
 
-    normalized_prefix = "#{prefix}/"
-    result.map do |entry|
-      entry.start_with?(normalized_prefix) ? entry.delete_prefix(normalized_prefix) : entry
+  def entries(path = '.', *args)
+    target = MKXPSaveFS.dir_target(path) || path
+    result = _mkxp_orig_entries(target, *args)
+    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_directory_path?(path)
+
+    result
+  end
+
+  def foreach(path = '.', *args, &block)
+    target = MKXPSaveFS.dir_target(path) || path
+    unless block
+      if MKXPSaveFS.save_directory_path?(path)
+        return MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each
+      end
+
+      return _mkxp_orig_foreach(target, *args)
     end
+
+    if MKXPSaveFS.save_directory_path?(path)
+      MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each(&block)
+    else
+      _mkxp_orig_foreach(target, *args, &block)
+    end
+  end
+
+  if method_defined?(:exist?) || private_method_defined?(:exist?)
+    def exist?(path)
+      return true if MKXPSaveFS.dir_target(path)
+
+      _mkxp_orig_exist(path)
+    end
+  end
+
+  def mkdir(path, *args)
+    return 0 if MKXPSaveFS.dir_target(path)
+
+    _mkxp_orig_mkdir(path, *args)
   end
 end
 
