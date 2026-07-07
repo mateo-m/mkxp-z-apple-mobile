@@ -73,7 +73,7 @@ if String.respond_to?(:prepend, true)
 else
   # Module#prepend is Ruby 2.0+. width/height are new methods on
   # String, so include is equivalent on 1.8/1.9 VX/VX Ace games.
-  String.send(:include, MkxpGraphicsPathString) unless String.ancestors.include?(MkxpGraphicsPathString)
+  String.include MkxpGraphicsPathString unless String.ancestors.include?(MkxpGraphicsPathString)
 end
 
 module MkxpBitmapPathCoercion
@@ -100,7 +100,7 @@ module MkxpBitmapPathCoercion
       klass.prepend(MkxpBitmapPathCoercion)
     else
       marker = :__mkxp_coerced_bitmap_set
-      return if klass.instance_methods.include?(marker)
+      return if klass.method_defined?(marker)
 
       klass.class_eval do
         alias_method marker, :bitmap=
