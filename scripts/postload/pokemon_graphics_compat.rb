@@ -155,10 +155,14 @@ if defined?(GameData::TrainerType) && GameData::TrainerType.respond_to?(:check_f
           candidates = []
           if optional_suffix && !optional_suffix.empty?
             candidates << (path + tr_type_data.id.to_s + optional_suffix + suffix)
-            candidates << (path + format('%03d', tr_type_data.id_number) + optional_suffix + suffix)
+            if tr_type_data.respond_to?(:id_number)
+              candidates << (path + format('%03d', tr_type_data.id_number) + optional_suffix + suffix)
+            end
           end
           candidates << (path + tr_type_data.id.to_s + suffix)
-          candidates << (path + format('%03d', tr_type_data.id_number) + suffix)
+          if tr_type_data.respond_to?(:id_number)
+            candidates << (path + format('%03d', tr_type_data.id_number) + suffix)
+          end
 
           candidates.each do |candidate|
             resolved = __mkxp_case_insensitive_bitmap(candidate)

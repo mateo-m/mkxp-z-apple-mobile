@@ -548,9 +548,23 @@ RB_METHOD_GUARD_END
  * explicitly want a dialog can call `msgbox` instead, which
  * stays bound to the original `mriPrint`/`showMessageBox` path.
  *
+ * Exception: Pokemon Essentials' pbPrintException ends with
+ * `print`, not `msgbox`. Detect that banner and route it through
+ * the host error dialog so handled script failures are visible.
+ *
  * Same arg semantics as Ruby's Kernel#print: each arg is converted
  * via `to_s`, joined without separator, no trailing newline.
  */
+static bool mkxpLooksLikePEExceptionPrint(const char *text) {
+    if (!text || !text[0])
+        return false;
+    if (!strstr(text, "Exception:"))
+        return false;
+    return strstr(text, "Backtrace:") ||
+           strstr(text, "Pokémon Essentials version") ||
+           strstr(text, "Pokemon Essentials version");
+}
+
 RB_METHOD_GUARD(mkxpKernelPrint) {
     RB_UNUSED_PARAM;
     
@@ -561,8 +575,11 @@ RB_METHOD_GUARD(mkxpKernelPrint) {
         rb_str_buf_append(buf, str);
     }
     
-    Debug() << RSTRING_PTR(buf);
-    mkxp_debugLog("SCRIPT", "Kernel.print [Ruby]", RSTRING_PTR(buf));
+    const char *text = RSTRING_PTR(buf);
+    Debug() << text;
+    mkxp_debugLog("SCRIPT", "Kernel.print [Ruby]", text);
+    if (mkxpLooksLikePEExceptionPrint(text))
+        shState->eThread().showMessageBox(text);
     
     shState->checkShutdown();
     shState->checkReset();
