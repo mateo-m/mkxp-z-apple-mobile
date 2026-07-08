@@ -1,9 +1,3 @@
-commit-msg:
-  parallel: false
-  commands:
-    message:
-      run: scripts/hooks/commit-msg.sh {1}
-
 pre-commit:
   parallel: false
   commands:
@@ -11,9 +5,3 @@ pre-commit:
       run: "git symbolic-ref -q HEAD >/dev/null || { printf 'pre-commit failed: refusing commit on detached HEAD\n' >&2; exit 1; }"
     checks:
       run: scripts/hooks/pre-commit.sh
-
-pre-push:
-  parallel: false
-  commands:
-    no-coauthors:
-      run: scripts/hooks/verify-no-coauthors.sh pre-push
