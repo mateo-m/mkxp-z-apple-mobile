@@ -1,26 +1,19 @@
+commit-msg:
+  parallel: false
+  commands:
+    message:
+      run: scripts/hooks/commit-msg.sh {1}
+
 pre-commit:
   parallel: false
   commands:
     block-detached-head:
       run: "git symbolic-ref -q HEAD >/dev/null || { printf 'pre-commit failed: refusing commit on detached HEAD\n' >&2; exit 1; }"
-    rubocop:
-      run: |
-        set -e
-        cd "$(git rev-parse --show-toplevel)"
-        STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
-        [ -n "$STAGED" ] || exit 0
-        command -v bundle >/dev/null 2>&1 || { printf 'pre-commit failed: bundle is required but not installed\n' >&2; exit 1; }
-        printf '\n-> rubocop --autocorrect-all (Ruby compat scripts)\n'
-        bundle exec rubocop --autocorrect-all --format quiet scripts/preload scripts/postload
-        if ! git diff --quiet -- scripts/preload scripts/postload; then
-          git add scripts/preload scripts/postload
-        fi
-        printf '\n-> rubocop (Ruby compat scripts)\n'
-        bundle exec rubocop scripts/preload scripts/postload
-        MD_FILES=$(printf '%s\n' "$STAGED" | grep -E '\.md$' | grep -Ev '^(src/theoraplay/|hmode7/)' || true)
-        if [ -n "$MD_FILES" ]; then
-          command -v bun >/dev/null 2>&1 || { printf 'pre-commit failed: bun is required but not installed\n' >&2; exit 1; }
-          printf '\n-> markdownlint (Markdown)\n'
-          printf '%s\n' "$MD_FILES" | xargs bun x markdownlint -c .markdownlint.json
-        fi
-        printf '\npre-commit OK\n'
+    checks:
+      run: scripts/hooks/pre-commit.sh
+
+pre-push:
+  parallel: false
+  commands:
+    no-coauthors:
+      run: scripts/hooks/verify-no-coauthors.sh pre-push
