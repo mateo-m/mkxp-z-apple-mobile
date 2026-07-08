@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <SDL.h>
+#include <SDL_syswm.h>
 
 #if TARGET_OS_IPHONE
 #include <CoreFoundation/CoreFoundation.h>
@@ -402,6 +403,17 @@ void mkxp_setSafeAreaInsets(float top, float bottom, float left, float right) {
 
 bool mkxp_consumeSafeAreaInsetsChanged(void) {
     return s_safeAreaInsetsChanged.exchange(false, std::memory_order_acquire);
+}
+
+void *mkxp_getSDLUIKitWindow(void) {
+    if (!SharedState::instance) return nullptr;
+    SDL_Window *win = SharedState::instance->sdlWindow();
+    if (!win) return nullptr;
+
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(win, &info)) return nullptr;
+    return info.info.uikit.window;
 }
 
 // Input bridge

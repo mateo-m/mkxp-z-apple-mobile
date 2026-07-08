@@ -216,6 +216,11 @@ bool        mkxp_consumeSafeAreaInsetsChanged(void);
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
+// SDL's UIKit UIWindow*, or NULL before the engine creates its window.
+// Owned by SDL; do not retain. For embedding host controls in the
+// same window stack as the game view on iOS.
+void       *mkxp_getSDLUIKitWindow(void);
+
 // Per-game settings (UI -> Engine), set by selectGame() before
 // engine boot and read by the engine during the run.
 //
