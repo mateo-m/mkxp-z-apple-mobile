@@ -150,6 +150,22 @@ const char *mkxp_getManagedConfigDir(void);
 void        mkxp_setUserDataDirectory(const char *path);
 const char *mkxp_getUserDataDirectory(void);
 
+// Launcher identity (UI -> Engine).
+//
+// Name of the host launcher embedding the engine, exposed to game
+// scripts before any preload/game code runs:
+//
+//   $userAgent = "<name>"
+//   $<name>    = true     (only when the name is a valid Ruby
+//                          identifier: [A-Za-z_][A-Za-z0-9_]*)
+//
+// This is the same detection contract JoiPlay established with its
+// `$joiplay` global; each host declares its own name so games and
+// patches can branch on the specific launcher. Set once before the
+// engine boots. Pass NULL/"" to clear (no globals are defined).
+void        mkxp_setLauncherIdentity(const char *name);
+const char *mkxp_getLauncherIdentity(void);
+
 // Text-input bridge (UI <-> Engine).
 //
 // Games request text input via `Input.text_input = true`, which calls

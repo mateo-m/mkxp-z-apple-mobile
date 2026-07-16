@@ -157,6 +157,11 @@ static std::string s_managedConfigDir;
 static std::mutex s_saveDirMutex;
 static std::string s_saveDir;
 
+// Launcher identity the host sets once before engine boot. Script
+// bootstrap reads it to define the `$userAgent` / `$<name>` globals.
+static std::mutex s_launcherIdentityMutex;
+static std::string s_launcherIdentity;
+
 // Game-side text-input intent. Set when the engine processes
 // REQUEST_TEXTMODE(1) (game called `Input.text_input = true`),
 // cleared on REQUEST_TEXTMODE(0). Distinct from
@@ -496,6 +501,16 @@ void mkxp_setUserDataDirectory(const char *path) {
 const char *mkxp_getUserDataDirectory(void) {
     std::lock_guard<std::mutex> lock(s_saveDirMutex);
     return s_saveDir.c_str();
+}
+
+void mkxp_setLauncherIdentity(const char *name) {
+    std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
+    s_launcherIdentity = (name && *name) ? std::string(name) : std::string();
+}
+
+const char *mkxp_getLauncherIdentity(void) {
+    std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
+    return s_launcherIdentity.c_str();
 }
 
 int mkxp_isTextInputActive(void) {

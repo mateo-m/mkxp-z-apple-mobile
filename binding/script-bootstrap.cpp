@@ -18,6 +18,7 @@
 #include "util/util.h"
 #include "filesystem/filesystem.h"
 
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -92,7 +93,30 @@ static void runBundledScript(const char *subdir, const char *name, const char *l
     }
 }
 
+// Expose the host launcher's identity to game scripts (see
+// mkxp_setLauncherIdentity in app_bridge.h): `$userAgent` carries the
+// name verbatim; `$<name> = true` follows the JoiPlay `$joiplay`
+// detection convention and is only defined when the name is a valid
+// Ruby identifier.
+static void setLauncherIdentityGlobals() {
+    const std::string identity(mkxp_getLauncherIdentity());
+    if (identity.empty())
+        return;
+
+    rb_gv_set("$userAgent", rb_utf8_str_new_cstr(identity.c_str()));
+
+    bool validIdentifier = std::isalpha((unsigned char)identity[0])
+                        || identity[0] == '_';
+    for (size_t i = 1; validIdentifier && i < identity.size(); ++i)
+        validIdentifier = std::isalnum((unsigned char)identity[i])
+                       || identity[i] == '_';
+    if (validIdentifier)
+        rb_gv_set(("$" + identity).c_str(), Qtrue);
+}
+
 void loadEnginePreloads() {
+    setLauncherIdentityGlobals();
+
     const char *enginePreloads[] = {
         "platform_compat",
         "pokemon_compat",
