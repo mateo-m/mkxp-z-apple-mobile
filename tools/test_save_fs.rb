@@ -118,4 +118,28 @@ Dir.chdir(GAME) do
   assert_eq(Dir.mkdir('Save'), 0, 'Dir.mkdir Save no-op')
 end
 
+# Pokemon Rejuvenation NG+ pattern: Dir.each_child("Save Data/") on a
+# folder that only exists as the remapped UserData root.
+Dir.chdir(GAME) do
+  children = []
+  Dir.each_child('Save Data/') { |entry| children << entry }
+  assert_true(children.include?('Save03.rvdata2'), 'each_child lists remapped save')
+  assert_false(children.include?('keybindings.mkxp3'), 'each_child filters engine file')
+
+  enum = Dir.each_child('Save Data/')
+  assert_true(enum.to_a.include?('Save03.rvdata2'), 'each_child enumerator remapped')
+
+  listed = Dir.children('Save')
+  assert_true(listed.include?('Save03.rvdata2'), 'children lists remapped save')
+  assert_false(listed.include?('keybindings.mkxp3'), 'children filters engine file')
+
+  plain = File.join(GAME, 'PlainDir')
+  Dir.mkdir(plain) unless File.exist?(plain)
+  File.write(File.join(plain, 'a.txt'), '')
+  assert_true(Dir.children('PlainDir').include?('a.txt'), 'children passthrough')
+  passthrough = []
+  Dir.each_child('PlainDir') { |entry| passthrough << entry }
+  assert_true(passthrough.include?('a.txt'), 'each_child passthrough')
+end
+
 puts 'OK: test_save_fs.rb passed'

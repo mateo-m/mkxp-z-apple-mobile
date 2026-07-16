@@ -917,6 +917,41 @@ class << Dir
     end
   end
 
+  # Ruby 2.5+/2.6+ additions; Pokemon Rejuvenation's New Game Plus
+  # code lists the save folder via Dir.each_child.
+  if method_defined?(:children) || private_method_defined?(:children)
+    alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
+
+    def children(path, *args)
+      target = MKXPSaveFS.dir_target(path) || path
+      result = _mkxp_orig_children(target, *args)
+      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_directory_path?(path)
+
+      result
+    end
+  end
+
+  if method_defined?(:each_child) || private_method_defined?(:each_child)
+    alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
+
+    def each_child(path, *args, &block)
+      target = MKXPSaveFS.dir_target(path) || path
+      unless block
+        if MKXPSaveFS.save_directory_path?(path)
+          return MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each
+        end
+
+        return _mkxp_orig_each_child(target, *args)
+      end
+
+      if MKXPSaveFS.save_directory_path?(path)
+        MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each(&block)
+      else
+        _mkxp_orig_each_child(target, *args, &block)
+      end
+    end
+  end
+
   if method_defined?(:exist?) || private_method_defined?(:exist?)
     def exist?(path)
       return true if MKXPSaveFS.dir_target(path)
