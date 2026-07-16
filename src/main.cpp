@@ -646,7 +646,13 @@ void EngineHost::runSession(int argc, char *argv[]) {
 
 void EngineHost::shutdown() {
   if (persistGLCtx_) {
-    SDL_GL_DeleteContext(persistGLCtx_);
+    /* persistGLCtx_ is the ANGLE EGL context cast to SDL_GLContext
+     * (see createPersistentGL), not an SDL-created context.
+     * SDL_GL_DeleteContext would hand it to SDL's UIKit EAGL
+     * backend, which dereferences it as an Objective-C view object
+     * and crashes. Tear it down through EGL, like the init()
+     * failure path does. */
+    teardownANGLE();
     persistGLCtx_ = nullptr;
   }
   alcMakeContextCurrent(NULL);
