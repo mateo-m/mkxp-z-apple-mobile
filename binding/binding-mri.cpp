@@ -555,6 +555,17 @@ RB_METHOD_GUARD_END
  * Same arg semantics as Ruby's Kernel#print: each arg is converted
  * via `to_s`, joined without separator, no trailing newline.
  */
+/* Last Kernel#print payload and the Graphics frame count at the time
+ * it was printed. Boot-gate scripts (e.g. Pokemon Reborn's
+ * ScriptLoader refusing to run the Windows build outside desktop)
+ * print their reason and immediately call `exit`; with print routed
+ * to the debug log the user would only see the generic "game has
+ * ended" alert. When the session ends cleanly and no frame was
+ * rendered since the last print, that print is the game's parting
+ * message - surface it through the host error dialog. */
+static std::string s_lastKernelPrintText;
+static int s_lastKernelPrintFrame = -1;
+
 static bool mkxpLooksLikePEExceptionPrint(const char *text) {
     if (!text || !text[0])
         return false;
@@ -578,6 +589,8 @@ RB_METHOD_GUARD(mkxpKernelPrint) {
     const char *text = RSTRING_PTR(buf);
     Debug() << text;
     mkxp_debugLog("SCRIPT", "Kernel.print [Ruby]", text);
+    s_lastKernelPrintText = text;
+    s_lastKernelPrintFrame = shState->graphics().getFrameCount();
     if (mkxpLooksLikePEExceptionPrint(text))
         shState->eThread().showMessageBox(text);
     
@@ -1910,16 +1923,31 @@ static void mriBindingExecute() {
      * false state from mkxp_setGamePath stays false in those cases
      * and the UI shows the recovery alert.
      *
-     * Additional gate: at least one script section must have
-     * executed without being skipped. If every script bailed via
-     * the LoadError/SyntaxError/NoMethodError tolerance path
-     * (e.g. a game whose Main does nothing but `require 'socket'`),
-     * the user never got a running game and shouldn't see the
-     * "game has ended or requested a restart" message - that text
-     * only makes sense for sessions where the game actually ran. */
-    if ((NIL_P(exc) || rb_obj_is_kind_of(exc, rb_eSystemExit)) &&
-        s_scriptsExecutedThisSession > 0) {
+     * Additional gate for the no-exception case: at least one
+     * script section must have executed without being skipped. If
+     * every script bailed via the LoadError/SyntaxError/
+     * NoMethodError tolerance path (e.g. a game whose Main does
+     * nothing but `require 'socket'`), the user never got a
+     * running game and shouldn't see the "game has ended or
+     * requested a restart" message - that text only makes sense
+     * for sessions where the game actually ran.
+     *
+     * SystemExit is exempt from that gate: `exit` in the very
+     * first script section (Reborn's ScriptLoader boot checks
+     * bail this way before the section can finish and be counted)
+     * is still the game deliberately ending itself, not a crash. */
+    if ((!NIL_P(exc) && rb_obj_is_kind_of(exc, rb_eSystemExit)) ||
+        (NIL_P(exc) && s_scriptsExecutedThisSession > 0)) {
         mkxp_setEngineExitedCleanly();
+
+        /* If the game printed something and then exited without
+         * rendering another frame, the print is its parting message
+         * (boot-gate pattern: "print reason; exit"). Route it to the
+         * host so the exit alert shows the game's own words instead
+         * of the generic clean-exit text. */
+        if (!s_lastKernelPrintText.empty() &&
+            s_lastKernelPrintFrame == shState->graphics().getFrameCount())
+            mkxp_setErrorMessage(s_lastKernelPrintText.c_str());
     }
 
     /* No ruby_cleanup: Ruby's VM has process-global state (signal
