@@ -82,13 +82,15 @@ module MKXP
     # JoiPlay) gate at boot on `MKXP.plugin_version.to_i`, which
     # encodes JoiPlay's RPG Maker Plugin version as a 5-digit
     # integer (1.20.53 -> 12053). The check refuses to run if
-    # the integer is below a hardcoded minimum. We set
-    # `$joiplay = true` to route these games through their
-    # JoiPlay code path, so we also have to advertise a
-    # plugin version high enough to satisfy those gates. We
-    # report 99999 - well above any known minimum - so future
-    # releases that bump the floor also pass without us having
-    # to chase every version.
+    # the integer is below a hardcoded minimum. When the host
+    # enables JoiPlay compat (`$joiplay = true`, see
+    # platform_compat.rb) these games take their JoiPlay code
+    # path, so we also have to advertise a plugin version high
+    # enough to satisfy those gates. We report 99999 - well
+    # above any known minimum - so future releases that bump
+    # the floor also pass without us having to chase every
+    # version. Harmless when the flag is off; games only
+    # consult this on the JoiPlay path.
     def plugin_version
       99_999
     end

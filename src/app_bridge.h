@@ -313,6 +313,7 @@ typedef struct {
     MKXPVerticalAlignment verticalAlignment;
     bool postloadEnabled;
     bool useInGameKeyboard;
+    bool joiplayCompat;
 } MKXPSessionConfig;
 
 void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
@@ -329,6 +330,14 @@ void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
 // `USEKEYBOARDTEXTENTRY = false` overrides when this is set.
 void mkxp_setUseInGameKeyboard(bool enabled);
 bool mkxp_getUseInGameKeyboard(void);
+
+// JoiPlay-compat signal (`$joiplay = true` in the game's Ruby VM).
+// Several games ship JoiPlay-specific patches that branch on the
+// global; whether those help or hurt depends on the game, so the
+// host decides per boot. Default false. `platform_compat.rb` reads
+// this via `System.joiplay_compat?` before game scripts load.
+void mkxp_setJoiplayCompat(bool enabled);
+bool mkxp_getJoiplayCompat(void);
 
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);

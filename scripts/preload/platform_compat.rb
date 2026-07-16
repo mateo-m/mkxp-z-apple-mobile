@@ -15,11 +15,17 @@ end
 # stripped-down API surface and desktop mkxp-z's extended one.
 # Example: Reborn's `internal_se_play` uses `Audio.se_play` on
 # JoiPlay but `Audio.se_play_position` on desktop - the latter is
-# an mkxp-z extension our iOS build doesn't carry. Since we ship
+# an mkxp-z extension our iOS build doesn't carry. We ship
 # JoiPlay-compat shims (NilClass safe-stubs, Win32API/DL stubs,
-# poke_* graphics aliases, cheats, network stubs) the JoiPlay code
-# path is what works here, so we set the flag.
-$joiplay = true
+# poke_* graphics aliases, cheats, network stubs) so the JoiPlay
+# code path often works here - but `$joiplay` also triggers patches
+# written against JoiPlay's old mkxp fork that misbehave on this
+# engine, so the host decides per game (System.joiplay_compat?,
+# wired to mkxp_setJoiplayCompat). Default off when the host
+# doesn't say.
+$joiplay =
+  defined?(System) && System.respond_to?(:joiplay_compat?) &&
+  System.joiplay_compat?
 
 # --- Thread.critical / Thread.critical= no-op shims (Ruby 1.9+) ---
 # Ruby 1.8 had `Thread.critical` and `Thread.critical=` to disable

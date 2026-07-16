@@ -74,6 +74,10 @@ static std::atomic<int>   s_syntaxTransformMode{MKXP_SYNTAX_TRANSFORM_UNSET};
 // when set to fall back to the game's own keyboard scene.
 static std::atomic<bool>  s_useInGameKeyboard{false};
 
+// Per-game JoiPlay-compat toggle. Default false. Read by
+// `platform_compat.rb` to decide whether to set `$joiplay = true`.
+static std::atomic<bool>  s_joiplayCompat{false};
+
 // Debug: tint the area outside the game viewport.
 static std::atomic<bool>  s_showViewportBounds{false};
 static std::atomic<float> s_vpBoundsR{0};
@@ -803,6 +807,7 @@ void mkxp_applySessionConfig(const MKXPSessionConfig *config) {
     mkxp_setSyntaxTransformMode(config->syntaxTransformMode);
     mkxp_applyPerGameSettings(config->verticalAlignment, config->postloadEnabled);
     mkxp_setUseInGameKeyboard(config->useInGameKeyboard);
+    mkxp_setJoiplayCompat(config->joiplayCompat);
 }
 
 void mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
@@ -849,6 +854,14 @@ void mkxp_setUseInGameKeyboard(bool enabled) {
 
 bool mkxp_getUseInGameKeyboard(void) {
     return s_useInGameKeyboard.load(std::memory_order_acquire);
+}
+
+void mkxp_setJoiplayCompat(bool enabled) {
+    s_joiplayCompat.store(enabled, std::memory_order_release);
+}
+
+bool mkxp_getJoiplayCompat(void) {
+    return s_joiplayCompat.load(std::memory_order_acquire);
 }
 
 void mkxp_setShowViewportBounds(bool enabled) {

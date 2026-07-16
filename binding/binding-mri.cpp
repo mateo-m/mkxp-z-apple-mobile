@@ -163,6 +163,7 @@ RB_METHOD(mkxpIsReallyWindowsHost);
 
 RB_METHOD(mkxpCheatsEnabled);
 RB_METHOD(mkxpUseInGameKeyboard);
+RB_METHOD(mkxpJoiplayCompat);
 RB_METHOD(mkxpManagedConfigDir);
 RB_METHOD(mkxpSyntaxTransformTarget);
 RB_METHOD(mkxpApplyOverrides);
@@ -427,6 +428,7 @@ static void mriBindingInit() {
 
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
     _rb_define_module_function(mod, "use_in_game_keyboard?", mkxpUseInGameKeyboard);
+    _rb_define_module_function(mod, "joiplay_compat?", mkxpJoiplayCompat);
     _rb_define_module_function(mod, "managed_config_dir", mkxpManagedConfigDir);
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
@@ -750,6 +752,14 @@ RB_METHOD(mkxpCheatsEnabled) {
 RB_METHOD(mkxpUseInGameKeyboard) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getUseInGameKeyboard());
+}
+
+/* System.joiplay_compat? - true when the host wants game scripts to
+   see `$joiplay = true` and take their JoiPlay-specific code paths.
+   Read by `platform_compat.rb` before game scripts load. */
+RB_METHOD(mkxpJoiplayCompat) {
+    RB_UNUSED_PARAM;
+    return rb_bool_new(mkxp_getJoiplayCompat());
 }
 
 /* System.data_directory - per-game writable directory. On iOS Empo
