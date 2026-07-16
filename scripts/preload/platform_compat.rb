@@ -766,6 +766,27 @@ unless defined?(Input::Controller)
   end
 end
 
+# --- Audio.se_play_position shim ---
+# Pokemon Reborn's custom desktop mkxp-z fork extends Audio with
+# spatially-positioned sound effects:
+# `se_play_position(name, volume, pitch, x, y, z)`. Reborn's
+# `internal_se_play` calls it on every SE when `$joiplay` is false,
+# so without a shim the first message-confirm sound raises
+# NoMethodError and soft-locks the scene. Our engine's SE path has
+# no spatial support; drop the coordinates and play the SE plain -
+# identical to the game's own JoiPlay branch
+# (`Audio.se_play(name, volume, pitch)`).
+#
+# Guarded so a future engine-native implementation (or a game's own
+# monkey-patch loaded later via preload) wins over the shim.
+if defined?(Audio) && Audio.respond_to?(:se_play) && !Audio.respond_to?(:se_play_position)
+  module Audio
+    def self.se_play_position(filename, volume = 100, pitch = 100, *_position)
+      se_play(filename, volume, pitch)
+    end
+  end
+end
+
 # --- MKXP module shim ---
 # Some game preload scripts expect the MKXP module from Ancurio's
 # original mkxp. mkxp-z uses "System" module instead.
@@ -859,6 +880,16 @@ class << File
   def mtime(path)
     _mkxp_orig_mtime(MKXPSaveFS.path_for(path))
   end
+
+  # Ruby 3 separates keyword args from positionals; without the
+  # ruby2_keywords flag these *args wrappers would collapse
+  # `File.open(path, mode: 'rb')`-style kwargs into a positional
+  # Hash and the original method raises TypeError. No-op relevant
+  # on 1.8/1.9 (hash-positional is the native semantic there).
+  if respond_to?(:ruby2_keywords, true)
+    ruby2_keywords :open
+    ruby2_keywords :new
+  end
 end
 
 module FileTest
@@ -897,6 +928,9 @@ class << Dir
 
     MKXPSaveFS.normalize_glob_results(result, pattern)
   end
+  # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
+  # this) flowing through the *args wrapper; see the File note above.
+  ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
 
   def entries(path = '.', *args)
     target = MKXPSaveFS.dir_target(path) || path
@@ -905,6 +939,7 @@ class << Dir
 
     result
   end
+  ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
 
   def foreach(path = '.', *args, &block)
     target = MKXPSaveFS.dir_target(path) || path
@@ -922,6 +957,7 @@ class << Dir
       _mkxp_orig_foreach(target, *args, &block)
     end
   end
+  ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
 
   # Ruby 2.5+/2.6+ additions; Pokemon Rejuvenation's New Game Plus
   # code lists the save folder via Dir.each_child.
@@ -935,6 +971,7 @@ class << Dir
 
       result
     end
+    ruby2_keywords :children if respond_to?(:ruby2_keywords, true)
   end
 
   if method_defined?(:each_child) || private_method_defined?(:each_child)
@@ -956,6 +993,7 @@ class << Dir
         _mkxp_orig_each_child(target, *args, &block)
       end
     end
+    ruby2_keywords :each_child if respond_to?(:ruby2_keywords, true)
   end
 
   if method_defined?(:exist?) || private_method_defined?(:exist?)
@@ -1178,6 +1216,82 @@ end
 # TODO: compile Ruby with network stdlib so online features
 # work. See TODO.md "Engine / compatibility".
 
+# --- rbconfig fallback ---
+# Our embedded Ruby doesn't ship `rbconfig` (it's generated per-arch
+# at Ruby build time, so it never lands in the static ext set).
+# Desktop-targeting games hit it indirectly - e.g. Pokemon Reborn's
+# bundled rubyzip does `require 'rbconfig'` on the non-JoiPlay path
+# and reads CONFIG['host_os'] to pick Windows vs POSIX path
+# handling. Reborn ships its own stdlib copies of rbconfig.rb but
+# only pushes the arch subdir (stdlib/x64-mingw32 etc.) onto the
+# load path for platforms it knows about, so on iOS the require
+# fails and the whole script eval aborts.
+#
+# When `require 'rbconfig'` raises LoadError, install a minimal
+# darwin-flavored RbConfig instead - iOS is closest to macOS (POSIX
+# paths, case-insensitive FS), so callers branch away from the
+# Windows-specific path handling that would corrupt our paths.
+# Installing a real module matters: merely swallowing the require
+# would leave `RbConfig::CONFIG['host_os']` to the const_missing
+# NullStub, whose method_missing chain is always-truthy and would
+# match ANY `=~ /mswin|mingw/` probe as Windows.
+#
+# Lazy (hooked into the require rescue below, not pre-defined) so a
+# game that gets a real rbconfig.rb onto the load path still loads
+# the genuine article without constant-redefinition noise.
+module MKXPRbConfigFallback
+  module_function
+
+  # Unknown keys resolve to '' (not nil) so string ops on unprobed
+  # CONFIG entries don't raise.
+  def config_values
+    parts = RUBY_VERSION.split('.')
+    config = Hash.new { |_hash, _key| '' }
+    config.update(
+      'MAJOR' => parts[0],
+      'MINOR' => parts[1],
+      'TEENY' => parts[2],
+      'ruby_version' => "#{parts[0]}.#{parts[1]}.0",
+      'RUBY_PROGRAM_VERSION' => RUBY_VERSION,
+      'host_os' => 'darwin',
+      'target_os' => 'darwin',
+      'host_cpu' => 'arm64',
+      'target_cpu' => 'arm64',
+      'arch' => 'arm64-darwin',
+      'sitearch' => 'arm64-darwin',
+      'host' => 'arm64-apple-darwin',
+      'ruby_install_name' => 'ruby',
+      'RUBY_INSTALL_NAME' => 'ruby',
+      'RUBY_SO_NAME' => 'ruby',
+      'EXEEXT' => '',
+      'DLEXT' => 'bundle',
+      'SOEXT' => 'dylib',
+      'PATH_SEPARATOR' => ':'
+    )
+  end
+
+  def install
+    return if Object.const_defined?(:RbConfig)
+
+    config = config_values
+    mod = Module.new
+    mod.const_set(:CONFIG, config)
+    mod.const_set(:MAKEFILE_CONFIG, config)
+    mod.const_set(:TOPDIR, nil)
+    mod.const_set(:DESTDIR, '')
+    def mod.ruby
+      'ruby'
+    end
+
+    def mod.expand(val, _config = nil)
+      val
+    end
+    Object.const_set(:RbConfig, mod)
+    System.puts '[platform_compat] rbconfig fallback installed' if defined?(System)
+    nil
+  end
+end
+
 module Kernel
   # Known-missing networking requires. Match by exact path or by
   # prefix so `net/http`, `net/https`, `net/http/status`, etc. are
@@ -1201,6 +1315,17 @@ module Kernel
       orig_require.bind(self).call(path)
     rescue LoadError => e
       str = path.to_s
+
+      # rbconfig gets a real fallback module (see
+      # MKXPRbConfigFallback above), not a swallow: callers read
+      # RbConfig::CONFIG values right after requiring.
+      if ['rbconfig', 'rbconfig.rb'].include?(str)
+        MKXPRbConfigFallback.install
+        feature = 'rbconfig.rb'
+        $LOADED_FEATURES << feature unless $LOADED_FEATURES.include?(feature)
+        next true
+      end
+
       matched = NETWORK_REQUIRE_PATHS.any? do |entry|
         entry.end_with?('/') ? str.start_with?(entry) : str == entry
       end
