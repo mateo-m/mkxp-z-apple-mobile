@@ -627,6 +627,32 @@ begin
 rescue StandardError
   # Dir.tmpdir can raise on locked-down sandboxes; fall back to /tmp.
 end
+
+# SDL_GetPrefPath contract: directory paths used for string-concat
+# save joins must end with '/'. iOS normalize strips trailing slashes;
+# the C++ System.data_directory binding re-adds one. Shared by the
+# Ruby mirror (stale-merged.o safety) and ENV setup below.
+module EmpoPath
+  module_function
+
+  def ensure_trailing_dir_sep(path)
+    p = path.to_s
+    return './' if p.empty? || p == '.'
+
+    p.end_with?('/', '\\') ? p : "#{p}/"
+  end
+end
+
+if defined?(System) && System.respond_to?(:data_directory) && !System.respond_to?(:_empo_orig_data_directory)
+  class << System
+    alias _empo_orig_data_directory data_directory
+
+    def data_directory(*args)
+      EmpoPath.ensure_trailing_dir_sep(_empo_orig_data_directory(*args))
+    end
+  end
+end
+
 save_root = nil
 begin
   if defined?(System) && System.respond_to?(:data_directory)
@@ -636,7 +662,9 @@ begin
 rescue StandardError
   save_root = nil
 end
-userdata = save_root || "#{tmp}/UserData"
+# Fake Windows env vars → per-game save root (trailing slash required
+# for `ENV['APPDATA'] + "Game.rxdata"`-style concat).
+userdata = EmpoPath.ensure_trailing_dir_sep(save_root || "#{tmp}/UserData")
 ENV['TEMP'] ||= tmp
 ENV['TMP']  ||= tmp
 ENV['APPDATA']              ||= userdata

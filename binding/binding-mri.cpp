@@ -623,7 +623,14 @@ RB_METHOD(mkxpDelta) {
 /* System.data_directory - per-game writable directory. On iOS Empo
    points this at `Documents/Games/<id>/UserData/` so saves and any
    companion app-data files are visible in the Files app and stay
-   inside the imported game container. */
+   inside the imported game container.
+
+   Always ends with '/' (same contract as SDL_GetPrefPath). Pokemon
+   Essentials and other PE forks concatenate with string + rather than
+   File.join (`System.data_directory + "Game.rxdata"`); without the
+   separator that becomes `.../UserDataGame.rxdata` at the container
+   root. Foundation's URLByStandardizingPath strips trailing slashes,
+   so we re-add one after normalize. */
 RB_METHOD(mkxpDataDirectory) {
     RB_UNUSED_PARAM;
     
@@ -631,9 +638,12 @@ RB_METHOD(mkxpDataDirectory) {
     const char *s = path.empty() ? "." : path.c_str();
     
     std::string s_nml = shState->fileSystem().normalize(s, 1, 1);
-    VALUE ret = mkxp_str_new_cstr(s_nml.c_str());
+    if (s_nml.empty() || s_nml == ".")
+        return mkxp_str_new_cstr("./");
+    if (s_nml.back() != '/')
+        s_nml += '/';
     
-    return ret;
+    return mkxp_str_new_cstr(s_nml.c_str());
 }
 
 RB_METHOD(mkxpSetTitle) {
@@ -762,10 +772,6 @@ RB_METHOD(mkxpJoiplayCompat) {
     return rb_bool_new(mkxp_getJoiplayCompat());
 }
 
-/* System.data_directory - per-game writable directory. On iOS Empo
-   points this at `Documents/Games/<id>/UserData/` so saves and
-   companion app-data files are visible in the Files app and stay
-   inside the imported game container. */
 /* MKXP.managed_config_dir - host-managed per-game state directory
    (Documents/EmpoState/<id>/ on iOS). Postload scripts use this
    to drop runtime-detection marker files that survive across
