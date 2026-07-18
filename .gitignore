@@ -81,3 +81,6 @@ DerivedData/
 
 # Node tool caches (CI uses bun + bun.lock instead).
 node_modules/
+
+# Rubocop cache (written by the pre-commit hook).
+.rubocop_cache/
