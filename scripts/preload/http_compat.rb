@@ -11,11 +11,12 @@
 # different signature: one URL, hash return `{status, body,
 # headers}`. Rather than duplicate the binding, wrap it in Ruby.
 #
-# `HTTP.download` has no native analog - we could stream to disk
-# via HTTPLite but the fangames that call it only need the
-# progress callback fired and a non-error return. Return 200 and
-# call the progress callback once at 100/100 so "check for update"
-# probes see a benign success.
+# `HTTP.download` streams for real through `HTTPLite.download` when
+# the host has enabled network access. When the game is offline
+# (toggle off, or a build without the native download), it falls
+# back to the historical fake: fire the progress callback once at
+# 100/100 and return 200 so "check for update" probes see a benign
+# success without transferring bytes.
 #
 # All calls are wrapped in `begin...rescue` so a transient
 # network failure surfaces to Ruby as an empty string rather
@@ -29,6 +30,7 @@ if defined?(HTTPLite)
         alias __mkxp_native_get get
         alias __mkxp_native_post post
         alias __mkxp_native_post_body post_body
+        alias __mkxp_native_download download if method_defined?(:download)
 
         # rubocop:disable Lint/RescueException -- JoiPlay returns "" on any binding error, not just StandardError
         def get(*args)
@@ -53,6 +55,16 @@ if defined?(HTTPLite)
           raise unless __mkxp_http_error?(e)
 
           __mkxp_empty_response('POST', args[0], e)
+        end
+
+        if method_defined?(:__mkxp_native_download)
+          def download(*args)
+            __mkxp_native_download(*args)
+          rescue Exception => e
+            raise unless __mkxp_http_error?(e)
+
+            __mkxp_empty_response('DOWNLOAD', args[0], e)
+          end
         end
         # rubocop:enable Lint/RescueException
 
@@ -93,22 +105,34 @@ module HTTP
       ''
     end
 
-    # JoiPlay invokes this for trophy unlocks / update checks; a
-    # success status is enough, our side does not need to stream
-    # bytes to disk because those probes discard the payload.
-    def download(host, query, _path, on_progress = nil)
-      if on_progress.is_a?(String) && respond_to?(on_progress, true)
-        send(on_progress, 100, 100)
-      elsif on_progress.respond_to?(:call)
-        on_progress.call(100, 100)
-      end
-      200
+    def download(host, query, path, on_progress = nil)
+      url = _join(host, query)
+      return _fake_download(on_progress) unless _network_on? && HTTPLite.respond_to?(:download)
+
+      # The native callback contract is a top-level method name;
+      # Procs/Methods can't cross into C, so run those transfers
+      # callback-less and fire the callable once at completion.
+      native_cb = on_progress.is_a?(String) || on_progress.is_a?(Symbol) ? on_progress : nil
+      result = HTTPLite.download(url, path, native_cb)
+      status = result.is_a?(Hash) ? (result[:status] || 0) : 0
+      on_progress.call(100, 100) if native_cb.nil? && on_progress.respond_to?(:call) && status == 200
+      status
     rescue StandardError => e
       _log_err('DOWNLOAD', _join(host, query), e)
       0
     end
 
     private
+
+    # Offline fake: benign success, no bytes transferred.
+    def _fake_download(on_progress)
+      if on_progress.is_a?(String) && respond_to?(on_progress, true)
+        send(on_progress, 100, 100)
+      elsif on_progress.respond_to?(:call)
+        on_progress.call(100, 100)
+      end
+      200
+    end
 
     # Accept either a full URL in `host` with empty query, or a
     # host/scheme separate from a path/query. Avoid double slashes
@@ -121,6 +145,10 @@ module HTTP
       return host + query if query.start_with?('?')
 
       "#{host}/#{query}"
+    end
+
+    def _network_on?
+      defined?(System) && System.respond_to?(:network_enabled?) && System.network_enabled?
     end
 
     def _log_err(verb, url, e)

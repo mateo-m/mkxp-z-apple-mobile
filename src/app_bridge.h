@@ -166,6 +166,19 @@ const char *mkxp_getUserDataDirectory(void);
 void        mkxp_setLauncherIdentity(const char *name);
 const char *mkxp_getLauncherIdentity(void);
 
+// CA certificate bundle (UI -> Engine).
+//
+// Absolute path to a PEM CA bundle (e.g. the Mozilla root store)
+// used to verify TLS server certificates for all engine-side
+// networking: the native HTTPLite client, and Ruby's openssl ext
+// (exported as SSL_CERT_FILE before the VM boots). Set once before
+// the engine starts, like the launcher identity.
+//
+// When unset, TLS connections fail closed (certificate verification
+// has no roots to succeed against) — plain http still works.
+void        mkxp_setCABundlePath(const char *path);
+const char *mkxp_getCABundlePath(void);
+
 // Text-input bridge (UI <-> Engine).
 //
 // Games request text input via `Input.text_input = true`, which calls
@@ -314,6 +327,7 @@ typedef struct {
     bool postloadEnabled;
     bool useInGameKeyboard;
     bool joiplayCompat;
+    bool networkEnabled;
 } MKXPSessionConfig;
 
 void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
@@ -338,6 +352,14 @@ bool mkxp_getUseInGameKeyboard(void);
 // this via `System.joiplay_compat?` before game scripts load.
 void mkxp_setJoiplayCompat(bool enabled);
 bool mkxp_getJoiplayCompat(void);
+
+// Network access (UI -> Engine). When enabled, the preload layer
+// stops simulating an offline device: network stdlib requires
+// resolve normally, HTTP downloads stream for real, and postload
+// online-feature stubs stay out of the way. Ruby reads this via
+// `System.network_enabled?`. Default false (host must opt in).
+void mkxp_setNetworkEnabled(bool enabled);
+bool mkxp_getNetworkEnabled(void);
 
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);

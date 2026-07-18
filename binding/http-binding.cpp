@@ -6,11 +6,16 @@
 //
 
 #include <stdio.h>
+#include <string>
 
 #include "util/json5pp.hpp"
 #include "binding-util.h"
 
 #include "net/net.h"
+
+#if RAPI_MAJOR >= 2
+#include <ruby/thread.h>
+#endif
 
 VALUE stringMap2hash(mkxp_net::StringMap &map) {
     VALUE ret = rb_hash_new();
@@ -187,6 +192,146 @@ RB_METHOD_GUARD(httpPostBody) {
 }
 RB_METHOD_GUARD_END
 
+/* HTTPLite.download(url, filename, progress_cb_name = nil, headers = nil)
+ *
+ * JoiPlay-compatible streaming download: writes the response body to
+ * `filename` and reports progress by calling the *top-level method*
+ * named by `progress_cb_name` with (received_bytes, total_bytes).
+ * (Top-level `def foo` methods are private methods of Object;
+ * rb_funcall ignores visibility, which is exactly JoiPlay's
+ * "global function name" contract.) Returns {status:, headers:}.
+ *
+ * The transfer runs with the GVL released; each progress event
+ * reacquires it just long enough to run the callback. A callback
+ * that raises cancels the transfer and its exception propagates to
+ * the caller. */
+
+typedef struct {
+    mkxp_net::HTTPRequest *req;
+    std::string destPath;
+    ID cbId;                    // 0 = no callback
+    int cbState;                // rb_protect state from a raised callback
+    long long lastPercent;      // throttle: last reported percent
+    uint64_t lastBytes;         //   ... or byte watermark when total unknown
+    int status;
+    mkxp_net::StringMap responseHeaders;
+} httpDownloadArgs;
+
+typedef struct {
+    httpDownloadArgs *args;
+    uint64_t current;
+    uint64_t total;
+} httpDownloadProgressEvent;
+
+static VALUE httpDownloadInvokeCb(VALUE data) {
+    httpDownloadProgressEvent *ev = (httpDownloadProgressEvent*)data;
+    return rb_funcall(rb_cObject, ev->args->cbId, 2,
+                      ULL2NUM(ev->current), ULL2NUM(ev->total));
+}
+
+static void *httpDownloadFireCb(void *data) {
+    httpDownloadProgressEvent *ev = (httpDownloadProgressEvent*)data;
+    int state = 0;
+    rb_protect(httpDownloadInvokeCb, (VALUE)ev, &state);
+    if (state)
+        ev->args->cbState = state;
+    return 0;
+}
+
+void *httpDownloadInternal(void *a) {
+    httpDownloadArgs *args = (httpDownloadArgs*)a;
+
+    mkxp_net::HTTPResponse res = args->req->download(
+        args->destPath.c_str(),
+        [args](uint64_t current, uint64_t total) -> bool {
+            if (!args->cbId)
+                return true;
+
+            /* Throttle GVL ping-pong: percent steps when the size is
+             * known, 1 MiB steps when it isn't. Always report the
+             * final event so callers see 100%. */
+            bool fire;
+            if (total) {
+                long long percent = (long long)(current * 100 / total);
+                fire = (percent != args->lastPercent) || current == total;
+                if (fire)
+                    args->lastPercent = percent;
+            } else {
+                fire = (current - args->lastBytes) >= (1 << 20);
+                if (fire)
+                    args->lastBytes = current;
+            }
+            if (!fire)
+                return true;
+
+            httpDownloadProgressEvent ev = {args, current, total};
+#if RAPI_MAJOR >= 2
+            rb_thread_call_with_gvl(httpDownloadFireCb, &ev);
+#else
+            httpDownloadFireCb(&ev);
+#endif
+            return args->cbState == 0;
+        });
+
+    args->status = res.status();
+    args->responseHeaders = res.headers();
+    return 0;
+}
+
+RB_METHOD_GUARD(httpDownload) {
+    RB_UNUSED_PARAM;
+
+    VALUE path, filename, cbname, rheaders;
+    rb_scan_args(argc, argv, "22", &path, &filename, &cbname, &rheaders);
+    SafeStringValue(path);
+    SafeStringValue(filename);
+
+    mkxp_net::HTTPRequest req(RSTRING_PTR(path));
+    if (rheaders != Qnil) {
+        auto headers = hash2StringMap(rheaders);
+        req.headers().insert(headers.begin(), headers.end());
+    }
+
+    httpDownloadArgs args;
+    args.req = &req;
+    args.destPath = RSTRING_PTR(filename);
+    args.cbId = 0;
+    args.cbState = 0;
+    args.lastPercent = -1;
+    args.lastBytes = 0;
+    args.status = 0;
+
+    if (cbname != Qnil) {
+        if (RB_TYPE_P(cbname, RUBY_T_SYMBOL)) {
+            args.cbId = SYM2ID(cbname);
+        } else {
+            SafeStringValue(cbname);
+            args.cbId = rb_intern(RSTRING_PTR(cbname));
+        }
+    }
+
+    try {
+#if RAPI_MAJOR >= 2
+        drop_gvl_guard(httpDownloadInternal, &args, 0, 0);
+#else
+        httpDownloadInternal(&args);
+#endif
+    }
+    catch (const Exception &e) {
+        /* A raising progress callback cancels the transfer; surface
+         * the callback's own exception, not the cancel error. */
+        if (args.cbState)
+            rb_jump_tag(args.cbState);
+        throw;
+    }
+
+    VALUE ret = rb_hash_new();
+    rb_hash_aset(ret, ID2SYM(rb_intern("status")), INT2NUM(args.status));
+    rb_hash_aset(ret, ID2SYM(rb_intern("headers")), stringMap2hash(args.responseHeaders));
+    return ret;
+}
+RB_METHOD_GUARD_END
+
 VALUE json2rb(json5pp::value const &v) {
     if (v.is_null())
         return Qnil;
@@ -307,6 +452,7 @@ void httpBindingInit() {
     _rb_define_module_function(mNet, "get", httpGet);
     _rb_define_module_function(mNet, "post", httpPost);
     _rb_define_module_function(mNet, "post_body", httpPostBody);
+    _rb_define_module_function(mNet, "download", httpDownload);
     
     VALUE mNetJSON = rb_define_module_under(mNet, "JSON");
     _rb_define_module_function(mNetJSON, "stringify", httpJsonStringify);

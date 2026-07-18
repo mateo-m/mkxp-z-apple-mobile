@@ -78,6 +78,11 @@ static std::atomic<bool>  s_useInGameKeyboard{false};
 // `platform_compat.rb` to decide whether to set `$joiplay = true`.
 static std::atomic<bool>  s_joiplayCompat{false};
 
+// Per-game network access toggle. Default false (offline illusion
+// preserved unless the host opts in). Read by the preload layer via
+// `System.network_enabled?`.
+static std::atomic<bool>  s_networkEnabled{false};
+
 // Debug: tint the area outside the game viewport.
 static std::atomic<bool>  s_showViewportBounds{false};
 static std::atomic<float> s_vpBoundsR{0};
@@ -165,6 +170,11 @@ static std::string s_saveDir;
 // bootstrap reads it to define the `$userAgent` / `$<name>` globals.
 static std::mutex s_launcherIdentityMutex;
 static std::string s_launcherIdentity;
+
+// PEM CA bundle used for TLS server verification (native HTTP client
+// + Ruby openssl via SSL_CERT_FILE). Set once before engine boot.
+static std::mutex s_caBundlePathMutex;
+static std::string s_caBundlePath;
 
 // Game-side text-input intent. Set when the engine processes
 // REQUEST_TEXTMODE(1) (game called `Input.text_input = true`),
@@ -517,6 +527,18 @@ const char *mkxp_getLauncherIdentity(void) {
     return s_launcherIdentity.c_str();
 }
 
+void mkxp_setCABundlePath(const char *path) {
+    std::lock_guard<std::mutex> lock(s_caBundlePathMutex);
+    s_caBundlePath = (path && *path) ? std::string(path) : std::string();
+}
+
+const char *mkxp_getCABundlePath(void) {
+    std::lock_guard<std::mutex> lock(s_caBundlePathMutex);
+    /* Pointer is valid until s_caBundlePath is reassigned; callers
+     * should copy into std::string if they need to keep it. */
+    return s_caBundlePath.c_str();
+}
+
 int mkxp_isTextInputActive(void) {
     /* Game-side intent (`Input.text_input = true`) rather than
      * SDL's flag, which the iOS backend auto-clears on transient
@@ -808,6 +830,7 @@ void mkxp_applySessionConfig(const MKXPSessionConfig *config) {
     mkxp_applyPerGameSettings(config->verticalAlignment, config->postloadEnabled);
     mkxp_setUseInGameKeyboard(config->useInGameKeyboard);
     mkxp_setJoiplayCompat(config->joiplayCompat);
+    mkxp_setNetworkEnabled(config->networkEnabled);
 }
 
 void mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
@@ -862,6 +885,14 @@ void mkxp_setJoiplayCompat(bool enabled) {
 
 bool mkxp_getJoiplayCompat(void) {
     return s_joiplayCompat.load(std::memory_order_acquire);
+}
+
+void mkxp_setNetworkEnabled(bool enabled) {
+    s_networkEnabled.store(enabled, std::memory_order_release);
+}
+
+bool mkxp_getNetworkEnabled(void) {
+    return s_networkEnabled.load(std::memory_order_acquire);
 }
 
 void mkxp_setShowViewportBounds(bool enabled) {

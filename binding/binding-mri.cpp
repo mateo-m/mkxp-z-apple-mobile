@@ -164,6 +164,7 @@ RB_METHOD(mkxpIsReallyWindowsHost);
 RB_METHOD(mkxpCheatsEnabled);
 RB_METHOD(mkxpUseInGameKeyboard);
 RB_METHOD(mkxpJoiplayCompat);
+RB_METHOD(mkxpNetworkEnabled);
 RB_METHOD(mkxpManagedConfigDir);
 RB_METHOD(mkxpSyntaxTransformTarget);
 RB_METHOD(mkxpApplyOverrides);
@@ -429,6 +430,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
     _rb_define_module_function(mod, "use_in_game_keyboard?", mkxpUseInGameKeyboard);
     _rb_define_module_function(mod, "joiplay_compat?", mkxpJoiplayCompat);
+    _rb_define_module_function(mod, "network_enabled?", mkxpNetworkEnabled);
     _rb_define_module_function(mod, "managed_config_dir", mkxpManagedConfigDir);
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
     _rb_define_module_function(mod, "rpg_version", mkxpRpgVersion);
@@ -770,6 +772,15 @@ RB_METHOD(mkxpUseInGameKeyboard) {
 RB_METHOD(mkxpJoiplayCompat) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getJoiplayCompat());
+}
+
+/* System.network_enabled? - true when the host allows this game to
+   reach the network. When false the preload layer keeps up the
+   offline illusion (network stdlib requires are swallowed, HTTP
+   download shims fake success, online-feature stubs stay active). */
+RB_METHOD(mkxpNetworkEnabled) {
+    RB_UNUSED_PARAM;
+    return rb_bool_new(mkxp_getNetworkEnabled());
 }
 
 /* MKXP.managed_config_dir - host-managed per-game state directory
@@ -1785,6 +1796,16 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
 static void mriBindingExecute() {
     Config &conf = shState->rtData().config;
 
+    /* Point Ruby's openssl ext at the host-provided CA bundle before
+     * the VM boots; the baked-in openssldir from the cross-compile
+     * doesn't exist on device, so without this every TLS handshake
+     * fails verification even with a valid server cert. */
+    {
+        const char *caPath = mkxp_getCABundlePath();
+        if (caPath && caPath[0])
+            setenv("SSL_CERT_FILE", caPath, 1);
+    }
+
 #if RAPI_MAJOR >= 2
     /* Normally only a ruby executable would do a sysinit,
      * but not doing it will lead to crashes due to closed
@@ -1897,10 +1918,25 @@ static void mriBindingExecute() {
     VALUE lpaths = rb_gv_get(":");
     rb_ary_clear(lpaths);
     
-#if defined(MKXPZ_BUILD_XCODE) && RAPI_MAJOR >= 2
-    std::string resPath = mkxp_fs::getResourcePath();
-    resPath += "/Ruby/" + std::to_string(RAPI_MAJOR) + "." + std::to_string(RAPI_MINOR) + ".0";
-    rb_ary_push(lpaths, rb_str_new(resPath.c_str(), resPath.size()));
+#ifdef MKXPZ_BUILD_XCODE
+    /* Host-bundled pure-Ruby stdlib (net/http, uri, openssl.rb, ...).
+     * Directory names follow each Ruby's own rubylibdir convention
+     * so the trees can be copied verbatim from a Ruby checkout.
+     * Only exposed when the host allows network access: with the
+     * toggle off, `require 'net/http'` must keep failing (and being
+     * absorbed by platform_compat) exactly as before networking
+     * support existed. */
+    if (mkxp_getNetworkEnabled()) {
+        std::string resPath = mkxp_fs::getResourcePath();
+#if RAPI_MAJOR >= 2
+        resPath += "/Ruby/" + std::to_string(RAPI_MAJOR) + "." + std::to_string(RAPI_MINOR) + ".0";
+#elif RAPI_FULL >= 190
+        resPath += "/Ruby/1.9.1";
+#else
+        resPath += "/Ruby/1.8";
+#endif
+        rb_ary_push(lpaths, rb_str_new(resPath.c_str(), resPath.size()));
+    }
 #endif
     
     if (!conf.rubyLoadpaths.empty()) {

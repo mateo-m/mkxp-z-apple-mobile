@@ -6,8 +6,14 @@
 //
 
 #include <stdio.h>
+#include <cstdint>
 
-#if defined(MKXPZ_SSL)
+/* TLS for the in-engine HTTP client. Deliberately NOT keyed on MKXPZ_SSL:
+ * upstream uses that flag as a combined "with-https" build variant that
+ * also switches on the xBRZ shader paths (see src/display/*). This fork
+ * wants TLS without dragging in untested renderer code, so the network
+ * layer has its own flag. */
+#if defined(MKXPZ_NET_TLS)
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #endif
 #include "httplib.h"
@@ -16,6 +22,7 @@
 
 #include "LUrlParser.h"
 #include "net.h"
+#include "app_bridge.h"
 
 const char* httpErrorNames[] = {
     "Success",
@@ -56,7 +63,7 @@ std::string getHost(LUrlParser::ParseURL url) {
     host += url.scheme_;
     host += "://";
     host += url.host_;
-    
+
     int port;
     if (!url.port_.empty() && url.getPort(&port)) {
         host += ":";
@@ -68,17 +75,44 @@ std::string getHost(LUrlParser::ParseURL url) {
 std::string getPath(LUrlParser::ParseURL url) {
     std::string path = "/";
     path += url.path_;
-    
+
     if (!url.query_.empty()) {
         path += "?";
         path += url.query_;
     }
-    
+
     return path;
 }
 
 
 using namespace mkxp_net;
+
+/* The host's per-game network toggle is enforced here, at the native
+ * client, so every Ruby-visible path over it (HTTPLite, the HTTP shim,
+ * the old-VM Net::HTTP facade) goes offline together: requests throw,
+ * and the Ruby-side wrappers translate that into the same empty
+ * responses games saw before Empo had networking. */
+static void ensureNetworkAllowed() {
+    if (!mkxp_getNetworkEnabled())
+        throw Exception(Exception::MKXPError,
+                        "Network access is disabled for this game");
+}
+
+/* Shared client setup: TLS server verification against the host-provided
+ * CA bundle (fails closed when none was set), plus timeouts so a game
+ * firing an update check against a dead server doesn't hang the script
+ * thread for minutes. */
+static void configureClient(httplib::Client &client) {
+#ifdef MKXPZ_NET_TLS
+    const char *caPath = mkxp_getCABundlePath();
+    if (caPath && caPath[0])
+        client.set_ca_cert_path(caPath);
+    client.enable_server_certificate_verification(true);
+#endif
+    client.set_connection_timeout(10, 0);
+    client.set_read_timeout(30, 0);
+    client.set_write_timeout(30, 0);
+}
 
 HTTPResponse::HTTPResponse() :
     _headers(StringMap()),
@@ -113,132 +147,175 @@ StringMap &HTTPRequest::headers() {
 }
 
 HTTPResponse HTTPRequest::get() {
+    ensureNetworkAllowed();
+
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
-    
-    httplib::Client *client = nullptr;
-    try {
-        client = new httplib::Client(getHost(target).c_str());
-    }
-    catch (std::exception &e) {
-        delete client;
-        throw Exception(Exception::MKXPError, "Failed to create HTTP client (%s)", e.what());
-    }
-    
+
+    httplib::Client client(getHost(target).c_str());
+    configureClient(client);
+    client.set_follow_location(follow_location);
+
     httplib::Headers head;
-    
-    // Seems to need to be disabled for now, at least on macOS
-#ifdef MKXPZ_SSL
-    client->enable_server_certificate_verification(false);
-#endif
-    client->set_follow_location(follow_location);
-    
     for (auto const &h : _headers)
         head.emplace(h.first, h.second);
-        
-    if (auto result = client->Get(getPath(target).c_str(), head)) {
+
+    if (auto result = client.Get(getPath(target).c_str(), head)) {
         auto response = result.value();
         ret._status = response.status;
         ret._body = response.body;
-        
+
         for (auto const &h : response.headers)
             ret._headers.emplace(h.first, h.second);
     }
     else {
         auto err = result.error();
         std::string errname = httplib::to_string(err);
-        delete client;
         throw Exception(Exception::MKXPError, "Failed to GET %s (%i: %s)", destination.c_str(), err, errname.c_str());
     }
-    
-    delete client;
+
     return ret;
 }
 
 HTTPResponse HTTPRequest::post(StringMap &postData) {
+    ensureNetworkAllowed();
+
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
-    
-    httplib::Client *client = nullptr;
-    try {
-        client = new httplib::Client(getHost(target).c_str());
-    }
-    catch (std::exception &e) {
-        delete client;
-        throw Exception(Exception::MKXPError, "Failed to create HTTP client (%s)", e.what());
-    }
-    
+
+    httplib::Client client(getHost(target).c_str());
+    configureClient(client);
+    client.set_follow_location(follow_location);
+
     httplib::Headers head;
     httplib::Params params;
-    
-    // Seems to need to be disabled for now, at least on macOS
-#ifdef MKXPZ_SSL
-    client->enable_server_certificate_verification(false);
-#endif
-    client->set_follow_location(follow_location);
-    
+
     for (auto const &h : _headers)
         head.emplace(h.first, h.second);
-    
+
     for (auto const &p : postData)
         params.emplace(p.first, p.second);
-    
-    if (auto result = client->Post(getPath(target).c_str(), head, params)) {
+
+    if (auto result = client.Post(getPath(target).c_str(), head, params)) {
         auto response = result.value();
         ret._status = response.status;
         ret._body = response.body;
-        
+
         for (auto h : response.headers)
             ret._headers.emplace(h.first, h.second);
     }
     else {
         auto err = result.error();
         std::string errname = httplib::to_string(err);
-        delete client;
         throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
     }
-    delete client;
     return ret;
 }
 
 HTTPResponse HTTPRequest::post(const char *body, const char *content_type) {
+    ensureNetworkAllowed();
+
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
-    
-    httplib::Client *client = nullptr;
-    try {
-        client = new httplib::Client(getHost(target).c_str());
-    }
-    catch (std::exception &e) {
-        delete client;
-        throw Exception(Exception::MKXPError, "Failed to create HTTP client (%s)", e.what());
-    }
-    
+
+    httplib::Client client(getHost(target).c_str());
+    configureClient(client);
+    client.set_follow_location(true);
+
     httplib::Headers head;
-    
-    // Seems to need to be disabled for now, at least on macOS
-#ifdef MKXPZ_SSL
-    client->enable_server_certificate_verification(false);
-#endif
-    client->set_follow_location(true);
-    
     for (auto const &h : _headers)
         head.emplace(h.first, h.second);
 
-    if (auto result = client->Post(getPath(target).c_str(), head, body, content_type)) {
+    if (auto result = client.Post(getPath(target).c_str(), head, body, content_type)) {
         auto response = result.value();
         ret._status = response.status;
         ret._body = response.body;
-        
+
         for (auto const &h : response.headers)
             ret._headers.emplace(h.first, h.second);
     }
     else {
         auto err = result.error();
         std::string errname = httplib::to_string(err);
-        delete client;
         throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
     }
-    delete client;
+    return ret;
+}
+
+HTTPResponse HTTPRequest::download(const char *destPath, DownloadProgressFn progress) {
+    ensureNetworkAllowed();
+
+    HTTPResponse ret;
+    auto target = readURL(destination.c_str());
+
+    httplib::Client client(getHost(target).c_str());
+    configureClient(client);
+    client.set_follow_location(follow_location);
+
+    httplib::Headers head;
+    for (auto const &h : _headers)
+        head.emplace(h.first, h.second);
+
+    std::string tmpPath = std::string(destPath) + ".part";
+    FILE *out = nullptr;
+    bool writeFailed = false;
+    int status = 0;
+
+    auto result = client.Get(
+        getPath(target).c_str(), head,
+        [&](const httplib::Response &response) {
+            status = response.status;
+            for (auto const &h : response.headers)
+                ret._headers.emplace(h.first, h.second);
+            return true;
+        },
+        [&](const char *data, size_t len) {
+            /* Only stream a successful response to disk; error bodies
+             * (404 pages, auth challenges) are discarded so callers can
+             * retry without cleanup. */
+            if (status != 200)
+                return true;
+            if (!out) {
+                out = fopen(tmpPath.c_str(), "wb");
+                if (!out) {
+                    writeFailed = true;
+                    return false;
+                }
+            }
+            if (fwrite(data, 1, len, out) != len) {
+                writeFailed = true;
+                return false;
+            }
+            return true;
+        },
+        [&](uint64_t current, uint64_t total) {
+            if (progress)
+                return progress(current, total);
+            return true;
+        });
+
+    if (out)
+        fclose(out);
+
+    if (!result || writeFailed) {
+        remove(tmpPath.c_str());
+        if (writeFailed)
+            throw Exception(Exception::MKXPError, "Failed to write %s while downloading %s", destPath, destination.c_str());
+        auto err = result.error();
+        std::string errname = httplib::to_string(err);
+        throw Exception(Exception::MKXPError, "Failed to download %s (%i: %s)", destination.c_str(), (int)err, errname.c_str());
+    }
+
+    ret._status = status;
+    if (status == 200) {
+        remove(destPath);
+        if (rename(tmpPath.c_str(), destPath) != 0) {
+            remove(tmpPath.c_str());
+            throw Exception(Exception::MKXPError, "Failed to move %s into place", destPath);
+        }
+    } else {
+        remove(tmpPath.c_str());
+    }
+
     return ret;
 }

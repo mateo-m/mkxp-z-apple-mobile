@@ -1321,23 +1321,44 @@ module MKXPRbConfigFallback
 end
 
 module Kernel
-  # Known-missing networking requires. Match by exact path or by
-  # prefix so `net/http`, `net/https`, `net/http/status`, etc. are
-  # all absorbed by a single `net/` entry.
-  NETWORK_REQUIRE_PATHS = [
+  # Network stdlib. When the host enables network access these
+  # requires resolve for real: on modern Rubies against the bundled
+  # pure-Ruby stdlib + static socket/openssl exts, on 1.8/1.9 partly
+  # via the Net::HTTP facade in `net_http_compat.rb`. A require that
+  # still fails (a stdlib piece we didn't ship) is absorbed exactly
+  # like in offline mode - games historically survive the resulting
+  # NameError through their own rescues, and a shipping gap must not
+  # crash a game that used to boot - but it is logged loudly so the
+  # gap can be reported and closed.
+  #
+  # Match by exact path or by prefix so `net/http`, `net/https`,
+  # `net/http/status`, etc. are all absorbed by a single `net/`
+  # entry.
+  NETWORK_STDLIB_PATHS = [
     'socket', 'resolv', 'resolv-replace',
     'openssl', 'digest',
     'uri', 'ipaddr',
-    'net', 'net/',
-    'httparty', 'rest-client', 'rest_client',
-    'discord', 'discord-rpc', 'discordrb',
-    'poke-api-v2', 'pokeapi',
-    'websocket', 'websocket-client',
-    'json-jwt', 'jwt'
+    'net', 'net/'
   ].freeze
+
+  # Gems that desktop games bundle but that can't exist here (no
+  # user gems, no dlopen). Genuinely absent regardless of the
+  # network toggle, so always absorbed.
+  MISSING_GEM_PATHS = %w[
+    httparty rest-client rest_client
+    discord discord-rpc discordrb
+    poke-api-v2 pokeapi
+    websocket websocket-client
+    json-jwt jwt
+  ].freeze
+
+  # Back-compat: older patches/scripts referenced the combined list.
+  NETWORK_REQUIRE_PATHS = (NETWORK_STDLIB_PATHS + MISSING_GEM_PATHS).freeze
 
   orig_require = instance_method(:require)
 
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # -- the interceptor enumerates the historical absorb rules in one place
   define_method(:require) do |path|
     begin
       orig_require.bind(self).call(path)
@@ -1354,10 +1375,25 @@ module Kernel
         next true
       end
 
-      matched = NETWORK_REQUIRE_PATHS.any? do |entry|
-        entry.end_with?('/') ? str.start_with?(entry) : str == entry
+      match = lambda do |list|
+        list.any? do |entry|
+          entry.end_with?('/') ? str.start_with?(entry) : str == entry
+        end
       end
-      raise e unless matched
+
+      matched_stdlib = match.call(NETWORK_STDLIB_PATHS)
+      raise e unless matched_stdlib || match.call(MISSING_GEM_PATHS)
+
+      # With networking enabled these requires should have resolved
+      # against the bundled stdlib/shims; absorbing one means we
+      # failed to ship something the game wants. Keep the game alive
+      # (as in offline mode) but say so loudly.
+      if matched_stdlib &&
+         defined?(System) && System.respond_to?(:network_enabled?) &&
+         System.network_enabled? && defined?(MKXP) && MKXP.respond_to?(:puts)
+        MKXP.puts("[platform_compat] network stdlib require '#{str}' failed " \
+                  "despite networking being enabled: #{e.message}")
+      end
 
       # Mark as loaded so future `require` calls short-circuit.
       feature = str.end_with?('.rb') ? str : "#{str}.rb"
@@ -1365,6 +1401,7 @@ module Kernel
       false
     end
   end
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 end
 
 # --- Socket class stubs ---
@@ -1374,4 +1411,38 @@ end
 # here causes "superclass mismatch" when the game later defines
 # the same class with a different parent. Games that genuinely
 # need network stubs (rare on iOS where we have no real socket
-# layer anyway) should ship their own.
+# layer anyway) should ship their own. With networking enabled the
+# real socket classes come from the statically-linked ext instead
+# (gated in extinit so offline mode still matches this old
+# behavior).
+
+# --- TLS trust store protection ---
+# Desktop-targeting games routinely do
+#   ENV['SSL_CERT_FILE'] = 'cacert.pem'
+# pointing at a bundle shipped next to Game.exe (Rejuvenation's
+# ScriptLoader does exactly this). The host already exports a
+# working SSL_CERT_FILE for Ruby's openssl; letting a game point it
+# at a file that doesn't exist in the iOS import silently breaks
+# every TLS handshake with "unable to get local issuer
+# certificate". Honor the game's assignment when the file is really
+# there (game-relative paths resolve against the game dir, our
+# cwd), otherwise keep the host trust store.
+class << ENV
+  unless method_defined?(:__mkxp_orig_env_set)
+    alias __mkxp_orig_env_set []=
+
+    def []=(key, value)
+      if %w[SSL_CERT_FILE SSL_CERT_DIR].include?(key.to_s) &&
+         value && !File.exist?(value.to_s)
+        if defined?(MKXP) && MKXP.respond_to?(:puts)
+          MKXP.puts("[platform_compat] ignoring ENV['#{key}'] = " \
+                    "#{value.inspect}: file missing; keeping host trust store")
+        end
+        return
+      end
+      __mkxp_orig_env_set(key, value)
+    end
+
+    alias store []=
+  end
+end

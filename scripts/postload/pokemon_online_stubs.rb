@@ -25,24 +25,38 @@
 # that PE games call by exact method name. Renaming would break the
 # game-side calls that this file exists to neutralise.
 if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
-  # Runtime asset downloader used by Green Remix / Natural Green.
-  # Replaced wholesale: report nothing-to-download, complete
-  # immediately, and no-op every call site.
-  module Downloader
-    def self.downloading?
-      false
+  # When the host grants network access, the game's own online
+  # modules (Downloader, GameJolt, URL probes) are left in place so
+  # they can do their real work over the now-functional network
+  # stack. The stubs below that *replace* game behavior only apply
+  # in offline mode; pure safety-net definitions (error-string
+  # constants, FontInstaller, autosave) apply either way since they
+  # neutralise Windows-only or undefined-constant crashes, not
+  # networking.
+  network_on = defined?(System) &&
+               System.respond_to?(:network_enabled?) &&
+               System.network_enabled?
+
+  unless network_on
+    # Runtime asset downloader used by Green Remix / Natural Green.
+    # Replaced wholesale: report nothing-to-download, complete
+    # immediately, and no-op every call site.
+    module Downloader
+      def self.downloading?
+        false
+      end
+
+      def self.update; end
+
+      def self.progress?
+        100
+      end
+
+      def self.download(url, filename) end
+      def self.createIfNecessary(f)    end
+      def self.finishUp;               end
+      def self.startNext;              end
     end
-
-    def self.update; end
-
-    def self.progress?
-      100
-    end
-
-    def self.download(url, filename) end
-    def self.createIfNecessary(f)    end
-    def self.finishUp;               end
-    def self.startNext;              end
   end
 
   # Berka network-error string constants referenced by a handful of
@@ -67,9 +81,12 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
 
   # Natural Green probes external URLs via pbGetTextFromInternet;
   # return empty string so downstream `.split` etc. get an empty
-  # array instead of nil.
-  def pbGetTextFromInternet(_url)
-    ''
+  # array instead of nil. Offline mode only - with network access
+  # the game's own implementation is left to run.
+  unless network_on
+    def pbGetTextFromInternet(_url)
+      ''
+    end
   end
 
   # FontInstaller tries to shell out to the Windows font installer.
@@ -94,83 +111,85 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # GameJolt leaderboard / trophy API. Stub every documented entry
   # point; return sensible neutral values (nil, false, empty string,
   # empty array) so games branching on "is the player logged in"
-  # always take the offline path.
-  module GameJolt
-    @status = -1
-    @error  = ''
-
-    def self.login
-      true
-    end
-
-    def self.login_status
-      @status
-    end
-
-    def self.reset_status
+  # always take the offline path. Offline mode only.
+  unless network_on
+    module GameJolt
       @status = -1
-    end
+      @error  = ''
 
-    def self.is_logged_in
-      false
-    end
+      def self.login
+        true
+      end
 
-    def self.call
-      login
-    end
+      def self.login_status
+        @status
+      end
 
-    def self.logoff
-      @status = -1
-      $user = nil
-      $password = nil
-    end
+      def self.reset_status
+        @status = -1
+      end
 
-    def self.has_already_got_trophy?(_trophy_id)
-      false
-    end
+      def self.is_logged_in
+        false
+      end
 
-    def self.award_trophy(trophy_id); end
+      def self.call
+        login
+      end
 
-    def self.submit_score(_score, *_args)
-      false
-    end
+      def self.logoff
+        @status = -1
+        $user = nil
+        $password = nil
+      end
 
-    def self.show_highscores(*args); end
+      def self.has_already_got_trophy?(_trophy_id)
+        false
+      end
 
-    def self.do_request(_base_url)
-      { 'success' => 'false' }
-    end
+      def self.award_trophy(trophy_id); end
 
-    def self.make_bool(s)
-      s == 'true'
-    end
+      def self.submit_score(_score, *_args)
+        false
+      end
 
-    def self.authenticate(_user, _token)
-      true
-    end
+      def self.show_highscores(*args); end
 
-    def self.get_userdata_string; end
+      def self.do_request(_base_url)
+        { 'success' => 'false' }
+      end
 
-    def self.get_error
-      @error
-    end
+      def self.make_bool(s)
+        s == 'true'
+      end
 
-    def self.sync_trophies; end
+      def self.authenticate(_user, _token)
+        true
+      end
 
-    def self.get_highscores_formatted(*_args)
-      ''
-    end
+      def self.get_userdata_string; end
 
-    def self.get_highscores(*_args)
-      nil
-    end
+      def self.get_error
+        @error
+      end
 
-    def self.has_login_data
-      'Empo'
-    end
+      def self.sync_trophies; end
 
-    def self.enter_text(text = '', _var = nil, max_char = 30)
-      $inputText = pbEnterText(text, 0, max_char, '', 3, nil) if defined?(pbEnterText)
+      def self.get_highscores_formatted(*_args)
+        ''
+      end
+
+      def self.get_highscores(*_args)
+        nil
+      end
+
+      def self.has_login_data
+        'Empo'
+      end
+
+      def self.enter_text(text = '', _var = nil, max_char = 30)
+        $inputText = pbEnterText(text, 0, max_char, '', 3, nil) if defined?(pbEnterText)
+      end
     end
   end
 

@@ -127,6 +127,7 @@ void loadEnginePreloads() {
 #endif
         "mkxp_wrap",
         "http_compat",
+        "net_http_compat",
         nullptr
     };
 
