@@ -353,10 +353,13 @@ bool mkxp_getUseInGameKeyboard(void);
 void mkxp_setJoiplayCompat(bool enabled);
 bool mkxp_getJoiplayCompat(void);
 
-// Network access (UI -> Engine). When enabled, the preload layer
-// stops simulating an offline device: network stdlib requires
-// resolve normally, HTTP downloads stream for real, and postload
-// online-feature stubs stay out of the way. Ruby reads this via
+// Network access (UI -> Engine). When disabled, the game sees the
+// equivalent of airplane mode: network libraries load and their
+// classes exist, but every connection attempt fails the way it
+// would with no connectivity (native client refuses, socket
+// connects raise ENETDOWN via the preload layer, downloads report
+// failure). Games then take the same offline fallback paths they
+// ship for desktop players without internet. Ruby reads this via
 // `System.network_enabled?`. Default false (host must opt in).
 void mkxp_setNetworkEnabled(bool enabled);
 bool mkxp_getNetworkEnabled(void);

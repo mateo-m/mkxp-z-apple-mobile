@@ -11,12 +11,11 @@
 # different signature: one URL, hash return `{status, body,
 # headers}`. Rather than duplicate the binding, wrap it in Ruby.
 #
-# `HTTP.download` streams for real through `HTTPLite.download` when
-# the host has enabled network access. When the game is offline
-# (toggle off, or a build without the native download), it falls
-# back to the historical fake: fire the progress callback once at
-# 100/100 and return 200 so "check for update" probes see a benign
-# success without transferring bytes.
+# `HTTP.download` streams for real through `HTTPLite.download`. With
+# network access toggled off the native client refuses and the
+# download reports 0, the same failed status airplane mode produces
+# on JoiPlay. Builds without the native download (desktop) keep the
+# historical fake-success fallback.
 #
 # All calls are wrapped in `begin...rescue` so a transient
 # network failure surfaces to Ruby as an empty string rather
@@ -107,7 +106,11 @@ module HTTP
 
     def download(host, query, path, on_progress = nil)
       url = _join(host, query)
-      return _fake_download(on_progress) unless _network_on? && HTTPLite.respond_to?(:download)
+      # No native download (desktop build): keep the historical fake.
+      # With networking toggled off the native client refuses and the
+      # rescue below reports 0 - the same failed download airplane
+      # mode produces on JoiPlay.
+      return _fake_download(on_progress) unless HTTPLite.respond_to?(:download)
 
       # The native callback contract is a top-level method name;
       # Procs/Methods can't cross into C, so run those transfers
@@ -145,10 +148,6 @@ module HTTP
       return host + query if query.start_with?('?')
 
       "#{host}/#{query}"
-    end
-
-    def _network_on?
-      defined?(System) && System.respond_to?(:network_enabled?) && System.network_enabled?
     end
 
     def _log_err(verb, url, e)

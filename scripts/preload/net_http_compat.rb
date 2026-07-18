@@ -11,8 +11,10 @@
 #
 # Generic by design: implements documented Net::HTTP surface only,
 # no game-specific branches. Not loaded on Ruby >= 2.0 (those VMs
-# get the genuine stdlib) or when the host disabled network access
-# (platform_compat.rb keeps the offline illusion instead).
+# get the genuine stdlib). Installed regardless of the network
+# toggle: with networking off the device behaves like airplane mode
+# - the classes exist, and requests fail with rescuable connection
+# errors when the native client refuses them.
 #
 # Deliberate deviations from real Net::HTTP, all on the "keep old
 # games running" side:
@@ -28,8 +30,7 @@
 #   on, against the host CA bundle. VERIFY_NONE does not disable
 #   it - fail closed, not open.
 
-if RUBY_VERSION < '2' && defined?(HTTPLite) &&
-   defined?(System) && System.respond_to?(:network_enabled?) && System.network_enabled?
+if RUBY_VERSION < '2' && defined?(HTTPLite)
 
   module Net
     class HTTPResponse
@@ -403,6 +404,11 @@ if RUBY_VERSION < '2' && defined?(HTTPLite) &&
     # Alias tree some scripts reference directly.
     HTTPGenericRequest = HTTPRequestBase
   end
+
+  # Games rescue SocketError on connection failures; define it when
+  # the socket ext isn't registered so those rescue clauses resolve
+  # to a real exception class instead of a const_missing stub.
+  class SocketError < StandardError; end unless defined?(SocketError)
 
   # `require 'openssl'` callers only ever touch the verify-mode
   # constants in the code paths this shim serves.

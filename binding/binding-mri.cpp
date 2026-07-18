@@ -1922,11 +1922,11 @@ static void mriBindingExecute() {
     /* Host-bundled pure-Ruby stdlib (net/http, uri, openssl.rb, ...).
      * Directory names follow each Ruby's own rubylibdir convention
      * so the trees can be copied verbatim from a Ruby checkout.
-     * Only exposed when the host allows network access: with the
-     * toggle off, `require 'net/http'` must keep failing (and being
-     * absorbed by platform_compat) exactly as before networking
-     * support existed. */
-    if (mkxp_getNetworkEnabled()) {
+     * Always on the load path, network toggle included: with the
+     * toggle off the device behaves like airplane mode (libraries
+     * load, connections fail), not like a build without the
+     * libraries. */
+    {
         std::string resPath = mkxp_fs::getResourcePath();
 #if RAPI_MAJOR >= 2
         resPath += "/Ruby/" + std::to_string(RAPI_MAJOR) + "." + std::to_string(RAPI_MINOR) + ".0";

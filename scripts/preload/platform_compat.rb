@@ -1446,3 +1446,65 @@ class << ENV
     alias store []=
   end
 end
+
+# --- Airplane-mode socket blocking ---
+# With network access toggled off the game must see the equivalent
+# of airplane mode: libraries load, classes exist, connections fail.
+# The native HTTP client refuses on its own, but Ruby 3.1's real
+# socket classes are statically compiled in and would happily reach
+# the network. Patch the connection-making surface to raise
+# ENETDOWN - the exact errno airplane mode produces - so raw-socket
+# code takes the same rescue paths it takes on a device with no
+# connectivity. Local binds/listens are left alone (they work in
+# airplane mode too); on the 1.8/1.9 VMs the socket classes aren't
+# registered while offline, so these guards simply never match.
+network_off = defined?(System) &&
+              System.respond_to?(:network_enabled?) &&
+              !System.network_enabled?
+if network_off
+  # Force the socket ext to initialize now if this VM carries it:
+  # Ruby 3.1's statically-linked exts initialize lazily on first
+  # require, so the classes don't exist yet at preload time. On the
+  # 1.8/1.9 VMs without the ext registered, the require is absorbed
+  # by the interceptor above and the guards below stay no-ops.
+  require 'socket'
+
+  if defined?(TCPSocket)
+    class << TCPSocket
+      def open(*_args)
+        raise Errno::ENETDOWN
+      end
+      alias new open
+    end
+  end
+
+  if defined?(Socket)
+    class Socket
+      def connect(*_args)
+        raise Errno::ENETDOWN
+      end
+
+      def connect_nonblock(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+
+    class << Socket
+      def tcp(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+
+  if defined?(UDPSocket)
+    class UDPSocket
+      def send(*_args)
+        raise Errno::ENETDOWN
+      end
+
+      def connect(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+end
