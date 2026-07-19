@@ -814,7 +814,17 @@ RB_METHOD(mkxpApplyOverrides) {
 
     std::string data(RSTRING_PTR(arg), RSTRING_LEN(arg));
     shState->patcher().apply(data);
-    return rb_str_new(data.data(), (long)data.size());
+    VALUE ret = rb_str_new(data.data(), (long)data.size());
+#if RAPI_FULL >= 190
+    /* Keep the caller's string encoding. rb_str_new tags the result
+       ASCII-8BIT; games that round-trip their script sources through
+       apply_overrides before eval (Reborn-style ScriptLoader) would
+       then eval binary-encoded source, turning every string literal
+       binary — and per-character text drawing splits multi-byte
+       UTF-8 glyphs into replacement boxes. */
+    rb_enc_associate_index(ret, rb_enc_get_index(arg));
+#endif
+    return ret;
 }
 
 /* System.rpg_version - integer RGSS version (1 = XP, 2 = VX, 3 = VX
