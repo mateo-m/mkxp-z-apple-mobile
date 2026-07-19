@@ -373,6 +373,14 @@ bool        mkxp_getShowViewportBounds(void);
 void        mkxp_setCheatsEnabled(bool enabled);
 bool        mkxp_getCheatsEnabled(void);
 
+/* Controls whether the engine consumes SDL game-controller events
+ * for its built-in input bindings. Hosts that implement their own
+ * physical-controller handling disable this to avoid double input.
+ * Default: enabled. Must be set before or during session start;
+ * takes effect immediately. */
+void        mkxp_setGameControllerCaptureEnabled(bool enabled);
+bool        mkxp_getGameControllerCaptureEnabled(void);
+
 void        mkxp_setViewportBoundsColor(float r, float g, float b, float a);
 void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);
 

@@ -94,6 +94,10 @@ static std::atomic<float> s_vpBoundsA{1};
 // $CHEATS in sync so cheat scripts pick up UI toggles immediately.
 static std::atomic<bool>  s_cheatsEnabled{false};
 
+// When false, EventThread discards SDL_CONTROLLER* events so a host
+// layer can inject keyboard events without double-applying presses.
+static std::atomic<bool>  s_gameControllerCaptureEnabled{true};
+
 // Input bridge: cached SDL window ID for event injection.
 static std::atomic<uint32_t> s_sdlWindowID{0};
 
@@ -909,6 +913,14 @@ void mkxp_setCheatsEnabled(bool enabled) {
 
 bool mkxp_getCheatsEnabled(void) {
     return s_cheatsEnabled.load(std::memory_order_relaxed);
+}
+
+void mkxp_setGameControllerCaptureEnabled(bool enabled) {
+    s_gameControllerCaptureEnabled.store(enabled, std::memory_order_release);
+}
+
+bool mkxp_getGameControllerCaptureEnabled(void) {
+    return s_gameControllerCaptureEnabled.load(std::memory_order_acquire);
 }
 
 void mkxp_setViewportBoundsColor(float r, float g, float b, float a) {

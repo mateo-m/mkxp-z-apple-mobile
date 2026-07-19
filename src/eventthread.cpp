@@ -26,6 +26,7 @@
  * can call it from the REQUEST_TEXTMODE branch below without pulling
  * in app_bridge.h's full surface. */
 extern "C" void mkxp_fireTextInputModeCallback(int active);
+extern "C" bool mkxp_getGameControllerCaptureEnabled(void);
 
 #include <SDL_events.h>
 #include <SDL_messagebox.h>
@@ -423,18 +424,26 @@ void EventThread::process(RGSSThreadData &rtData)
                 break;
                 
             case SDL_CONTROLLERBUTTONDOWN:
+                if (!mkxp_getGameControllerCaptureEnabled())
+                    continue;
                 controllerState.buttons[event.cbutton.button] = true;
                 break;
                 
             case SDL_CONTROLLERBUTTONUP:
+                if (!mkxp_getGameControllerCaptureEnabled())
+                    continue;
                 controllerState.buttons[event.cbutton.button] = false;
                 break;
                 
             case SDL_CONTROLLERAXISMOTION:
+                if (!mkxp_getGameControllerCaptureEnabled())
+                    continue;
                 controllerState.axes[event.caxis.axis] = event.caxis.value;
                 break;
                 
             case SDL_CONTROLLERDEVICEADDED:
+                if (!mkxp_getGameControllerCaptureEnabled())
+                    continue;
                 if (event.cdevice.which > 0)
                     break;
                 
@@ -442,6 +451,8 @@ void EventThread::process(RGSSThreadData &rtData)
                 break;
                 
             case SDL_CONTROLLERDEVICEREMOVED:
+                if (!mkxp_getGameControllerCaptureEnabled())
+                    continue;
                 resetInputStates();
                 ctrl = 0;
                 break;
