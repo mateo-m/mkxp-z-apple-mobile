@@ -466,10 +466,87 @@ void FileSystem::createPathCache() {
 
 void FileSystem::reloadPathCache() {
     if (!p->havePathCache) return;
-    
+
     p->fileLists.clear();
     p->pathCache.clear();
     createPathCache();
+}
+
+/* Rebuilds the cached listing of a single directory from a live
+ * PhysFS enumeration. Used by openRead's stale-cache fallback: games
+ * that write new files at runtime (e.g. Pokemon fangames downloading
+ * battler spritesheets on first encounter) create entries the
+ * boot-time path cache has never seen, so a cached lookup misses even
+ * though the file exists. Non-recursive on purpose: a fileLists entry
+ * only ever holds the files of its own directory. */
+struct DirRefreshEnumData {
+  FileSystemPrivate *p;
+  std::vector<std::string> *list;
+  /* Path-cache key of the directory being refreshed (NFC, lowercase).
+   * Keys are rebuilt from this rather than from the on-disk dirpath so
+   * they land exactly where openReadEnumCB's translation looks. */
+  std::string lowerDir;
+
+#ifdef __APPLE__
+  iconv_t nfd2nfc;
+  char buf[512];
+#endif
+
+  DirRefreshEnumData(FileSystemPrivate *p, std::vector<std::string> *list,
+                     const char *lowerDir)
+      : p(p), list(list), lowerDir(lowerDir) {
+#ifdef __APPLE__
+    nfd2nfc = iconv_open("utf-8", "utf-8-mac");
+#endif
+  }
+
+  ~DirRefreshEnumData() {
+#ifdef __APPLE__
+    iconv_close(nfd2nfc);
+#endif
+  }
+
+  /* Converts in-place */
+  void toNFC(char *inout) {
+#ifdef __APPLE__
+    ::toNFC(inout, nfd2nfc, buf, sizeof(buf));
+#else
+    (void)inout;
+#endif
+  }
+};
+
+static PHYSFS_EnumerateCallbackResult
+dirRefreshEnumCB(void *d, const char *origdir, const char *fname) {
+  DirRefreshEnumData &data = *static_cast<DirRefreshEnumData *>(d);
+  char originalPath[512];
+
+  if (!*origdir)
+    snprintf(originalPath, sizeof(originalPath), "%s", fname);
+  else
+    snprintf(originalPath, sizeof(originalPath), "%s/%s", origdir, fname);
+
+  PHYSFS_Stat stat;
+  PHYSFS_stat(originalPath, &stat);
+
+  if (stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+    return PHYSFS_ENUM_OK;
+
+  char filename[512];
+  strcpySafe(filename, fname, sizeof(filename), -1);
+  data.toNFC(filename);
+
+  std::string lowerFilename(filename);
+  strTolower(lowerFilename);
+
+  std::string lowerFull = data.lowerDir.empty()
+      ? lowerFilename
+      : data.lowerDir + "/" + lowerFilename;
+
+  data.list->push_back(lowerFilename);
+  data.p->pathCache.insert(lowerFull, originalPath);
+
+  return PHYSFS_ENUM_OK;
 }
 
 struct FontSetsCBData {
@@ -674,6 +751,52 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
 
   if (data.physfsError)
     throw Exception(Exception::PHYSFSError, "PhysFS: %s", data.physfsError);
+
+  /* Stale-path-cache fallback: the cache is built once at boot, so
+   * files written afterwards (runtime-downloaded sprites etc.) miss
+   * even though PhysFS can see them. Refresh just this directory's
+   * cached listing from a live enumeration and retry, so the caller
+   * pays one readdir on a miss instead of a full-tree reload. The
+   * live enumeration uses the caller's original path case, which is
+   * correct for the files-written-at-runtime scenario (the game opens
+   * what it just wrote). */
+  if (p->havePathCache && data.matchCount == 0) {
+    char obuffer[512];
+    size_t olen = strcpySafe(obuffer, filename_nm.c_str(), sizeof(obuffer), -1);
+
+#ifdef __APPLE__
+    iconv_t nfd2nfc = iconv_open("utf-8", "utf-8-mac");
+    char nfcBuf[512];
+    toNFC(obuffer, nfd2nfc, nfcBuf, sizeof(nfcBuf));
+    if (nfd2nfc != (iconv_t)-1)
+      iconv_close(nfd2nfc);
+    olen = strlen(obuffer);
+#endif
+
+    char *odelim;
+    for (odelim = obuffer + olen; odelim > obuffer; --odelim)
+      if (*odelim == '/')
+        break;
+
+    const char *odir = "";
+    if (odelim != obuffer) {
+      *odelim = '\0';
+      odir = obuffer;
+    }
+
+    std::vector<std::string> fresh;
+    DirRefreshEnumData refresh(p, &fresh, dir);
+
+    if (PHYSFS_enumerate(odir, dirRefreshEnumCB, &refresh)) {
+      p->fileLists[dir] = fresh;
+
+      for (size_t i = 0; i < fresh.size(); ++i)
+        openReadEnumCB(&data, dir, fresh[i].c_str());
+
+      if (data.physfsError)
+        throw Exception(Exception::PHYSFSError, "PhysFS: %s", data.physfsError);
+    }
+  }
 
   if (data.matchCount == 0)
     throw Exception(Exception::NoFileError, "%s", filename);
