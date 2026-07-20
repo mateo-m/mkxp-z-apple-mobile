@@ -39,7 +39,7 @@ This fork addresses each of those plus the usual Apple-platform quirks (CAMetalL
 
 ## Layout
 
-```
+```text
 binding/         Ruby C extension layer (per-version compiled)
 src/             Engine core (graphics, audio, input, scripting bridge)
 src/theoraplay/  Vendored ogg/theora decoder (upstream)
