@@ -2,6 +2,12 @@
 // Kept separate from engine code. No UIKit imports. No game logic.
 
 #include "app_bridge.h"
+
+// On non-mobile platforms app_bridge.h defines the whole API as
+// inline no-op stubs; this file must compile to nothing so the two
+// never clash if a desktop build sweeps it up.
+#if MKXPZ_MOBILE
+
 #include "sharedstate.h"
 #include "graphics.h"
 #include "audio.h"
@@ -63,7 +69,7 @@ static std::atomic<bool>  s_safeAreaInsetsChanged{false};
 static std::atomic<int>   s_verticalAlignment{1};  // 0=top, 1=top-center, 2=center
 static std::atomic<bool>  s_postloadEnabled{true};
 
-// Per-game syntax-transform mode. Empo sets this before each
+// Per-game syntax-transform mode. The host sets this before each
 // session so the choice stays out of mkxp.json (it's a host concept,
 // not part of the developer's engine config). See app_bridge.h for
 // the enum.
@@ -160,13 +166,13 @@ static bool s_keyWatcherInstalled = false;
 // SDL_StartTextInput / SDL_StopTextInput fires inside EventThread.
 static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
 
-// Managed-config directory Empo sets before each session. Engine
+// Managed-config directory the host sets before each session. Engine
 // modules look here first for files they used to read from cwd
 // (mkxp.json, patches.json). Empty = no override.
 static std::mutex s_managedConfigMutex;
 static std::string s_managedConfigDir;
 
-// Per-game UserData directory Empo sets before each session.
+// Per-game UserData directory the host sets before each session.
 static std::mutex s_saveDirMutex;
 static std::string s_saveDir;
 
@@ -1026,3 +1032,5 @@ std::string mkxp_getDebugLogPath(void) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);
     return s_debugLogPath;
 }
+
+#endif /* MKXPZ_MOBILE */

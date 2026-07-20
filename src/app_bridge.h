@@ -2,11 +2,32 @@
 // host UI layer. The only interface between them: UI never imports
 // engine headers (SDL, SharedState), engine never imports UI headers
 // (UIKit, SwiftUI). All communication goes through these functions.
+//
+// On non-mobile platforms the entire API degrades to inline no-op
+// stubs (see the bottom of this file), so engine code may call
+// mkxp_* functions unconditionally — no #ifdefs at call sites, no
+// link dependency on app_bridge.cpp, and zero runtime cost where no
+// host app exists.
 
 #ifndef IOS_BRIDGE_H
 #define IOS_BRIDGE_H
 
 #include <stdbool.h>
+
+// MKXPZ_MOBILE - 1 on platforms where a host app embeds the engine
+// (iOS/iPadOS/tvOS), 0 elsewhere. Overridable from the build system;
+// defaults to Apple's own platform conditionals.
+#ifndef MKXPZ_MOBILE
+#  ifdef __APPLE__
+#    include <TargetConditionals.h>
+#  endif
+#  if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#    define MKXPZ_MOBILE 1
+#  else
+#    define MKXPZ_MOBILE 0
+#  endif
+#endif
+
 // Scancode constants. Values match SDL_Scancode (USB HID usage page
 // 0x07) so the engine passes them through without translation. UI
 // code uses these instead of importing SDL headers.
@@ -72,6 +93,102 @@ enum {
     MKXP_SCANCODE_HOME   = 74,
 };
 
+// ---------------------------------------------------------------------------
+// Shared types - visible on every platform (both the live bridge and
+// the no-op stubs use them).
+// ---------------------------------------------------------------------------
+
+// Lifecycle callbacks (Engine -> UI). Fire on the engine thread; UI
+// must dispatch to main for any UI updates.
+typedef void (*mkxp_EngineTerminatedCallback)(void *userdata);
+typedef void (*mkxp_GameRectChangedCallback)(float x, float y, float w, float h, void *userdata);
+
+// Key event callback (Engine -> UI, fires on background thread)
+typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
+
+// Text-input mode callback (Engine -> UI); see the text-input bridge
+// section below.
+typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
+
+typedef void (*mkxp_ErrorMessageCallback)(const char *message, void *userdata);
+typedef void (*mkxp_InfoMessageCallback)(const char *message, void *userdata);
+
+// Fires on engine thread when paused (snapshot captured, audio suspended).
+typedef void (*mkxp_PausedCallback)(void *userdata);
+typedef void (*mkxp_ResumedCallback)(void *userdata);
+
+// One-shot: fires on engine thread after first frame is swapped post-resume
+// (or fresh start). UI uses this to fade the snapshot / dismiss loading.
+typedef void (*mkxp_FrameRenderedCallback)(void *userdata);
+
+typedef enum {
+    MKXP_VALIGN_TOP        = 0,
+    MKXP_VALIGN_TOP_CENTER = 1,
+    MKXP_VALIGN_CENTER     = 2,
+} MKXPVerticalAlignment;
+
+// Per-game `syntaxTransform` override.
+//
+// The host calls the setter on every game selection so the
+// developer's mkxp.json stays free of host-managed keys. Default is
+// `UNSET` so desktop / test-harness builds that never call the
+// setter keep the legacy mkxp.json-driven path. Numeric values match
+// Config::syntaxTransform (0/1/2); the typed enum exists so callers
+// don't sprinkle magic numbers.
+typedef enum {
+    MKXP_SYNTAX_TRANSFORM_UNSET     = -1,
+    MKXP_SYNTAX_TRANSFORM_DISABLED  = 0,  // Ruby 3 strict
+    MKXP_SYNTAX_TRANSFORM_CUSTOM    = 1,  // syntaxTransformCustomVersion* from mkxp.json
+    MKXP_SYNTAX_TRANSFORM_LEGACY    = 2,  // Ruby 1.9 for RGSS3, Ruby 1.8 for RGSS<3
+} MKXPSyntaxTransformMode;
+
+// Per-game Ruby interpreter version selection.
+//
+// Each Ruby version's libruby + binding is compiled separately and
+// merged into a relocatable .o with hidden symbols. At engine boot
+// the host calls the setter to pick which version to dispatch to;
+// main.cpp looks up `_mkxp_get_script_binding_<NN>()` from the
+// matching merged .o.
+//
+// Lets a vintage PE game run on actual Ruby 1.8's parser + VM
+// instead of a Ruby 3 parser with syntax-transform patches.
+//
+// `MKXP_RUBY_UNSET` falls back to the build's default. Numeric values
+// are MMmm (3.0 -> 30, 1.8 -> 18), matching JoiPlay's libmkxpNN.so
+// filename convention.
+//
+// `MKXP_RUBY_30` is retained for back-compat with metadata.json
+// values written by older builds (when a native 3.0 binding shipped
+// in the merged.o set). New builds route 30 to the 3.1 binding +
+// Legacy syntax-transform mode at dispatch time; keeping the enum
+// value here keeps old `rubyVersion: 30` JSON decoding correctly.
+typedef enum {
+    MKXP_RUBY_UNSET = -1,
+    MKXP_RUBY_18    = 18,
+    MKXP_RUBY_19    = 19,
+    MKXP_RUBY_30    = 30,
+    MKXP_RUBY_31    = 31,
+} MKXPRubyVersion;
+
+typedef struct {
+    const char *managedConfigDir;
+    const char *userDataDirectory;
+    MKXPRubyVersion rubyVersion;
+    MKXPSyntaxTransformMode syntaxTransformMode;
+    MKXPVerticalAlignment verticalAlignment;
+    bool postloadEnabled;
+    bool useInGameKeyboard;
+    bool joiplayCompat;
+    bool networkEnabled;
+} MKXPSessionConfig;
+
+#if MKXPZ_MOBILE
+
+// ---------------------------------------------------------------------------
+// Live bridge (mobile). Implemented in app_bridge.cpp and the
+// platform .mm files.
+// ---------------------------------------------------------------------------
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -104,13 +221,7 @@ void        mkxp_setEngineExitedCleanly(void);
 int         mkxp_isEngineHung(void);
 void        mkxp_setEngineHung(void);
 
-// Lifecycle callbacks (Engine -> UI). Fire on the engine thread; UI
-// must dispatch to main for any UI updates.
-
-typedef void (*mkxp_EngineTerminatedCallback)(void *userdata);
 void        mkxp_setEngineTerminatedCallback(mkxp_EngineTerminatedCallback cb, void *userdata);
-
-typedef void (*mkxp_GameRectChangedCallback)(float x, float y, float w, float h, void *userdata);
 void        mkxp_setGameRectChangedCallback(mkxp_GameRectChangedCallback cb, void *userdata);
 
 // Input injection (UI -> Engine)
@@ -118,20 +229,17 @@ void        mkxp_setGameRectChangedCallback(mkxp_GameRectChangedCallback cb, voi
 // scancode: MKXP_SCANCODE_* value. pressed: 1=down, 0=up.
 void        mkxp_injectKeyEvent(int scancode, int pressed);
 
-// Key event callback (Engine -> UI, fires on background thread)
-
-typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 
 // Managed-config directory (UI -> Engine).
 //
-// Empo keeps generated per-game state (mkxp.json, patches.json, save
-// metadata) outside the imported game folder so the game directory
-// stays a faithful mirror of what the user imported. The host calls
-// `mkxp_setManagedConfigDir` with the per-game state path before each
-// session; engine modules that used to load from cwd (Config::read,
-// Patcher auto-discovery) check this directory first and fall back
-// to cwd only if the file isn't found.
+// The host may keep generated per-game state (mkxp.json,
+// patches.json, save metadata) outside the imported game folder so
+// the game directory stays a faithful mirror of what the user
+// imported. The host calls `mkxp_setManagedConfigDir` with the
+// per-game state path before each session; engine modules that used
+// to load from cwd (Config::read, Patcher auto-discovery) check this
+// directory first and fall back to cwd only if the file isn't found.
 //
 // Pass NULL/"" to clear the override (cwd-only behavior, matches
 // desktop builds).
@@ -140,10 +248,10 @@ const char *mkxp_getManagedConfigDir(void);
 
 // Per-game UserData directory (UI -> Engine).
 //
-// On iOS, Empo stores game writable payload in
-// `Documents/Games/<id>/UserData/` so saves and companion files are
-// visible in the Files app and travel with the rest of the imported
-// container. Games that use app-data helpers
+// On iOS, hosts store game writable payload in a per-game container
+// (e.g. `Documents/Games/<id>/UserData/`) so saves and companion
+// files are visible in the Files app and travel with the rest of the
+// imported container. Games that use app-data helpers
 // (`System.data_directory`, `MKXP.data_directory`, fake APPDATA env)
 // and games that use relative RGSS save filenames are both routed
 // here by the engine + preload compatibility layer.
@@ -193,7 +301,6 @@ const char *mkxp_getCABundlePath(void);
 //
 // `mkxp_isTextInputActive()` lets the UI skip pushing events when SDL
 // text mode is off (otherwise the buffer fills with input nobody reads).
-typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
 void        mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata);
 void        mkxp_pushTextInput(const char *utf8);
 int         mkxp_isTextInputActive(void);
@@ -250,18 +357,12 @@ float       mkxp_getScreenScale(void);
 // same window stack as the game view on iOS.
 void       *mkxp_getSDLUIKitWindow(void);
 
-// Per-game settings (UI -> Engine), set by selectGame() before
-// engine boot and read by the engine during the run.
+// Per-game settings (UI -> Engine), set by the host before engine
+// boot and read by the engine during the run.
 //
 // Prefer `mkxp_applySessionConfig()` for pre-boot settings; it
 // groups the fields the host sets together on every launch. Individual
 // setters remain for mid-session toggles and legacy call sites.
-
-typedef enum {
-    MKXP_VALIGN_TOP        = 0,
-    MKXP_VALIGN_TOP_CENTER = 1,
-    MKXP_VALIGN_CENTER     = 2,
-} MKXPVerticalAlignment;
 
 void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
                                       bool postloadEnabled);
@@ -269,73 +370,20 @@ void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
 MKXPVerticalAlignment mkxp_getVerticalAlignment(void);
 bool        mkxp_getPostloadEnabled(void);
 
-// Per-game `syntaxTransform` override.
-//
-// Empo calls this on every selectGame() so the developer's mkxp.json
-// stays free of host-managed keys. Default is `UNSET` so desktop /
-// test-harness builds that never call the setter keep the legacy
-// mkxp.json-driven path. Numeric values match Config::syntaxTransform
-// (0/1/2); the typed enum exists so callers don't sprinkle magic
-// numbers.
-typedef enum {
-    MKXP_SYNTAX_TRANSFORM_UNSET     = -1,
-    MKXP_SYNTAX_TRANSFORM_DISABLED  = 0,  // Ruby 3 strict
-    MKXP_SYNTAX_TRANSFORM_CUSTOM    = 1,  // syntaxTransformCustomVersion* from mkxp.json
-    MKXP_SYNTAX_TRANSFORM_LEGACY    = 2,  // Ruby 1.9 for RGSS3, Ruby 1.8 for RGSS<3
-} MKXPSyntaxTransformMode;
-
 void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode);
 MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void);
 
-// Per-game Ruby interpreter version selection.
-//
-// Each Ruby version's libruby + binding is compiled separately and
-// merged into a relocatable .o with hidden symbols. At engine boot
-// the host calls this to pick which version to dispatch to;
-// main.cpp looks up `_mkxp_get_script_binding_<NN>()` from the
-// matching merged .o.
-//
-// Lets a vintage PE game run on actual Ruby 1.8's parser + VM
-// instead of a Ruby 3 parser with syntax-transform patches.
-//
-// `MKXP_RUBY_UNSET` falls back to the build's default. Numeric values
-// are MMmm (3.0 -> 30, 1.8 -> 18), matching JoiPlay's libmkxpNN.so
-// filename convention.
-//
-// `MKXP_RUBY_30` is retained for back-compat with metadata.json
-// values written by older builds (when a native 3.0 binding shipped
-// in the merged.o set). New builds route 30 to the 3.1 binding +
-// Legacy syntax-transform mode at dispatch time; keeping the enum
-// value here keeps old `rubyVersion: 30` JSON decoding correctly.
-typedef enum {
-    MKXP_RUBY_UNSET = -1,
-    MKXP_RUBY_18    = 18,
-    MKXP_RUBY_19    = 19,
-    MKXP_RUBY_30    = 30,
-    MKXP_RUBY_31    = 31,
-} MKXPRubyVersion;
-
 void             mkxp_setActiveRubyVersion(MKXPRubyVersion version);
 MKXPRubyVersion  mkxp_getActiveRubyVersion(void);
-
-typedef struct {
-    const char *managedConfigDir;
-    const char *userDataDirectory;
-    MKXPRubyVersion rubyVersion;
-    MKXPSyntaxTransformMode syntaxTransformMode;
-    MKXPVerticalAlignment verticalAlignment;
-    bool postloadEnabled;
-    bool useInGameKeyboard;
-    bool joiplayCompat;
-    bool networkEnabled;
-} MKXPSessionConfig;
 
 void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
 
 // Adding a new per-boot setting:
 //   1. Add a field to MKXPSessionConfig
 //   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
-//   3. Wire GameSession.configureEngine() on the Swift side
+//   3. Wire the host's session-configuration path
+//   4. Add a matching no-op stub default in the !MKXPZ_MOBILE
+//      section at the bottom of this header
 
 // Force the Pokemon Essentials in-game keyboard scene, overriding
 // the iOS soft keyboard. Default false (soft keyboard). Flip on for
@@ -403,13 +451,12 @@ void        mkxp_reportFatalError(const char *message);
 
 void        mkxp_installFatalErrorHandlers(void);
 
-typedef void (*mkxp_ErrorMessageCallback)(const char *message, void *userdata);
 void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata);
 
 // Info-message routing (Engine -> UI). Games call `msgbox` / `p`
 // deliberately to show a notice (PE 20+ version banners, plugin
 // dialogs) and then keep running. This is NOT an error: the UI
-// should present a plain dismissible alert without "restart Empo"
+// should present a plain dismissible alert without "restart the app"
 // framing. Blocks the engine thread until the user dismisses,
 // mirroring mkxp_presentErrorAndWait.
 
@@ -422,7 +469,6 @@ void        mkxp_presentInfoAndWait(const char *message);
  * may be blocking an engine thread in mkxp_presentInfoAndWait(). */
 void        mkxp_signalInfoDismissed(void);
 
-typedef void (*mkxp_InfoMessageCallback)(const char *message, void *userdata);
 void        mkxp_setInfoMessageCallback(mkxp_InfoMessageCallback cb, void *userdata);
 
 // Pause / Resume (UI <-> Engine).
@@ -452,16 +498,8 @@ bool        mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width,
 // the buffer for mkxp_copySnapshotRGBA.
 bool        mkxp_getSnapshotSize(int *width, int *height);
 
-// Fires on engine thread when paused (snapshot captured, audio suspended).
-typedef void (*mkxp_PausedCallback)(void *userdata);
 void        mkxp_setPausedCallback(mkxp_PausedCallback cb, void *userdata);
-
-typedef void (*mkxp_ResumedCallback)(void *userdata);
 void        mkxp_setResumedCallback(mkxp_ResumedCallback cb, void *userdata);
-
-// One-shot: fires on engine thread after first frame is swapped post-resume
-// (or fresh start). UI uses this to fade the snapshot / dismiss loading.
-typedef void (*mkxp_FrameRenderedCallback)(void *userdata);
 void        mkxp_setFrameRenderedCallback(mkxp_FrameRenderedCallback cb, void *userdata);
 
 // Engine-internal: fires the one-shot frame-rendered signal. NOT for UI.
@@ -505,5 +543,148 @@ int         mkxp_debugLogEnabled(void);
 #ifdef __cplusplus
 }
 #endif
+
+#else /* !MKXPZ_MOBILE */
+
+// ---------------------------------------------------------------------------
+// Inert stubs (desktop and every non-mobile platform).
+//
+// Engine code calls mkxp_* unconditionally; here each call collapses
+// to an inline no-op the compiler deletes. Getter defaults are chosen
+// to reproduce stock desktop mkxp-z behavior, NOT the mobile bridge's
+// boot defaults — where the two differ (networkEnabled, vertical
+// alignment) the stub comment says why.
+// ---------------------------------------------------------------------------
+
+#include <stddef.h>
+
+static inline void        mkxp_setGameReady(void) {}
+// Desktop has no launcher handshake: the game is ready the moment the
+// process starts, and the game path comes from argv/cwd, not a host.
+static inline int         mkxp_isGameReady(void) { return 1; }
+static inline void        mkxp_setGamePath(const char *path) { (void)path; }
+static inline const char *mkxp_waitForGamePath(void) { return NULL; }
+
+static inline void        mkxp_requestTerminate(void) {}
+static inline int         mkxp_isEngineTerminated(void) { return 0; }
+static inline void        mkxp_setEngineTerminated(void) {}
+static inline int         mkxp_didEngineExitCleanly(void) { return 0; }
+static inline void        mkxp_setEngineExitedCleanly(void) {}
+static inline int         mkxp_isEngineHung(void) { return 0; }
+static inline void        mkxp_setEngineHung(void) {}
+
+static inline void        mkxp_setEngineTerminatedCallback(mkxp_EngineTerminatedCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_setGameRectChangedCallback(mkxp_GameRectChangedCallback cb, void *userdata) { (void)cb; (void)userdata; }
+
+static inline void        mkxp_injectKeyEvent(int scancode, int pressed) { (void)scancode; (void)pressed; }
+static inline void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata) { (void)cb; (void)userdata; }
+
+// NULL managed-config dir == documented "cwd-only behavior, matches
+// desktop builds".
+static inline void        mkxp_setManagedConfigDir(const char *path) { (void)path; }
+static inline const char *mkxp_getManagedConfigDir(void) { return NULL; }
+static inline void        mkxp_setUserDataDirectory(const char *path) { (void)path; }
+static inline const char *mkxp_getUserDataDirectory(void) { return NULL; }
+static inline void        mkxp_setLauncherIdentity(const char *name) { (void)name; }
+static inline const char *mkxp_getLauncherIdentity(void) { return NULL; }
+static inline void        mkxp_setCABundlePath(const char *path) { (void)path; }
+static inline const char *mkxp_getCABundlePath(void) { return NULL; }
+
+static inline void        mkxp_setTextInputModeCallback(mkxp_TextInputModeCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_pushTextInput(const char *utf8) { (void)utf8; }
+static inline int         mkxp_isTextInputActive(void) { return 0; }
+
+static inline double      mkxp_getAverageFPS(void) { return 0.0; }
+static inline int         mkxp_getRGSSVersion(void) { return 0; }
+static inline const char *mkxp_getGameTitle(void) { return ""; }
+static inline int         mkxp_getSupportedRGSSVersionMask(void) { return 0; }
+static inline const char *mkxp_getRubyVersion(void) { return ""; }
+static inline const char *mkxp_getANGLEVersion(void) { return "unknown"; }
+static inline const char *mkxp_getMetalDeviceName(void) { return "unknown"; }
+
+static inline void        mkxp_setGameRect(float x, float y, float w, float h) { (void)x; (void)y; (void)w; (void)h; }
+
+// Desktop windows have no notch: zero insets, never "changed".
+static inline void        mkxp_getSafeAreaInsets(float *top, float *bottom, float *left, float *right)
+{ if (top) *top = 0; if (bottom) *bottom = 0; if (left) *left = 0; if (right) *right = 0; }
+static inline void        mkxp_setSafeAreaInsets(float top, float bottom, float left, float right) { (void)top; (void)bottom; (void)left; (void)right; }
+static inline bool        mkxp_consumeSafeAreaInsetsChanged(void) { return false; }
+static inline float       mkxp_getScreenScale(void) { return 1.0f; }
+static inline void       *mkxp_getSDLUIKitWindow(void) { return NULL; }
+
+static inline void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment, bool postloadEnabled) { (void)verticalAlignment; (void)postloadEnabled; }
+// CENTER, not the mobile TOP_CENTER default: stock desktop mkxp-z
+// centers the game in the window in every orientation.
+static inline MKXPVerticalAlignment mkxp_getVerticalAlignment(void) { return MKXP_VALIGN_CENTER; }
+// No postload compatibility layer on desktop (stock behavior).
+static inline bool        mkxp_getPostloadEnabled(void) { return false; }
+
+static inline void                    mkxp_setSyntaxTransformMode(MKXPSyntaxTransformMode mode) { (void)mode; }
+static inline MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) { return MKXP_SYNTAX_TRANSFORM_UNSET; }
+static inline void             mkxp_setActiveRubyVersion(MKXPRubyVersion version) { (void)version; }
+static inline MKXPRubyVersion  mkxp_getActiveRubyVersion(void) { return MKXP_RUBY_UNSET; }
+
+static inline void        mkxp_applySessionConfig(const MKXPSessionConfig *config) { (void)config; }
+
+// Desktop has no soft keyboard; a game's own keyboard scene is the
+// only text-entry path, so "use in-game keyboard" is trivially true.
+static inline bool        mkxp_getUseInGameKeyboard(void) { return true; }
+static inline void        mkxp_setUseInGameKeyboard(bool enabled) { (void)enabled; }
+static inline void        mkxp_setJoiplayCompat(bool enabled) { (void)enabled; }
+static inline bool        mkxp_getJoiplayCompat(void) { return false; }
+// true, not the mobile opt-in default: stock desktop mkxp-z has no
+// network kill-switch, so the stub must not fake airplane mode.
+static inline bool        mkxp_getNetworkEnabled(void) { return true; }
+static inline void        mkxp_setNetworkEnabled(bool enabled) { (void)enabled; }
+
+static inline void        mkxp_setShowViewportBounds(bool enabled) { (void)enabled; }
+static inline bool        mkxp_getShowViewportBounds(void) { return false; }
+static inline void        mkxp_setCheatsEnabled(bool enabled) { (void)enabled; }
+static inline bool        mkxp_getCheatsEnabled(void) { return false; }
+static inline void        mkxp_setGameControllerCaptureEnabled(bool enabled) { (void)enabled; }
+// Desktop engine always consumes its own controller events.
+static inline bool        mkxp_getGameControllerCaptureEnabled(void) { return true; }
+static inline void        mkxp_setViewportBoundsColor(float r, float g, float b, float a) { (void)r; (void)g; (void)b; (void)a; }
+static inline void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a)
+{ if (r) *r = 0; if (g) *g = 0; if (b) *b = 0; if (a) *a = 1; }
+
+// Error/info surfaces: desktop presents through SDL message boxes at
+// the call sites that own them; the bridge routes are inert.
+static inline void        mkxp_setErrorMessage(const char *message) { (void)message; }
+static inline void        mkxp_presentErrorAndWait(const char *message) { (void)message; }
+static inline void        mkxp_signalErrorDismissed(void) {}
+static inline void        mkxp_reportFatalError(const char *message) { (void)message; }
+static inline void        mkxp_installFatalErrorHandlers(void) {}
+static inline void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_presentInfoAndWait(const char *message) { (void)message; }
+static inline void        mkxp_signalInfoDismissed(void) {}
+static inline void        mkxp_setInfoMessageCallback(mkxp_InfoMessageCallback cb, void *userdata) { (void)cb; (void)userdata; }
+
+// No host-driven pause on desktop (window focus handling is SDL's).
+static inline void        mkxp_requestPause(void) {}
+static inline void        mkxp_requestResume(void) {}
+static inline void        mkxp_checkPause(void) {}
+static inline bool        mkxp_isPauseRequested(void) { return false; }
+static inline bool        mkxp_isPaused(void) { return false; }
+static inline void        mkxp_setSnapshot(const unsigned char *data, int width, int height) { (void)data; (void)width; (void)height; }
+static inline bool        mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width, int *height) { (void)dest; (void)destSize; (void)width; (void)height; return false; }
+static inline bool        mkxp_getSnapshotSize(int *width, int *height) { (void)width; (void)height; return false; }
+static inline void        mkxp_setPausedCallback(mkxp_PausedCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_setResumedCallback(mkxp_ResumedCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_setFrameRenderedCallback(mkxp_FrameRenderedCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_signalFrameRendered(void) {}
+
+static inline void        mkxp_setGLContextBroken(void) {}
+static inline bool        mkxp_isGLContextBroken(void) { return false; }
+
+static inline void        mkxp_setFastForwardMultiplier(int multiplier) { (void)multiplier; }
+static inline int         mkxp_getFastForwardMultiplier(void) { return 1; }
+static inline void        mkxp_resetSessionState(void) {}
+
+static inline void        mkxp_setDebugLogPath(const char *path) { (void)path; }
+static inline void        mkxp_debugLog(const char *tag, const char *source, const char *message) { (void)tag; (void)source; (void)message; }
+static inline int         mkxp_debugLogEnabled(void) { return 0; }
+
+#endif /* MKXPZ_MOBILE */
 
 #endif // IOS_BRIDGE_H
