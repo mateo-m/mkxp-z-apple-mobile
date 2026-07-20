@@ -41,9 +41,9 @@ WineHostType getRealHostType();
 std::string getPlistValue(const char *key);
 
 /* Historical settings-window entry point. On iOS this is a no-op
- * (the app shell owns its own SwiftUI settings UI) but the symbol is
- * still referenced from eventthread.cpp legacy branches. Definition
- * lives in the iOS-side systemImpl.mm. */
+ * (the host app owns its own settings UI) but the symbol is still
+ * referenced from eventthread.cpp legacy branches. Definition lives
+ * in systemImplIOS.mm. */
 void openSettingsWindow();
 
 /* Metal support probe. On iOS this always returns true - every
