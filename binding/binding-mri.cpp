@@ -518,7 +518,7 @@ static void printP(int argc, VALUE *argv, const char *convMethod,
     
     /* Deliberate game dialog (msgbox / p), not an error: the
      * INFORMATION flag routes it to the host's info channel so
-     * the alert doesn't carry "restart Empo" framing. */
+     * the alert doesn't carry "restart the app" framing. */
     shState->eThread().showMessageBox(RSTRING_PTR(dispString),
                                       SDL_MESSAGEBOX_INFORMATION);
 }
@@ -622,8 +622,8 @@ RB_METHOD(mkxpDelta) {
     return rb_float_new(shState->runTime());
 }
 
-/* System.data_directory - per-game writable directory. On iOS Empo
-   points this at `Documents/Games/<id>/UserData/` so saves and any
+/* System.data_directory - per-game writable directory. On iOS the
+   host points this at a per-game container so saves and any
    companion app-data files are visible in the Files app and stay
    inside the imported game container.
 
@@ -784,7 +784,7 @@ RB_METHOD(mkxpNetworkEnabled) {
 }
 
 /* MKXP.managed_config_dir - host-managed per-game state directory
-   (Documents/EmpoState/<id>/ on iOS). Postload scripts use this
+   (see `mkxp_setManagedConfigDir`). Postload scripts use this
    to drop runtime-detection marker files that survive across
    sessions, e.g. `pokemon_input.rb` writes a
    `.pokemon_essentials_detected` marker so the next launch's
@@ -1799,7 +1799,7 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
  * in main.cpp's rgssThreadFun. Once this returns, the engine is dead
  * for the remainder of the process — App Store guideline 2.5.1 stops
  * us from terminating ourselves, so the user has to close + reopen
- * Empo to play another game. Ruby's VM has process-global state
+ * the app to play another game. Ruby's VM has process-global state
  * (signal handlers, atexit, parser, symbol table) that doesn't
  * unwind cleanly via ruby_cleanup, and a second ruby_init in the
  * same process would crash anyway. */
@@ -2014,7 +2014,7 @@ static void mriBindingExecute() {
 
     /* No ruby_cleanup: Ruby's VM has process-global state (signal
      * handlers, atexit, parser, symbol table) that doesn't unwind
-     * cleanly. The whole process exits when the user closes Empo
+     * cleanly. The whole process exits when the user closes the app
      * from the app switcher, which is what does the actual cleanup. */
 
     shState->rtData().rqTermAck.set();

@@ -251,15 +251,14 @@ try { exp } catch (...) {}
     
     /* Resolve the path to the base mkxp.json.
      *
-     * Empo (iOS) keeps per-game state outside the game folder
-     * (`Documents/EmpoState/<game-id>/mkxp.json`) so the imported
-     * game directory stays a faithful mirror of what the user
-     * dropped in. The host UI sets that path via
-     * `mkxp_setManagedConfigDir` before each session. If a managed
-     * config file exists there, prefer it; otherwise fall back to
-     * the historic cwd-relative `mkxp.json` (desktop builds, raw
-     * mkxp-z usage, games imported before the EmpoState
-     * migration). */
+     * A host may keep per-game state outside the game folder (a
+     * managed per-game state directory) so the imported game
+     * directory stays a faithful mirror of what the user dropped
+     * in. The host UI sets that path via `mkxp_setManagedConfigDir`
+     * before each session. If a managed config file exists there,
+     * prefer it; otherwise fall back to the historic cwd-relative
+     * `mkxp.json` (desktop builds, raw mkxp-z usage, hosts that
+     * don't manage state). */
     std::string managedDir(mkxp_getManagedConfigDir());
     std::string conf_path = CONF_FILE;
     if (!managedDir.empty()) {

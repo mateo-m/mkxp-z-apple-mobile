@@ -139,7 +139,7 @@ struct Config {
     // replacements; others are literal substring replacements.
     // Applied to RGSS script sections at load time, in memory only,
     // so save compatibility is preserved. Config key: `scriptPatches`
-    // (an Empo addition upstream mkxp-z simply ignores; JoiPlay-style
+    // (a fork addition upstream mkxp-z simply ignores; JoiPlay-style
     // patch JSONs still drop in via `patches.json` auto-discovery).
     std::vector<std::string> scriptPatches;
     

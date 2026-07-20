@@ -632,7 +632,7 @@ end
 # save joins must end with '/'. iOS normalize strips trailing slashes;
 # the C++ System.data_directory binding re-adds one. Shared by the
 # Ruby mirror (stale-merged.o safety) and ENV setup below.
-module EmpoPath
+module MkxpPath
   module_function
 
   def ensure_trailing_dir_sep(path)
@@ -643,12 +643,12 @@ module EmpoPath
   end
 end
 
-if defined?(System) && System.respond_to?(:data_directory) && !System.respond_to?(:_empo_orig_data_directory)
+if defined?(System) && System.respond_to?(:data_directory) && !System.respond_to?(:_mkxp_orig_data_directory)
   class << System
-    alias _empo_orig_data_directory data_directory
+    alias _mkxp_orig_data_directory data_directory
 
     def data_directory(*args)
-      EmpoPath.ensure_trailing_dir_sep(_empo_orig_data_directory(*args))
+      MkxpPath.ensure_trailing_dir_sep(_mkxp_orig_data_directory(*args))
     end
   end
 end
@@ -664,7 +664,11 @@ rescue StandardError
 end
 # Fake Windows env vars → per-game save root (trailing slash required
 # for `ENV['APPDATA'] + "Game.rxdata"`-style concat).
-userdata = EmpoPath.ensure_trailing_dir_sep(save_root || "#{tmp}/UserData")
+# Machine/user identity for the fake Windows env below: prefer the
+# launcher identity the host declared ($userAgent), fall back to the
+# engine's own name so nothing here is tied to a specific host app.
+host_identity = defined?($userAgent) && $userAgent ? $userAgent.to_s : 'mkxp'
+userdata = MkxpPath.ensure_trailing_dir_sep(save_root || "#{tmp}/UserData")
 ENV['TEMP'] ||= tmp
 ENV['TMP']  ||= tmp
 ENV['APPDATA']              ||= userdata
@@ -675,10 +679,10 @@ ENV['HOMEDRIVE']            ||= ''
 ENV['HOMEPATH']             ||= userdata
 ENV['SystemRoot']           ||= userdata
 ENV['windir']               ||= userdata
-ENV['COMPUTERNAME']         ||= 'Empo'
-ENV['USERNAME']             ||= 'Empo'
-ENV['USERDOMAIN']           ||= 'Empo'
-ENV['SESSIONNAME']          ||= 'Empo'
+ENV['COMPUTERNAME']         ||= host_identity
+ENV['USERNAME']             ||= host_identity
+ENV['USERDOMAIN']           ||= host_identity
+ENV['SESSIONNAME']          ||= host_identity
 ENV['OS']                   ||= 'Windows_NT'
 ENV['PATH']                 ||= ''
 ENV['PATHEXT']              ||= ''

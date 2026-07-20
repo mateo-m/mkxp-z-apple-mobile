@@ -41,7 +41,7 @@ module MKXP
       System.cheats_enabled?
     end
 
-    # Per-game in-game-keyboard toggle. The host (Empo) sets
+    # Per-game in-game-keyboard toggle. The host app sets
     # the bridge value at session start; `pokemon_input.rb`
     # reads this to decide whether to force `USEKEYBOARDTEXTENTRY
     # = false` and surface the game's own keyboard scene.
@@ -51,9 +51,9 @@ module MKXP
       System.use_in_game_keyboard?
     end
 
-    # Per-game state directory (`Documents/EmpoState/<id>/` on
-    # iOS). Engine postloads use this to write runtime-detection
-    # marker files.
+    # Per-game state directory the host manages (see
+    # `mkxp_setManagedConfigDir`). Engine postloads use this to
+    # write runtime-detection marker files.
     def managed_config_dir
       System.managed_config_dir
     end

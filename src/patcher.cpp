@@ -37,11 +37,11 @@ Patcher::Patcher(const std::vector<std::string> &patches)
 
     /* Auto-discovery fallback: if mkxp.json's `scriptPatches` list
      * is empty, look for a `patches.json` in (a) the host-managed
-     * config directory (Empo: `Documents/EmpoState/<game-id>/`),
+     * config directory (see `mkxp_setManagedConfigDir`),
      * then (b) the current working directory (game folder, the
      * historical location used by JoiPlay-style desktop installs).
      *
-     * The two-tier lookup lets Empo on iOS write its curated
+     * The two-tier lookup lets a host write its curated
      * patches.json into a state directory parallel to the game
      * folder so the imported game folder stays untouched, while
      * still honoring user-dropped `patches.json` files in the

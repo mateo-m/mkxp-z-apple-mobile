@@ -184,7 +184,7 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
       end
 
       def self.has_login_data
-        'Empo'
+        defined?($userAgent) && $userAgent ? $userAgent.to_s : 'mkxp'
       end
 
       def self.enter_text(text = '', _var = nil, max_char = 30)

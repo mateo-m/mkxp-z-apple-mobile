@@ -169,7 +169,7 @@ void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
  *
  * Runs the game session once and exits. Once the user returns to
  * the Library, the engine is fully torn down and the user must
- * close + reopen Empo to play another game (per App Store
+ * close + reopen the host app to play another game (per App Store
  * guideline 2.5.1, we can't terminate the process programmatically).
  *
  * Ruby's VM has process-global state (signal handlers, atexit,
@@ -285,7 +285,7 @@ static void initSyntaxTransform(Config &conf) {
   extern unsigned int mkxp_syntax_transform_target_ruby_version_major, mkxp_syntax_transform_target_ruby_version_minor, mkxp_syntax_transform_target_ruby_version_teeny;
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 
-  // Host-bridge override. The Empo iOS app sets this per-game so
+  // Host-bridge override. The host app sets this per-game so
   // syntaxTransform doesn't have to live inside mkxp.json (which is
   // meant to mirror the developer's engine-config layer; mixing
   // host-managed keys in there bleeds into mkxp.original.json
@@ -493,7 +493,7 @@ static bool waitForRGSSAck(RGSSThreadData &rtData) {
  * called in that order; init() returning false means the host is
  * already torn down and runSession/shutdown must not be called.
  * Single-shot: once runSession returns, the engine is dead and the
- * user has to relaunch Empo to play another game. */
+ * user has to relaunch the host app to play another game. */
 class EngineHost {
 public:
   bool init(int argc, char *argv[]);
@@ -623,7 +623,7 @@ void EngineHost::runSession(int argc, char *argv[]) {
      * the UI to ask the user to force-close the app. */
     mkxp_setEngineHung();
     mkxp_setErrorMessage(
-        "The game stopped responding. Close Empo from the app switcher.");
+        "The game stopped responding. Close the app from the app switcher.");
   }
 
   if (!rtData.rgssErrorMsg.empty()) {

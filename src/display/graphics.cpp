@@ -556,7 +556,7 @@ struct GraphicsPrivate {
         // "no visible difference" when bumping render scale; this
         // line tells us whether scRes scaled or stayed at the
         // RGSS default. Routes through mkxp_debugLog so it lands in
-        // the per-session log file Empo opens at game launch
+        // the per-session log file the host opens at game launch
         // (Debug()'s std::cerr goes nowhere on iOS).
         if (mkxp_debugLogEnabled()) {
             char msg[320];
@@ -883,7 +883,7 @@ struct GraphicsPrivate {
 
         if (mkxp_isGLContextBroken()) {
             mkxp_setErrorMessage(
-                "The graphics context crashed. Close Empo from the app switcher and reopen it.");
+                "The graphics context crashed. Close the app from the app switcher and reopen it.");
             shutdown();
             return;
         }
@@ -1178,7 +1178,7 @@ double Graphics::lastUpdate() {
 void Graphics::update(bool checkForShutdown) {
     if (mkxp_isGLContextBroken()) {
         mkxp_setErrorMessage(
-            "The graphics context crashed. Close Empo from the app switcher and reopen it.");
+            "The graphics context crashed. Close the app from the app switcher and reopen it.");
         shState->checkShutdown();
         return;
     }

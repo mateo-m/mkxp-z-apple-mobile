@@ -91,7 +91,7 @@ using namespace mkxp_net;
  * client, so every Ruby-visible path over it (HTTPLite, the HTTP shim,
  * the old-VM Net::HTTP facade) goes offline together: requests throw,
  * and the Ruby-side wrappers translate that into the same empty
- * responses games saw before Empo had networking. */
+ * responses games saw before the engine had networking. */
 static void ensureNetworkAllowed() {
     if (!mkxp_getNetworkEnabled())
         throw Exception(Exception::MKXPError,
