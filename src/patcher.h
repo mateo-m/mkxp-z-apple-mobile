@@ -2,7 +2,7 @@
 ** patcher.h
 **
 ** Ports JoiPlay's Patcher class. Reads JSON files listed in
-** `mkxp.json.patches` and applies literal / regex script
+** `mkxp.json.scriptPatches` and applies literal / regex script
 ** replacements as each RGSS script section is loaded into the
 ** Ruby VM via newStringUTF8. Lets us ship per-game compat fixes
 ** (e.g. a single problematic line in a fangame) without

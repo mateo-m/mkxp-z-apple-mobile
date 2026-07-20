@@ -429,10 +429,10 @@
 
     // Similar to the RTP option, except items are loaded before
     // the game archive and folder, for incremental game updates
-    // or modding. Config key: `patchPaths`.
+    // or modding. Same name and meaning as upstream mkxp-z.
     // (default: none)
     //
-    // "patchPaths": [
+    // "patches": [
     //     "/path/to/patch1.zip",
     //     "/path/to/patch2",
     // ],
@@ -447,7 +447,7 @@
     // in a fangame) without modifying the game's own files.
     // (default: none)
     //
-    // "patches": [
+    // "scriptPatches": [
     //     "/path/to/mygame-patch.json",
     // ],
 

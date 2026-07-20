@@ -2,7 +2,7 @@
 ** patcher.cpp
 **
 ** Ports JoiPlay's Patcher. Parses each JSON file listed in
-** `mkxp.json.patches`, pulls the "rpgm" array, and applies each
+** `mkxp.json.scriptPatches`, pulls the "rpgm" array, and applies each
 ** entry as either a literal substring replacement or, if the
 ** key starts with "[regex]", as an ECMAScript regex replacement.
 */
@@ -35,8 +35,8 @@ Patcher::Patcher(const std::vector<std::string> &patches)
     for (const std::string &patch : patches)
         load(patch.c_str());
 
-    /* Auto-discovery fallback: if mkxp.json's `patches` list is
-     * empty, look for a `patches.json` in (a) the host-managed
+    /* Auto-discovery fallback: if mkxp.json's `scriptPatches` list
+     * is empty, look for a `patches.json` in (a) the host-managed
      * config directory (Empo: `Documents/EmpoState/<game-id>/`),
      * then (b) the current working directory (game folder, the
      * historical location used by JoiPlay-style desktop installs).
@@ -71,12 +71,12 @@ Patcher::Patcher(const std::vector<std::string> &patches)
             patcherLog("auto-discovered patches.json in game folder");
             load("patches.json");
         } else {
-            patcherLog("no explicit patches and no patches.json found "
-                       "in managed dir or cwd");
+            patcherLog("no explicit scriptPatches and no patches.json "
+                       "found in managed dir or cwd");
         }
     } else {
         patcherLog("loaded " + std::to_string(patches.size()) +
-                   " explicit patch path(s) from mkxp.json");
+                   " explicit scriptPatches path(s) from mkxp.json");
     }
 }
 

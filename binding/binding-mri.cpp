@@ -803,7 +803,7 @@ RB_METHOD(mkxpManagedConfigDir) {
    script text-patcher over `str` and returns the rewritten text.
    Reborn and other PE fangames call MKXP.apply_overrides on each
    script section before Kernel#eval so config-driven fixes
-   (from the `patches` mkxp.json field) can ship as data. When
+   (from the `scriptPatches` mkxp.json field) can ship as data. When
    no patches are loaded this is effectively `str.dup`. */
 RB_METHOD(mkxpApplyOverrides) {
     VALUE arg;

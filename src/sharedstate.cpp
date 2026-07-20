@@ -119,7 +119,7 @@ struct SharedStatePrivate
 	      _glState(threadData->config),
 	      fontState(threadData->config),
 	      stampCounter(0),
-	      patcher(threadData->config.patches)
+	      patcher(threadData->config.scriptPatches)
 	{}
 	
 	void init(RGSSThreadData *threadData)
@@ -133,8 +133,8 @@ struct SharedStatePrivate
 
 		std::string archPath = config.execName + gameArchExt();
 
-		for (size_t i = 0; i < config.patchPaths.size(); ++i)
-			fileSystem.addPath(config.patchPaths[i].c_str());
+		for (size_t i = 0; i < config.patches.size(); ++i)
+			fileSystem.addPath(config.patches[i].c_str());
 
 		/* Check if a game archive exists */
 		FILE *tmp = fopen(archPath.c_str(), "rb");

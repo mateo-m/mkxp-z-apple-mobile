@@ -100,7 +100,7 @@ module MKXP
     # the JoiPlay-shipped patcher to rewrite known-broken
     # lines. We route to our own patcher (src/patcher.cpp),
     # so the same config-driven rewrites work when users set
-    # `patches` in mkxp.json. Scripts that call this on
+    # `scriptPatches` in mkxp.json. Scripts that call this on
     # engines without a patcher would just get `str` back.
     def apply_overrides(*args)
       System.apply_overrides(*args)
