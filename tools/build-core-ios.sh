@@ -71,6 +71,13 @@ CXX="$(xcrun --sdk "$SDK" -f clang++)"
 AR="$(xcrun --sdk "$SDK" -f ar)"
 RANLIB="$(xcrun --sdk "$SDK" -f ranlib)"
 
+# Compiler launcher: use ccache when available (CORE_NO_CCACHE=1
+# opts out). Purely a speed layer — output is identical.
+LAUNCHER=""
+if [ "${CORE_NO_CCACHE:-0}" != "1" ] && command -v ccache >/dev/null 2>&1; then
+    LAUNCHER="ccache"
+fi
+
 # Engine include dirs mirror the flat header layout the sources expect.
 ENGINE_INCLUDES="\
  -I$ENGINE \
@@ -149,17 +156,17 @@ for src in $(list_sources); do
     echo "  -> $src"
     case "$src" in
         *.c)
-            # shellcheck disable=SC2086 # COMMON_FLAGS is a flag list
-            "$CC" $COMMON_FLAGS -c "$ENGINE/$src" -o "$obj"
+            # shellcheck disable=SC2086,SC2090 # LAUNCHER/COMMON_FLAGS are word lists
+            $LAUNCHER "$CC" $COMMON_FLAGS -c "$ENGINE/$src" -o "$obj"
             ;;
         *.mm)
-            # shellcheck disable=SC2086
-            "$CXX" -std=c++14 -fdeclspec -fobjc-arc $COMMON_FLAGS \
+            # shellcheck disable=SC2086,SC2090
+            $LAUNCHER "$CXX" -std=c++14 -fdeclspec -fobjc-arc $COMMON_FLAGS \
                 -c "$ENGINE/$src" -o "$obj"
             ;;
         *)
-            # shellcheck disable=SC2086
-            "$CXX" -std=c++14 -fdeclspec $COMMON_FLAGS \
+            # shellcheck disable=SC2086,SC2090
+            $LAUNCHER "$CXX" -std=c++14 -fdeclspec $COMMON_FLAGS \
                 -c "$ENGINE/$src" -o "$obj"
             ;;
     esac
