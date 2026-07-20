@@ -36,6 +36,10 @@ on:
       - "empo-v*"
   workflow_dispatch:
 
+# The default GITHUB_TOKEN is read-only; releases need contents:write.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
