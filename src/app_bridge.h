@@ -246,6 +246,21 @@ void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 void        mkxp_setManagedConfigDir(const char *path);
 const char *mkxp_getManagedConfigDir(void);
 
+// In-memory config overlay (UI -> Engine).
+//
+// A JSON object the host merges over the base mkxp.json at config-
+// read time; overlay keys win per TOP-LEVEL key (shallow merge: an
+// overlay `bindingNames` replaces the whole object). JSON null
+// values neutralize a key so the engine's guarded reads fall back to
+// defaults. Lets hosts override config keys per session without
+// mutating the developer's on-disk file — same idea as the existing
+// per-session bridge setters, generalized.
+//
+// Set before each session start; NULL or "" clears any previous
+// overlay. Reject inputs over 1 MiB (warn log, keep previous state).
+void        mkxp_setConfigOverlayJSON(const char *jsonUTF8);
+const char *mkxp_getConfigOverlayJSON(void);
+
 // Per-game UserData directory (UI -> Engine).
 //
 // On iOS, hosts store game writable payload in a per-game container
@@ -583,6 +598,8 @@ static inline void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, voi
 // desktop builds".
 static inline void        mkxp_setManagedConfigDir(const char *path) { (void)path; }
 static inline const char *mkxp_getManagedConfigDir(void) { return NULL; }
+static inline void        mkxp_setConfigOverlayJSON(const char *jsonUTF8) { (void)jsonUTF8; }
+static inline const char *mkxp_getConfigOverlayJSON(void) { return NULL; }
 static inline void        mkxp_setUserDataDirectory(const char *path) { (void)path; }
 static inline const char *mkxp_getUserDataDirectory(void) { return NULL; }
 static inline void        mkxp_setLauncherIdentity(const char *name) { (void)name; }

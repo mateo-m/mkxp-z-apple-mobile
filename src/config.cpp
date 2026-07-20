@@ -56,6 +56,19 @@ void fillStringVec(json::value &item, std::vector<std::string> &vector) {
     }
 }
 
+static void mergeConfigOverlay(json::value &optsJ, const json::value &overlay) {
+    if (!overlay.is_object())
+        return;
+
+    auto &opts = optsJ.as_object();
+    for (auto &it : overlay.as_object()) {
+        /* Shallow merge: each top-level overlay key wins outright,
+         * including JSON null (neutralizes the key for GUARDed reads)
+         * and whole-object replacement for bindingNames. */
+        opts[it.first] = it.second;
+    }
+}
+
 bool copyObject(json::value &dest, json::value &src, const char *objectName = "") {
     assert(dest.is_object());
     if (src.is_null())
@@ -269,6 +282,19 @@ try { exp } catch (...) {}
     json::value baseConf = readConfFile(conf_path.c_str(), true);
     copyObject(optsJ, baseConf);
     copyObject(opts["bindingNames"], baseConf.as_object()["bindingNames"], "bindingNames .");
+
+    const char *overlayJSON = mkxp_getConfigOverlayJSON();
+    if (overlayJSON && overlayJSON[0]) {
+        try {
+            json::value overlayConf = json::parse5(overlayJSON);
+            if (!overlayConf.is_object())
+                overlayConf = json::object({});
+            mergeConfigOverlay(optsJ, overlayConf);
+        }
+        catch (const std::exception &e) {
+            Debug() << "Failed to parse config overlay:" << e.what();
+        }
+    }
     
 #define SET_OPT_CUSTOMKEY(var, key, type) GUARD(var = opts[#key].as_##type();)
 #define SET_OPT(var, type) SET_OPT_CUSTOMKEY(var, var, type)

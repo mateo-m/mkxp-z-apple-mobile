@@ -172,6 +172,10 @@ static BridgeCallback<mkxp_TextInputModeCallback> s_textInputModeCb;
 static std::mutex s_managedConfigMutex;
 static std::string s_managedConfigDir;
 
+// In-memory mkxp.json overlay merged after the base config file.
+static std::mutex s_configOverlayMutex;
+static std::string s_configOverlayJSON;
+
 // Per-game UserData directory the host sets before each session.
 static std::mutex s_saveDirMutex;
 static std::string s_saveDir;
@@ -515,6 +519,27 @@ const char *mkxp_getManagedConfigDir(void) {
     /* Pointer is valid until s_managedConfigDir is reassigned;
      * callers should copy into std::string if they need to keep it. */
     return s_managedConfigDir.c_str();
+}
+
+void mkxp_setConfigOverlayJSON(const char *jsonUTF8) {
+    std::lock_guard<std::mutex> lock(s_configOverlayMutex);
+    if (!jsonUTF8 || !jsonUTF8[0]) {
+        s_configOverlayJSON.clear();
+        return;
+    }
+    constexpr size_t kMaxOverlayBytes = 1024 * 1024;
+    const size_t len = std::strlen(jsonUTF8);
+    if (len > kMaxOverlayBytes) {
+        mkxp_debugLog("BRIDGE", "app_bridge.cpp",
+                      "config overlay JSON exceeds 1 MiB; keeping previous state");
+        return;
+    }
+    s_configOverlayJSON.assign(jsonUTF8, len);
+}
+
+const char *mkxp_getConfigOverlayJSON(void) {
+    std::lock_guard<std::mutex> lock(s_configOverlayMutex);
+    return s_configOverlayJSON.c_str();
 }
 
 void mkxp_setUserDataDirectory(const char *path) {
