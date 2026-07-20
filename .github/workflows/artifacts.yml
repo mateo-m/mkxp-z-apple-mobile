@@ -1,0 +1,134 @@
+---
+# Build and publish the prebuilt engine-core artifact
+# (engine-ios-prebuilt.tar.gz: libmkxpz-core.a + fingerprint per SDK).
+#
+# Publishing from THIS public repo's CI is deliberate: the artifact is
+# built from a tagged public commit by a public recipe
+# (tools/build-core-ios.sh), so the GPL binary->source correspondence
+# is automatic — no trust in a maintainer's laptop required.
+#
+# Triggers:
+#   - tag push `engine-*`  (ad-hoc engine artifact releases)
+#   - tag push `empo-v*`   (tags created by the Empo launcher's
+#                           release script; guarantees an artifact
+#                           exists for every launcher release)
+#   - workflow_dispatch    (dry run; uploads a workflow artifact
+#                           instead of creating a release)
+#
+# Requirements:
+#   - Secret EMPO_DEPS_TOKEN: read access to the empo-deps repo, used
+#     only to fetch dependency *headers* (SDL2, pixman, ANGLE, ...)
+#     for compilation. No dependency binaries end up in the artifact.
+#   - The runner's Xcode must provide an SDK that can target the
+#     min-os below (bump `runs-on`/xcode-select as SDKs move).
+#
+# After a release is published, pin it in the launcher:
+#   ios/Dependencies/engine/.version
+#     ENGINE_VERSION=<tag>
+#     ENGINE_SHA256=<printed below>
+
+name: engine-artifacts
+
+on:
+  push:
+    tags:
+      - "engine-*"
+      - "empo-v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      MIN_OS: "26.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Fetch dependency headers from empo-deps
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_DEPS_TOKEN }}
+        run: |
+          set -eu
+          mkdir -p deps-headers
+          gh release download --repo mateo-m/empo-deps \
+            --pattern native-ios-prebuilt.tar.gz --dir deps-headers \
+            "$(gh release list --repo mateo-m/empo-deps \
+              --json tagName --jq '[.[].tagName | select(startswith("native-"))] | first')"
+          tar -xzf deps-headers/native-ios-prebuilt.tar.gz -C deps-headers \
+            '*/include'
+          gh release download --repo mateo-m/empo-deps \
+            --pattern angle-ios-prebuilt.tar.gz --dir deps-headers \
+            "$(gh release list --repo mateo-m/empo-deps \
+              --json tagName --jq '[.[].tagName | select(startswith("angle-"))] | first')"
+          mkdir -p deps-headers/angle
+          tar -xzf deps-headers/angle-ios-prebuilt.tar.gz -C deps-headers/angle \
+            '*/include'
+
+      - name: Build engine core (device + simulator)
+        run: |
+          set -eu
+          for sdk in iphoneos iphonesimulator; do
+            inc="deps-headers/build-$sdk-arm64/include"
+            ./tools/build-core-ios.sh \
+              --sdk "$sdk" \
+              --min-os "$MIN_OS" \
+              --obj "out/obj-$sdk" \
+              --out "out/$sdk/lib" \
+              --include "$inc" \
+              --include "$inc/AL" \
+              --include "$inc/SDL2" \
+              --include "$inc/pixman-1" \
+              --include "$inc/uchardet" \
+              --include "$inc/freetype2" \
+              --include "deps-headers/angle/$sdk/include"
+          done
+
+      - name: Package
+        id: package
+        run: |
+          set -eu
+          {
+            echo "tag=${GITHUB_REF_NAME}"
+            echo "commit=${GITHUB_SHA}"
+            echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > out/MANIFEST
+          tar -czf engine-ios-prebuilt.tar.gz -C out \
+            MANIFEST iphoneos iphonesimulator
+          SHA256="$(shasum -a 256 engine-ios-prebuilt.tar.gz | awk '{print $1}')"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "engine-ios-prebuilt.tar.gz sha256: $SHA256"
+
+      - name: Create release (tag builds)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          set -eu
+          {
+            echo "libmkxpz-core.a (iphoneos + iphonesimulator), built by"
+            echo "tools/build-core-ios.sh at \`$GITHUB_SHA\`."
+            echo ""
+            echo "Launcher pin (ios/Dependencies/engine/.version):"
+            echo '```'
+            echo "ENGINE_VERSION=$GITHUB_REF_NAME"
+            echo "ENGINE_SHA256=$SHA256"
+            echo '```'
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" engine-ios-prebuilt.tar.gz \
+            --title "engine prebuilt $GITHUB_REF_NAME" \
+            --notes-file notes.md
+
+      - name: Upload artifact (dispatch dry runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-ios-prebuilt
+          path: engine-ios-prebuilt.tar.gz
