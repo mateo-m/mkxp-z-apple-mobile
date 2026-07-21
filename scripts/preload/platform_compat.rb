@@ -437,6 +437,27 @@ unless defined?(MKXPSaveFS)
       path
     end
 
+    # iOS's filesystem is case-sensitive; Windows-authored games open
+    # files with mismatched case (e.g. "Audio/BGM/TITLE_MD.ogg" for
+    # title_md.ogg) and expect it to work. The engine resolves the
+    # actual on-disk spelling through its case-insensitive path cache
+    # (System.resolve_case_path); returns nil when nothing matches, so
+    # callers can retry raw file APIs once after Errno::ENOENT.
+    def casefold_fallback(path)
+      return nil unless defined?(System) && System.respond_to?(:resolve_case_path)
+
+      candidate = path.to_s
+      return nil if candidate.empty?
+      return nil if candidate =~ %r{\A(?:[A-Za-z]:[\\/]|[\\/])}
+
+      resolved = System.resolve_case_path(candidate)
+      return nil if resolved.nil? || resolved == candidate
+
+      resolved
+    rescue StandardError
+      nil
+    end
+
     def glob_for(pattern)
       return nil unless pattern.is_a?(String)
 
@@ -867,10 +888,20 @@ class << File
 
   def open(path, *args, &block)
     _mkxp_orig_open(MKXPSaveFS.path_for(path), *args, &block)
+  rescue Errno::ENOENT
+    fixed = MKXPSaveFS.casefold_fallback(path)
+    raise unless fixed
+
+    _mkxp_orig_open(MKXPSaveFS.path_for(fixed), *args, &block)
   end
 
   def new(path, *args)
     _mkxp_orig_new(MKXPSaveFS.path_for(path), *args)
+  rescue Errno::ENOENT
+    fixed = MKXPSaveFS.casefold_fallback(path)
+    raise unless fixed
+
+    _mkxp_orig_new(MKXPSaveFS.path_for(fixed), *args)
   end
 
   def delete(*paths)

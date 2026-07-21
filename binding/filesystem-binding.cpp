@@ -267,12 +267,17 @@ static bool mkxp_try_singleton_alias(VALUE recv, const char *aliasName,
     return RTEST(callSingletonAlias(recv, aliasName, argc, argv));
 }
 
+/* The casefold-aware predicates below dispatch the original
+ * (raw-syscall) method through `self` so one implementation can
+ * back File, FileTest and Dir alike; each receiver carries its own
+ * `_mkxp_native_orig_*` alias. The PhysFS fallback makes lookups
+ * case-insensitive on iOS's case-sensitive filesystem. */
 RB_METHOD_GUARD(fileExist) {
     VALUE filename;
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_exist?", 1, &filename))
+    if (mkxp_try_singleton_alias(self, "_mkxp_native_orig_exist?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().exists(RSTRING_PTR(filename)))
@@ -287,7 +292,7 @@ RB_METHOD_GUARD(fileDirectory) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_directory?", 1, &filename))
+    if (mkxp_try_singleton_alias(self, "_mkxp_native_orig_directory?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
@@ -302,7 +307,7 @@ RB_METHOD_GUARD(fileFile) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (mkxp_try_singleton_alias(rb_cFile, "_mkxp_native_orig_file?", 1, &filename))
+    if (mkxp_try_singleton_alias(self, "_mkxp_native_orig_file?", 1, &filename))
         return Qtrue;
 
     std::string resolved = shState->fileSystem().resolvePath(RSTRING_PTR(filename));
@@ -318,7 +323,7 @@ RB_METHOD_GUARD(dirExist) {
     rb_scan_args(argc, argv, "1", &filename);
     SafeStringValue(filename);
 
-    if (mkxp_try_singleton_alias(rb_cDir, "_mkxp_native_orig_exist?", 1, &filename))
+    if (mkxp_try_singleton_alias(self, "_mkxp_native_orig_exist?", 1, &filename))
         return Qtrue;
 
     if (shState->fileSystem().directoryExists(RSTRING_PTR(filename)))
@@ -453,13 +458,18 @@ void fileIntBindingInit() {
     _rb_define_method(klass, "binmode", fileIntBinmode);
     _rb_define_method(klass, "close", fileIntClose);
 
+    VALUE fileTest = rb_const_get(rb_cObject, rb_intern("FileTest"));
     VALUE fileSC = rb_singleton_class(rb_cFile);
+    VALUE fileTestSC = rb_singleton_class(fileTest);
     VALUE dirSC = rb_singleton_class(rb_cDir);
     VALUE kernelSC = rb_singleton_class(rb_mKernel);
 
     mkxp_define_alias_once(fileSC, "_mkxp_native_orig_exist?", "exist?");
     mkxp_define_alias_once(fileSC, "_mkxp_native_orig_file?", "file?");
     mkxp_define_alias_once(fileSC, "_mkxp_native_orig_directory?", "directory?");
+    mkxp_define_alias_once(fileTestSC, "_mkxp_native_orig_exist?", "exist?");
+    mkxp_define_alias_once(fileTestSC, "_mkxp_native_orig_file?", "file?");
+    mkxp_define_alias_once(fileTestSC, "_mkxp_native_orig_directory?", "directory?");
     mkxp_define_alias_once(dirSC, "_mkxp_native_orig_exist?", "exist?");
     mkxp_define_alias_once(kernelSC, "_mkxp_native_require_alias", "require");
     mkxp_define_alias_once(kernelSC, "_mkxp_native_load_alias", "load");
@@ -467,7 +477,25 @@ void fileIntBindingInit() {
     rb_define_singleton_method(rb_cFile, "exist?", RUBY_METHOD_FUNC(fileExist), -1);
     rb_define_singleton_method(rb_cFile, "file?", RUBY_METHOD_FUNC(fileFile), -1);
     rb_define_singleton_method(rb_cFile, "directory?", RUBY_METHOD_FUNC(fileDirectory), -1);
+    /* Pokemon Essentials preflights audio/graphics through
+     * FileTest.audio_exist? -> safeExists? -> FileTest.exist? and
+     * silently drops BGM when the check misses, so FileTest needs
+     * the same casefold treatment as File (silent-title-music bug). */
+    rb_define_singleton_method(fileTest, "exist?", RUBY_METHOD_FUNC(fileExist), -1);
+    rb_define_singleton_method(fileTest, "file?", RUBY_METHOD_FUNC(fileFile), -1);
+    rb_define_singleton_method(fileTest, "directory?", RUBY_METHOD_FUNC(fileDirectory), -1);
     rb_define_singleton_method(rb_cDir, "exist?", RUBY_METHOD_FUNC(dirExist), -1);
+
+    /* Deprecated `exists?` spellings predate Ruby 3.2 and are raw
+     * syscalls too; route them to the casefold impls when the VM
+     * still ships them (on 3.2+ the legacy syntax-transform shims
+     * in binding-mri.cpp forward to `exist?` and land here anyway). */
+    if (rb_method_boundp(fileSC, rb_intern("exists?"), /*ex=*/0))
+        rb_define_singleton_method(rb_cFile, "exists?", RUBY_METHOD_FUNC(fileExist), -1);
+    if (rb_method_boundp(fileTestSC, rb_intern("exists?"), /*ex=*/0))
+        rb_define_singleton_method(fileTest, "exists?", RUBY_METHOD_FUNC(fileExist), -1);
+    if (rb_method_boundp(dirSC, rb_intern("exists?"), /*ex=*/0))
+        rb_define_singleton_method(rb_cDir, "exists?", RUBY_METHOD_FUNC(dirExist), -1);
     _rb_define_module_function(rb_mKernel, "require", kernelRequireCasefold);
     _rb_define_module_function(rb_mKernel, "load", kernelLoadCasefold);
     

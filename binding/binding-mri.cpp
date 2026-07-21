@@ -182,6 +182,7 @@ RB_METHOD(mkxpReloadPathCache);
 RB_METHOD(mkxpAddPath);
 RB_METHOD(mkxpRemovePath);
 RB_METHOD(mkxpFileExists);
+RB_METHOD(mkxpResolveCasePath);
 RB_METHOD(mkxpLaunch);
 
 RB_METHOD(mkxpGetJSONSetting);
@@ -448,6 +449,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "mount", mkxpAddPath);
     _rb_define_module_function(mod, "unmount", mkxpRemovePath);
     _rb_define_module_function(mod, "file_exist?", mkxpFileExists);
+    _rb_define_module_function(mod, "resolve_case_path", mkxpResolveCasePath);
     _rb_define_module_function(mod, "launch", mkxpLaunch);
     
     _rb_define_module_function(mod, "default_font_family=", mkxpSetDefaultFontFamily);
@@ -981,14 +983,33 @@ RB_METHOD_GUARD_END
 
 RB_METHOD(mkxpFileExists) {
     RB_UNUSED_PARAM;
-    
+
     VALUE path;
     rb_scan_args(argc, argv, "1", &path);
     SafeStringValue(path);
-    
+
     if (shState->fileSystem().exists(RSTRING_PTR(path)))
         return Qtrue;
     return Qfalse;
+}
+
+/* System.resolve_case_path(path) - resolves a game-relative path
+   against the PhysFS path cache (case-insensitively) and returns
+   the actual on-disk spelling, or nil when nothing matches. Lets
+   Ruby-side wrappers retry raw file APIs (File.open etc.) that
+   fail on iOS's case-sensitive filesystem with a name whose case
+   only matches on Windows. */
+RB_METHOD(mkxpResolveCasePath) {
+    RB_UNUSED_PARAM;
+
+    VALUE path;
+    rb_scan_args(argc, argv, "1", &path);
+    SafeStringValue(path);
+
+    std::string resolved = shState->fileSystem().resolvePath(RSTRING_PTR(path));
+    if (resolved.empty())
+        return Qnil;
+    return rb_utf8_str_new(resolved.c_str(), resolved.size());
 }
 
 RB_METHOD(mkxpSetDefaultFontFamily) {
