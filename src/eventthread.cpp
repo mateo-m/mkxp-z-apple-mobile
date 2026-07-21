@@ -27,6 +27,7 @@
  * in app_bridge.h's full surface. */
 extern "C" void mkxp_fireTextInputModeCallback(int active);
 extern "C" bool mkxp_getGameControllerCaptureEnabled(void);
+extern "C" bool mkxp_getTouchMouseEnabled(void);
 
 #include <SDL_events.h>
 #include <SDL_messagebox.h>
@@ -247,7 +248,14 @@ void EventThread::process(RGSSThreadData &rtData)
             case SDL_MOUSEBUTTONDOWN :
             case SDL_MOUSEBUTTONUP :
             case SDL_MOUSEMOTION :
-                if (event.button.which == SDL_TOUCH_MOUSEID)
+                /* Touch-synthesized mouse events are opt-in (host
+                 * flag). Clipping them to the game viewport is the
+                 * HOST's job: it routes only game-surface touches to
+                 * the SDL view, and the platform delivers each touch
+                 * sequence to the view that received its begin, so
+                 * drags keep working after leaving the surface. */
+                if (event.button.which == SDL_TOUCH_MOUSEID
+                    && !mkxp_getTouchMouseEnabled())
                     continue;
                 break;
                 
@@ -459,6 +467,8 @@ void EventThread::process(RGSSThreadData &rtData)
                 
             case SDL_MOUSEBUTTONDOWN :
                 mouseState.buttons[event.button.button] = true;
+                if (event.button.which == SDL_TOUCH_MOUSEID)
+                    mouseState.inWindow = true;
                 break;
                 
             case SDL_MOUSEBUTTONUP :
@@ -468,6 +478,8 @@ void EventThread::process(RGSSThreadData &rtData)
             case SDL_MOUSEMOTION :
                 mouseState.x = event.motion.x;
                 mouseState.y = event.motion.y;
+                if (event.motion.which == SDL_TOUCH_MOUSEID)
+                    mouseState.inWindow = true;
                 cursorTimer();
                 updateCursorState(cursorInWindow, gameScreen);
                 break;

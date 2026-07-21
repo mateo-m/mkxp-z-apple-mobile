@@ -104,6 +104,9 @@ static std::atomic<bool>  s_cheatsEnabled{false};
 // layer can inject keyboard events without double-applying presses.
 static std::atomic<bool>  s_gameControllerCaptureEnabled{true};
 
+// When false, EventThread discards touch-synthesized SDL mouse events.
+static std::atomic<bool>  s_touchMouseEnabled{false};
+
 // Input bridge: cached SDL window ID for event injection.
 static std::atomic<uint32_t> s_sdlWindowID{0};
 
@@ -952,6 +955,14 @@ void mkxp_setGameControllerCaptureEnabled(bool enabled) {
 
 bool mkxp_getGameControllerCaptureEnabled(void) {
     return s_gameControllerCaptureEnabled.load(std::memory_order_acquire);
+}
+
+void mkxp_setTouchMouseEnabled(bool enabled) {
+    s_touchMouseEnabled.store(enabled, std::memory_order_release);
+}
+
+bool mkxp_getTouchMouseEnabled(void) {
+    return s_touchMouseEnabled.load(std::memory_order_acquire);
 }
 
 void mkxp_setViewportBoundsColor(float r, float g, float b, float a) {

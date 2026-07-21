@@ -444,6 +444,13 @@ bool        mkxp_getCheatsEnabled(void);
 void        mkxp_setGameControllerCaptureEnabled(bool enabled);
 bool        mkxp_getGameControllerCaptureEnabled(void);
 
+/* Controls whether touch-synthesized SDL mouse events
+ * (which == SDL_TOUCH_MOUSEID) are delivered to the engine input
+ * layer. Default: false = upstream behavior (touch never synthesizes
+ * mouse input); hosts that want touch-as-mouse set it true. */
+void        mkxp_setTouchMouseEnabled(bool enabled);
+bool        mkxp_getTouchMouseEnabled(void);
+
 void        mkxp_setViewportBoundsColor(float r, float g, float b, float a);
 void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);
 
@@ -661,6 +668,9 @@ static inline bool        mkxp_getCheatsEnabled(void) { return false; }
 static inline void        mkxp_setGameControllerCaptureEnabled(bool enabled) { (void)enabled; }
 // Desktop engine always consumes its own controller events.
 static inline bool        mkxp_getGameControllerCaptureEnabled(void) { return true; }
+static inline void        mkxp_setTouchMouseEnabled(bool enabled) { (void)enabled; }
+// Upstream behavior: touch never synthesizes mouse input.
+static inline bool        mkxp_getTouchMouseEnabled(void) { return false; }
 static inline void        mkxp_setViewportBoundsColor(float r, float g, float b, float a) { (void)r; (void)g; (void)b; (void)a; }
 static inline void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a)
 { if (r) *r = 0; if (g) *g = 0; if (b) *b = 0; if (a) *a = 1; }
