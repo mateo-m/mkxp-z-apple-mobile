@@ -30,6 +30,7 @@
 #include "fluid-fun.h"
 #include "sdl-util.h"
 #include "debugwriter.h"
+#include "app_bridge.h"
 
 #include <SDL_mutex.h>
 #include <SDL_thread.h>
@@ -252,7 +253,15 @@ void ALStream::openSource(const std::string &filename)
 		 * open the file, so we'll close it in that case. */
 		if (e.type != Exception::NoFileError)
 			close();
-		
+
+		if (mkxp_debugLogEnabled())
+		{
+			char buf[512];
+			snprintf(buf, sizeof(buf), "cannot open audio stream: %s: %s",
+			         filename.c_str(), e.msg.c_str());
+			mkxp_debugLog("WARN", "audio", buf);
+		}
+
 		throw e;
 	}
 
@@ -265,6 +274,11 @@ void ALStream::openSource(const std::string &filename)
 		         filename.c_str(), handler.errorMsg.c_str());
 
 		Debug() << buf;
+
+		/* Streams with no source silently no-op on play(); without
+		 * this the failure is invisible outside stderr. */
+		if (mkxp_debugLogEnabled())
+			mkxp_debugLog("WARN", "audio", buf);
 	}
 	
 	source = handler.source;

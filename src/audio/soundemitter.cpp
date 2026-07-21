@@ -27,6 +27,7 @@
 #include "config.h"
 #include "util.h"
 #include "debugwriter.h"
+#include "app_bridge.h"
 
 #include <SDL_sound.h>
 
@@ -248,6 +249,11 @@ SoundBuffer *SoundEmitter::allocateBuffer(const std::string &filename)
 			snprintf(buf, sizeof(buf), "Unable to decode sound: %s: %s",
 			         filename.c_str(), Sound_GetError());
 			Debug() << buf;
+
+			/* A null buffer silently drops the SE; surface the
+			 * failure in the per-game debug log too. */
+			if (mkxp_debugLogEnabled())
+				mkxp_debugLog("WARN", "audio", buf);
 
 			return 0;
 		}
