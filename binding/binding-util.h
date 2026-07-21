@@ -66,20 +66,31 @@
  * - rb_funcallv(recv, mid, argc, argv): added in 2.1. The 1.9
  *   equivalent is rb_funcall2 (older name; identical signature).
  * - rb_utf8_str_new_cstr(s): added in 2.2. 1.9 has encoding-aware
- *   strings but no UTF-8-flagged constructor; rb_str_new_cstr +
- *   rb_enc_associate_index gets the same effect, but for our use
- *   (config dirs, script source) plain rb_str_new_cstr is fine
- *   since rb_eval_string/load handle encoding tagging via magic
- *   comments in the script text itself.
+ *   strings but no UTF-8-flagged constructor; build one with
+ *   rb_enc_str_new + rb_utf8_encoding. Aliasing onto plain
+ *   rb_str_new is NOT equivalent: it tags the result ASCII-8BIT,
+ *   and game scripts (Scripts.rvdata2 sections) carry no magic
+ *   comments, so eval'd regexp/string literals containing
+ *   non-ASCII go binary and raise Encoding::CompatibilityError
+ *   against UTF-8 strings loaded from Marshal data. RGSS3 itself
+ *   tags script source UTF-8.
  * - rb_ary_new_capa(n): added in 2.0. 1.9 has the internal
  *   rb_ary_new2 with the same semantics.
  * - RB_INTEGER_TYPE_P(v): added in 2.4. 1.9-compatible test is
  *   FIXNUM_P(v) || rb_obj_is_kind_of(v, rb_cInteger).
  */
 #if RAPI_MAJOR == 1 && RAPI_MINOR == 9
+#  include <ruby/encoding.h>
+#  include <string.h>
+static inline VALUE mkxp_rb19_utf8_str_new(const char *str, long len) {
+  return rb_enc_str_new(str, len, rb_utf8_encoding());
+}
+static inline VALUE mkxp_rb19_utf8_str_new_cstr(const char *str) {
+  return rb_enc_str_new(str, (long)strlen(str), rb_utf8_encoding());
+}
 #  define rb_funcallv               rb_funcall2
-#  define rb_utf8_str_new_cstr      rb_str_new_cstr
-#  define rb_utf8_str_new           rb_str_new
+#  define rb_utf8_str_new_cstr      mkxp_rb19_utf8_str_new_cstr
+#  define rb_utf8_str_new           mkxp_rb19_utf8_str_new
 #  define rb_ary_new_capa           rb_ary_new2
 #  ifndef RARRAY_AREF
 #    define RARRAY_AREF(a, i)       (RARRAY_PTR(a)[(i)])
