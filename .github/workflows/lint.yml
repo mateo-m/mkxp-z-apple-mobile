@@ -48,3 +48,15 @@ jobs:
           if [ -n "$FILES" ]; then
             echo "$FILES" | xargs bun x markdownlint -c .markdownlint.json
           fi
+
+  # Aggregate gate whose check-run name matches the ruleset's required
+  # "Lint" context exactly (same pattern as empo-app's workflows).
+  summary:
+    name: Lint
+    needs: [ruby, markdown]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every job passed
+        run: |
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
