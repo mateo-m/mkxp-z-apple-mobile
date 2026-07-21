@@ -618,7 +618,14 @@ struct GraphicsPrivate {
         ratio.x = (float)scRes.x / scSize.x * backingScaleFactor;
         ratio.y = (float)scRes.y / scSize.y * backingScaleFactor;
         
-        rtData->screenOffset = scOffset / backingScaleFactor;
+        /* screenOffset feeds Input::mouseX/mouseY, whose mousePos is in
+         * top-left-origin window points. scOffset.y is GL bottom-left,
+         * so flip it (same conversion as the gameRect below); without
+         * the flip every mouse Y lands offset by the letterbox delta
+         * (negative near the top of the game on tall screens). */
+        rtData->screenOffset.x = scOffset.x / backingScaleFactor;
+        rtData->screenOffset.y =
+            (winSize.y - scOffset.y - scSize.y) / backingScaleFactor;
 
         // Publish the game viewport rect in logical points for the touch overlay.
         // scOffset.y is in GL coordinates (origin bottom-left), convert to
