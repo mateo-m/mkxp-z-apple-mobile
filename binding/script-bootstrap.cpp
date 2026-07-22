@@ -180,6 +180,7 @@ void loadEnginePostloadsBeforeMain() {
         return;
 
     const char *enginePostloads[] = {
+        "bool_coerce_compat",
         "rgss_plugin_stubs",
         "pokemon_input",
         "pokemon_online_stubs",
