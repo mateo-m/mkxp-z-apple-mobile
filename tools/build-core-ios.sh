@@ -97,28 +97,24 @@ ENGINE_INCLUDES="\
  -I$ENGINE/binding \
  -I$ENGINE/shader"
 
-# Defines mirror the launcher's engine build (project.yml /
-# common.make) so the core half and the binding half agree on ABI.
+# Shared feature flags come from src/mkxpz-buildconfig.h (force-
+# included below). Only per-consumer parameters stay as -D options.
 # The escaped quotes are intentional: expanded unquoted, the compiler
 # receives -DMKXPZ_VERSION="1.0.0" and the macro is a C string.
 # shellcheck disable=SC2089
 DEFINES="\
- -DMKXPZ_BUILD_XCODE \
- -DMKXPZ_ALCDEVICE=ALCdevice \
  -DMKXPZ_VERSION=\"1.0.0\" \
  -DMKXPZ_GIT_HASH=\"ios\" \
  -DMKXPZ_RUBY_VERSION=\"3.1\" \
  -DMKXPZ_RUBY_VERSION_MAJOR=3 \
  -DMKXPZ_RUBY_VERSION_MINOR=1 \
- -DMKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES \
- -DGLES2_HEADER \
- -DMKXPZ_HAS_ANGLE \
- -DHAVE_CONFIG_H \
- -DHM7_HAVE_MKXP_BITMAP"
+ -DMKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES"
+
+BUILDCONFIG="-include $ENGINE/src/mkxpz-buildconfig.h"
 
 # shellcheck disable=SC2090 # literal quotes in DEFINES are intended
 COMMON_FLAGS="-isysroot $SYSROOT $TARGET_FLAG -arch $ARCH -O3 \
-$ENGINE_INCLUDES $DEP_INCLUDES $DEFINES ${EXTRA_CORE_CFLAGS:-}"
+$ENGINE_INCLUDES $DEP_INCLUDES $BUILDCONFIG $DEFINES ${EXTRA_CORE_CFLAGS:-}"
 
 mkdir -p "$OBJ" "$OUT"
 
