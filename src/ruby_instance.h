@@ -64,6 +64,11 @@ void mkxpi_retireRubyInstance(void);
 // thread; the Library UI polls it per game card.
 MKXPSessionCapability mkxpi_sessionCapability(MKXPRubyVersion version);
 
+// Human-readable state of the most recent acquire, e.g.
+// "island 31 #3 (reset-in-place)". For the debug overlay via
+// mkxp_getRubyInstanceDiagnostics(). Never NULL.
+const char *mkxpi_rubyInstanceDiagnostics(void);
+
 #ifdef __cplusplus
 }
 #endif
@@ -77,6 +82,7 @@ static inline ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested
 static inline ScriptBinding *mkxpi_currentScriptBinding(void) { return 0; }
 static inline void mkxpi_retireRubyInstance(void) {}
 static inline MKXPSessionCapability mkxpi_sessionCapability(MKXPRubyVersion version) { (void)version; return MKXP_SESSION_CAP_FRESH; }
+static inline const char *mkxpi_rubyInstanceDiagnostics(void) { return "single-session build"; }
 
 #endif /* MKXPZ_MOBILE */
 

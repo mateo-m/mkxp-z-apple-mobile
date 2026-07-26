@@ -936,6 +936,10 @@ MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version) {
     return mkxpi_sessionCapability(version);
 }
 
+const char *mkxp_getRubyInstanceDiagnostics(void) {
+    return mkxpi_rubyInstanceDiagnostics();
+}
+
 void mkxp_setUseInGameKeyboard(bool enabled) {
     s_useInGameKeyboard.store(enabled, std::memory_order_release);
 }

@@ -233,6 +233,11 @@ const char *mkxp_waitForGamePath(void);
 // present), or when the statically-linked island has not run yet.
 MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version);
 
+// Debug-overlay string: which island instance the last session used
+// and via which freshness mechanism, e.g. "island 31 #3
+// (reset-in-place)". Never NULL; stable storage.
+const char *mkxp_getRubyInstanceDiagnostics(void);
+
 // Engine termination
 
 void        mkxp_requestTerminate(void);
@@ -620,6 +625,7 @@ static inline const char *mkxp_waitForGamePath(void) { return NULL; }
 // invocation), and its statically-linked binding has not run before
 // the session starts, so FRESH is always truthful here.
 static inline MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version) { (void)version; return MKXP_SESSION_CAP_FRESH; }
+static inline const char *mkxp_getRubyInstanceDiagnostics(void) { return "single-session build"; }
 
 static inline void        mkxp_requestTerminate(void) {}
 static inline int         mkxp_isEngineTerminated(void) { return 0; }
