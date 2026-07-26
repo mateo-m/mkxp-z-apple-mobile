@@ -238,6 +238,18 @@ MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version);
 // (reset-in-place)". Never NULL; stable storage.
 const char *mkxp_getRubyInstanceDiagnostics(void);
 
+// True when the ended session left the process able to run another
+// one: engine terminated, not hung, and no Ruby instance stuck
+// checked out (a crash or failed quiesce strands the instance). The
+// host uses it to choose between "back to the library" and "close
+// Empo from the app switcher" framing after a session ends.
+int mkxp_isSessionRecoverable(void);
+
+// Called by the binding when ruby_cleanup aborted mid-way (an
+// at_exit/END proc escaped with a non-Ruby exception): island
+// threads may be alive, so the instance must not be recycled.
+void mkxp_noteVMQuiesceFailed(void);
+
 // Engine termination
 
 void        mkxp_requestTerminate(void);
@@ -626,6 +638,8 @@ static inline const char *mkxp_waitForGamePath(void) { return NULL; }
 // the session starts, so FRESH is always truthful here.
 static inline MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version) { (void)version; return MKXP_SESSION_CAP_FRESH; }
 static inline const char *mkxp_getRubyInstanceDiagnostics(void) { return "single-session build"; }
+static inline int mkxp_isSessionRecoverable(void) { return 0; }
+static inline void mkxp_noteVMQuiesceFailed(void) {}
 
 static inline void        mkxp_requestTerminate(void) {}
 static inline int         mkxp_isEngineTerminated(void) { return 0; }

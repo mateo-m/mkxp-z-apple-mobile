@@ -2081,9 +2081,25 @@ static void mriBindingExecute() {
 #else
     rb_gv_set("$!", Qnil);
 #endif
-    ruby_cleanup(0);
-    /* The VM is gone; drop the binding-data pointer so nothing can
-     * mistake the dead stack-scoped RbData for a live one. */
+    /* Backstop: an at_exit/END proc that touches the engine while a
+     * terminate request is pending can reach checkShutdown() ->
+     * mriBindingTerminate() -> a C++ throw that unwinds through
+     * ruby_cleanup's C frames. Catch it here instead of letting it
+     * escape into the crash guard: the cleanup is incomplete (island
+     * threads may be alive), so poison the instance - retire then
+     * leaves it checked out and the host degrades to the honest
+     * restart alert instead of corrupting the next session. */
+    try {
+        ruby_cleanup(0);
+    } catch (...) {
+        Debug() << "ruby_cleanup aborted by a non-Ruby exception"
+                << "(at_exit touched the engine mid-terminate);"
+                << "instance poisoned.";
+        mkxp_noteVMQuiesceFailed();
+    }
+    /* The VM is gone (or abandoned); drop the binding-data pointer
+     * so nothing can mistake the dead stack-scoped RbData for a
+     * live one. */
     shState->setBindingData(0);
 #endif
 

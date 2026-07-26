@@ -193,6 +193,14 @@ extern "C" void mkxp_rgssThreadShutdownAfterFailure(void *userdata) {
   if (!userdata)
     return;
   rgssThreadShutdown(static_cast<RGSSThreadData *>(userdata));
+  /* A failure before execute() (SharedState init throw: missing or
+   * corrupt game files, GL setup errors) never ran any Ruby code, so
+   * the acquired instance is still factory-fresh - retire it so one
+   * bad game import doesn't cost the process its session loop. After
+   * execute() started this is a no-op: the island's state is unknown
+   * and the instance stays checked out, which makes
+   * mkxp_isSessionRecoverable() report false. */
+  mkxpi_retireRubyInstanceIfUnexecuted();
 }
 
 static void rgssThreadShutdown(RGSSThreadData *threadData) {
@@ -265,7 +273,11 @@ static int rgssThreadFunImpl(void *userdata) {
 
   /* Run game scripts on this session's acquired Ruby instance.
    * Mid-session terminate/reset dispatch reaches the same instance
-   * through getActiveScriptBinding(). */
+   * through getActiveScriptBinding(). The executing mark divides
+   * failure handling: before it, a guarded failure retires the
+   * still-pristine instance; after it, the instance is only
+   * reusable via the normal quiesce + retire path. */
+  mkxpi_markRubyInstanceExecuting();
   sessionBinding->execute();
 
   rgssThreadShutdown(threadData);

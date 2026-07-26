@@ -93,6 +93,15 @@ IslandSlot *s_activeSlot = nullptr;
 void *s_activeHandle = nullptr;          // NULL for static fallback
 ScriptBinding *s_activeBinding = nullptr;
 bool s_activeIsCanonical = false;
+// execute() started: Ruby code has run on this instance. A failure
+// before this point leaves the instance pristine (ruby_init never
+// ran) and safe to retire; after it, a failure means unknown island
+// state and the instance stays checked out.
+bool s_activeExecuted = false;
+// The VM quiesce (ruby_cleanup) failed mid-way: island threads may
+// be alive. Retire must not dlclose or reset this instance; it stays
+// checked out so the capability gate blocks further sessions.
+bool s_activePoisoned = false;
 
 // Process sigaction table snapshot, taken at acquire and restored at
 // retire. ruby_init installs handlers (SEGV, PIPE, INT, ...) that
@@ -140,9 +149,23 @@ void resolveDylib(IslandSlot &slot) {
 }
 
 // Human-readable state of the most recent acquire, for the debug
-// overlay ("Ruby island 31 #3 (reset-in-place)"). Written under
-// s_mutex; read lock-free (stale reads are harmless UI-wise).
-char s_diagnostics[128] = "no session yet";
+// overlay ("island 31 #3 (reset-in-place)"). Double-buffered with an
+// atomic publish pointer: the writer (RGSS thread, under s_mutex)
+// fills the inactive buffer and swaps, so the lock-free reader (main
+// thread) always sees a fully NUL-terminated string - never a buffer
+// whose terminator is mid-overwrite.
+char s_diagBufs[2][128] = {"no session yet", "no session yet"};
+std::atomic<const char *> s_diagPublished{s_diagBufs[0]};
+int s_diagWriteIdx = 1;
+
+void publishDiagnostics(const char *fmt, const char *suffix, int generation,
+                        const char *mechanism) {
+    snprintf(s_diagBufs[s_diagWriteIdx], sizeof(s_diagBufs[0]), fmt,
+             suffix, generation, mechanism);
+    s_diagPublished.store(s_diagBufs[s_diagWriteIdx],
+                          std::memory_order_release);
+    s_diagWriteIdx ^= 1;
+}
 
 #ifdef __APPLE__
 
@@ -351,10 +374,12 @@ bool acquireSlot(IslandSlot &slot) {
         s_activeHandle = handle;
         s_activeBinding = binding;
         s_activeIsCanonical = isCanonical;
-        snprintf(s_diagnostics, sizeof(s_diagnostics),
-                 "island %s #%d (%s)", slot.suffix, slot.generation,
-                 mechanism);
-        Debug() << "ruby_instance:" << s_diagnostics;
+        s_activeExecuted = false;
+        s_activePoisoned = false;
+        publishDiagnostics("island %s #%d (%s)", slot.suffix,
+                           slot.generation, mechanism);
+        Debug() << "ruby_instance:"
+                << s_diagPublished.load(std::memory_order_relaxed);
         return true;
     }
 
@@ -368,9 +393,12 @@ bool acquireSlot(IslandSlot &slot) {
     s_activeHandle = nullptr;
     s_activeBinding = binding;
     s_activeIsCanonical = false;
-    snprintf(s_diagnostics, sizeof(s_diagnostics),
-             "island %s #1 (static, single-shot)", slot.suffix);
-    Debug() << "ruby_instance:" << s_diagnostics;
+    s_activeExecuted = false;
+    s_activePoisoned = false;
+    publishDiagnostics("island %s #%d (%s)", slot.suffix, 1,
+                       "static, single-shot");
+    Debug() << "ruby_instance:"
+            << s_diagPublished.load(std::memory_order_relaxed);
     return true;
 }
 
@@ -391,58 +419,25 @@ void restoreSigactions() {
     s_sigactionsSaved = false;
 }
 
-} // namespace
-
-extern "C" {
-
-ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested) {
-    std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (s_activeBinding) {
-        Debug() << "ruby_instance: acquire while a session is active";
-        return nullptr;
-    }
-
-    saveSigactions();
-
-    if (acquireSlot(*slotFor(requested)))
-        return s_activeBinding;
-
-    // Fallback chain, newest first, mirroring the historical
-    // dispatcher: a stubbed or exhausted requested version falls
-    // through to whichever island can still mint an instance.
-    for (IslandSlot *slot : {&s_slots[2], &s_slots[1], &s_slots[0]}) {
-        if (slot == slotFor(requested))
-            continue;
-        if (acquireSlot(*slot)) {
-            Debug() << "ruby_instance: requested island unavailable,"
-                    << "fell back to" << slot->suffix;
-            return s_activeBinding;
-        }
-    }
-
-    restoreSigactions();
-    Debug() << "ruby_instance: no fresh Ruby instance available";
-    return nullptr;
-}
-
-ScriptBinding *mkxpi_currentScriptBinding(void) {
-    return s_activeBinding;
-}
-
-const char *mkxpi_rubyInstanceDiagnostics(void) {
-    return s_diagnostics;
-}
-
-void mkxpi_retireRubyInstance(void) {
-    std::lock_guard<std::mutex> lock(s_mutex);
-
+// Retire the active instance. Caller holds s_mutex.
+void retireLocked() {
     if (!s_activeSlot)
         return;
 
     // Ruby's handlers must not outlive the image they live in.
     // Restores the host's fatal-report handlers as a side effect.
     restoreSigactions();
+
+    if (s_activePoisoned) {
+        // The quiesce failed; island threads may be alive. dlclose
+        // or a segment reset here would rip code and globals out
+        // from under them. Leave the instance checked out: the
+        // capability gate then reports DIRTY and the host asks for
+        // an app restart.
+        Debug() << "ruby_instance: instance poisoned (quiesce failed);"
+                << "left checked out";
+        return;
+    }
 
     IslandSlot &slot = *s_activeSlot;
     if (s_activeHandle) {
@@ -489,6 +484,85 @@ void mkxpi_retireRubyInstance(void) {
     s_activeHandle = nullptr;
     s_activeBinding = nullptr;
     s_activeIsCanonical = false;
+    s_activeExecuted = false;
+}
+
+} // namespace
+
+extern "C" {
+
+ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+
+    if (s_activeBinding) {
+        Debug() << "ruby_instance: acquire while a session is active";
+        return nullptr;
+    }
+
+    saveSigactions();
+
+    if (acquireSlot(*slotFor(requested)))
+        return s_activeBinding;
+
+    // Fallback chain, newest first, mirroring the historical
+    // dispatcher: a stubbed or exhausted requested version falls
+    // through to whichever island can still mint an instance.
+    for (IslandSlot *slot : {&s_slots[2], &s_slots[1], &s_slots[0]}) {
+        if (slot == slotFor(requested))
+            continue;
+        if (acquireSlot(*slot)) {
+            Debug() << "ruby_instance: requested island unavailable,"
+                    << "fell back to" << slot->suffix;
+            return s_activeBinding;
+        }
+    }
+
+    restoreSigactions();
+    Debug() << "ruby_instance: no fresh Ruby instance available";
+    return nullptr;
+}
+
+ScriptBinding *mkxpi_currentScriptBinding(void) {
+    return s_activeBinding;
+}
+
+const char *mkxpi_rubyInstanceDiagnostics(void) {
+    return s_diagPublished.load(std::memory_order_acquire);
+}
+
+void mkxpi_markRubyInstanceExecuting(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    s_activeExecuted = true;
+}
+
+void mkxpi_poisonActiveRubyInstance(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    s_activePoisoned = true;
+}
+
+int mkxpi_hasStuckRubyInstance(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    return s_activeBinding != nullptr;
+}
+
+void mkxpi_retireRubyInstance(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    retireLocked();
+}
+
+void mkxpi_retireRubyInstanceIfUnexecuted(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (!s_activeSlot || s_activeExecuted)
+        return;
+    // The session failed before execute() - engine init errors like
+    // missing game files or GL failures - so ruby_init never ran and
+    // the instance is still factory-fresh. Retire it so one bad game
+    // doesn't cost the process its session loop. A static island is
+    // even still virgin: un-mark it so the capability gate keeps
+    // reporting FRESH.
+    if (!s_activeHandle)
+        s_activeSlot->staticUsed = false;
+    retireLocked();
 }
 
 MKXPSessionCapability mkxpi_sessionCapability(MKXPRubyVersion version) {

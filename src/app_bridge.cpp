@@ -940,6 +940,15 @@ const char *mkxp_getRubyInstanceDiagnostics(void) {
     return mkxpi_rubyInstanceDiagnostics();
 }
 
+int mkxp_isSessionRecoverable(void) {
+    return mkxp_isEngineTerminated() && !mkxp_isEngineHung() &&
+           !mkxpi_hasStuckRubyInstance();
+}
+
+void mkxp_noteVMQuiesceFailed(void) {
+    mkxpi_poisonActiveRubyInstance();
+}
+
 void mkxp_setUseInGameKeyboard(bool enabled) {
     s_useInGameKeyboard.store(enabled, std::memory_order_release);
 }

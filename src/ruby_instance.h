@@ -56,9 +56,30 @@ ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested);
 // The active session's binding, NULL outside acquire..retire.
 ScriptBinding *mkxpi_currentScriptBinding(void);
 
+// The RGSS thread is about to run execute() on the acquired
+// instance: Ruby code will run, so a later failure can no longer be
+// treated as pre-Ruby.
+void mkxpi_markRubyInstanceExecuting(void);
+
+// The VM quiesce (ruby_cleanup) failed mid-way; island threads may
+// still be alive. The instance stays checked out at retire, and the
+// capability gate blocks further sessions.
+void mkxpi_poisonActiveRubyInstance(void);
+
+// An instance is still checked out. Meaningful once the engine has
+// terminated: it means the session crashed or was poisoned past the
+// retire path, so no further session can start this launch.
+int mkxpi_hasStuckRubyInstance(void);
+
 // Retire the active instance: restore sigactions, dlclose, and run
 // the unload canary that decides the next session's mechanism.
 void mkxpi_retireRubyInstance(void);
+
+// Retire only when execute() never started (engine init failed
+// before any Ruby code ran): the instance is still factory-fresh,
+// so cross-session play survives pre-Ruby load errors. No-op after
+// execute() started.
+void mkxpi_retireRubyInstanceIfUnexecuted(void);
 
 // What a session for `version` would get right now. Safe from any
 // thread; the Library UI polls it per game card.
@@ -80,7 +101,11 @@ const char *mkxpi_rubyInstanceDiagnostics(void);
 // binding.h and these stubs never run.
 static inline ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested) { (void)requested; return 0; }
 static inline ScriptBinding *mkxpi_currentScriptBinding(void) { return 0; }
+static inline void mkxpi_markRubyInstanceExecuting(void) {}
+static inline void mkxpi_poisonActiveRubyInstance(void) {}
+static inline int mkxpi_hasStuckRubyInstance(void) { return 0; }
 static inline void mkxpi_retireRubyInstance(void) {}
+static inline void mkxpi_retireRubyInstanceIfUnexecuted(void) {}
 static inline MKXPSessionCapability mkxpi_sessionCapability(MKXPRubyVersion version) { (void)version; return MKXP_SESSION_CAP_FRESH; }
 static inline const char *mkxpi_rubyInstanceDiagnostics(void) { return "single-session build"; }
 
