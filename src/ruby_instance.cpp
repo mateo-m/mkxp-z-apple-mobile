@@ -307,9 +307,9 @@ void opDiscardSnapshot(void *, int slot) {
 #ifdef __APPLE__
 
 struct ZoneScanState {
-    std::vector<uint64_t> keys;
-    std::vector<mkxpi::MapRange> maps;
-    std::vector<mkxpi::MapRange> unmaps;
+    std::vector<uint64_t> keyCreates;
+    std::vector<uint64_t> keyDeletes;
+    std::vector<mkxpi::MapEvent> mapEvents;
 };
 
 kern_return_t zoneScanReader(task_t, vm_address_t addr, vm_size_t,
@@ -327,20 +327,25 @@ void zoneScanRecorder(task_t, void *ctx, unsigned /*type*/,
         if (ranges[i].size < sizeof(uint64_t))
             continue;
         const uint64_t magic = *(const uint64_t *)ranges[i].address;
-        if (magic == MKXPZ_ISLAND_KEYREC_MAGIC &&
+        if ((magic == MKXPZ_ISLAND_KEYREC_MAGIC ||
+             magic == MKXPZ_ISLAND_KEYDEL_MAGIC) &&
             ranges[i].size >= sizeof(MkxpzIslandKeyRec)) {
-            state->keys.push_back(
-                ((const MkxpzIslandKeyRec *)ranges[i].address)->key);
+            const MkxpzIslandKeyRec *rec =
+                (const MkxpzIslandKeyRec *)ranges[i].address;
+            (magic == MKXPZ_ISLAND_KEYREC_MAGIC ? state->keyCreates
+                                                : state->keyDeletes)
+                .push_back(rec->key);
         } else if ((magic == MKXPZ_ISLAND_MAPREC_MAGIC ||
                     magic == MKXPZ_ISLAND_UNMAPREC_MAGIC) &&
                    ranges[i].size >= sizeof(MkxpzIslandMapRec)) {
             const MkxpzIslandMapRec *rec =
                 (const MkxpzIslandMapRec *)ranges[i].address;
-            mkxpi::MapRange range;
-            range.addr = rec->addr;
-            range.len = rec->len;
-            (magic == MKXPZ_ISLAND_MAPREC_MAGIC ? state->maps : state->unmaps)
-                .push_back(range);
+            mkxpi::MapEvent ev;
+            ev.addr = rec->addr;
+            ev.len = rec->len;
+            ev.time = rec->time;
+            ev.unmap = (magic == MKXPZ_ISLAND_UNMAPREC_MAGIC);
+            state->mapEvents.push_back(ev);
         }
     }
 }
@@ -366,6 +371,15 @@ void opReclaimAllocations(void *) {
     if (!zone)
         return; // session never allocated (e.g. pre-execute failure)
 
+    // Settle window: ruby_cleanup declares VM threads dead once their
+    // Ruby-level teardown finishes, but a dying pthread's native
+    // epilogue can still free island-zone memory microseconds later.
+    // Give stragglers a beat before the zone disappears under them.
+    // (SharedState teardown already ran between cleanup and retire,
+    // so this is a second fence, not the only one; the on-device
+    // soak matrix asserts it suffices.)
+    usleep(20 * 1000);
+
     ZoneScanState state;
     if (zone->introspect && zone->introspect->enumerator)
         zone->introspect->enumerator(mach_task_self(), &state,
@@ -373,17 +387,25 @@ void opReclaimAllocations(void *) {
                                      (vm_address_t)zone, zoneScanReader,
                                      zoneScanRecorder);
 
-    for (uint64_t key : state.keys)
+    // Keys: net creates minus deletes. Never re-delete a key the VM
+    // released itself - Darwin reuses slots and the number may now
+    // belong to a foreign library's live TLS key.
+    std::vector<uint64_t> keys =
+        mkxpi::liveKeys(state.keyCreates, state.keyDeletes);
+    for (uint64_t key : keys)
         pthread_key_delete((pthread_key_t)key);
 
+    // Mappings: faithful replay of the recorded history (partial
+    // trims, address reuse), munmap only what is genuinely still
+    // mapped.
     std::vector<mkxpi::MapRange> leftover =
-        mkxpi::leftoverMappings(state.maps, state.unmaps);
+        mkxpi::replayMappings(std::move(state.mapEvents));
     for (const mkxpi::MapRange &m : leftover)
         munmap((void *)(uintptr_t)m.addr, (size_t)m.len);
 
     malloc_destroy_zone(zone);
     Debug() << "ruby_instance: reclaimed island zone -"
-            << (int)state.keys.size() << "pthread keys,"
+            << (int)keys.size() << "pthread keys,"
             << (int)leftover.size() << "leftover mappings";
 #endif
 }

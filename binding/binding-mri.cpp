@@ -2092,14 +2092,24 @@ static void mriBindingExecute() {
      * to the honest restart alert instead of corrupting the next
      * session. */
     mkxp_setVMQuiescing(1);
+    bool quiesced = true;
     try {
         ruby_cleanup(0);
     } catch (...) {
         Debug() << "ruby_cleanup aborted by a non-Ruby exception;"
                 << "instance poisoned.";
         mkxp_noteVMQuiesceFailed();
+        quiesced = false;
     }
-    mkxp_setVMQuiescing(0);
+    /* Poisoned = island threads may be alive. Keep the quiescing
+     * flag SET in that case: it holds the engine's terminate/reset
+     * dispatch disarmed, so a surviving thread that reaches
+     * checkShutdown spins harmlessly instead of throwing on a
+     * non-RGSS thread (uncaught -> std::terminate). The session is
+     * over and the instance stays checked out either way, so the
+     * flag has nothing left to protect against staying set. */
+    if (quiesced)
+        mkxp_setVMQuiescing(0);
     /* The VM is gone (or abandoned); drop the binding-data pointer
      * so nothing can mistake the dead stack-scoped RbData for a
      * live one. */

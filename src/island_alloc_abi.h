@@ -26,19 +26,29 @@
 // destroyed at retire, before the next acquire can allocate.
 #define MKXPZ_ISLAND_ZONE_NAME "mkxpz.ruby.island"
 
-#define MKXPZ_ISLAND_KEYREC_MAGIC   0x4D4B5A4B45590001ULL /* "MKZKEY.." */
-#define MKXPZ_ISLAND_MAPREC_MAGIC   0x4D4B5A4D41500001ULL /* "MKZMAP.." */
-#define MKXPZ_ISLAND_UNMAPREC_MAGIC 0x4D4B5A554D410001ULL /* "MKZUMA.." */
+#define MKXPZ_ISLAND_KEYREC_MAGIC   0x4D4B5A4B45590002ULL /* "MKZKEY.." */
+#define MKXPZ_ISLAND_KEYDEL_MAGIC   0x4D4B5A4B44454C02ULL /* "MKZKDEL." */
+#define MKXPZ_ISLAND_MAPREC_MAGIC   0x4D4B5A4D41500002ULL /* "MKZMAP.." */
+#define MKXPZ_ISLAND_UNMAPREC_MAGIC 0x4D4B5A554D410002ULL /* "MKZUMA.." */
 
 typedef struct {
-    uint64_t magic; // MKXPZ_ISLAND_KEYREC_MAGIC
-    uint64_t key;   // pthread_key_t created by the island's Ruby
+    uint64_t magic; // KEYREC (pthread_key_create) or KEYDEL (delete)
+    uint64_t key;   // pthread_key_t number
 } MkxpzIslandKeyRec;
 
+// mmap/munmap event. Ruby's GC page allocator maps oversized
+// regions and trims the misaligned head/tail with partial munmaps,
+// and the kernel reuses addresses - so reclaim must REPLAY the
+// events in order with interval algebra, never match map records
+// against unmap tombstones by exact range. `time` is
+// mach_absolute_time() at the call: zone enumeration returns
+// records in arbitrary order, and only the timestamps recover the
+// true sequence.
 typedef struct {
-    uint64_t magic; // MAPREC (mmap) or UNMAPREC (munmap tombstone)
+    uint64_t magic; // MAPREC (mmap) or UNMAPREC (munmap)
     uint64_t addr;
     uint64_t len;
+    uint64_t time;
 } MkxpzIslandMapRec;
 
 #endif // MKXPZ_ISLAND_ALLOC_ABI_H

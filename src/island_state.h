@@ -20,11 +20,13 @@
 #ifndef MKXPZ_ISLAND_STATE_H
 #define MKXPZ_ISLAND_STATE_H
 
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -83,33 +85,98 @@ struct IslandOps {
     void (*log)(void *user, const char *msg) = nullptr;
 };
 
-// Pure helper for the zone reclaimer: which recorded mappings have no
-// matching unmap tombstone and must be munmapped at retire.
+// Pure helpers for the zone reclaimer.
+
 struct MapRange {
     uint64_t addr = 0;
     uint64_t len = 0;
 };
 
-inline std::vector<MapRange> leftoverMappings(
-    const std::vector<MapRange> &maps, const std::vector<MapRange> &unmaps) {
-    std::vector<MapRange> leftover;
-    // Tombstones are consumed: n identical maps with n-1 identical
-    // tombstones leave exactly one live mapping (mmap can legally
-    // return a previously unmapped address again).
-    std::vector<bool> used(unmaps.size(), false);
-    for (const MapRange &m : maps) {
-        bool matched = false;
-        for (size_t i = 0; i < unmaps.size(); ++i) {
-            if (!used[i] && unmaps[i].addr == m.addr && unmaps[i].len == m.len) {
-                used[i] = true;
-                matched = true;
-                break;
-            }
+// One recorded mmap/munmap call, stamped with a monotonic time
+// (zone enumeration returns records in arbitrary order; only the
+// timestamps recover the true sequence).
+struct MapEvent {
+    uint64_t addr = 0;
+    uint64_t len = 0;
+    uint64_t time = 0;
+    bool unmap = false;
+};
+
+// Which address ranges are genuinely still mapped after the recorded
+// history. This must be a faithful REPLAY with interval algebra, not
+// record matching: Ruby's GC page allocator mmaps an oversized
+// region and trims the misaligned head/tail with PARTIAL munmaps,
+// frees pages with page-sized munmaps that never equal the original
+// record, and the kernel reuses addresses across map/unmap cycles.
+// Exact-match tombstones would report the original full ranges as
+// leftover and munmap memory that was returned long ago - and
+// possibly re-mapped by someone else since.
+inline std::vector<MapRange> replayMappings(std::vector<MapEvent> events) {
+    std::stable_sort(events.begin(), events.end(),
+                     [](const MapEvent &a, const MapEvent &b) {
+                         return a.time < b.time;
+                     });
+
+    // Live intervals as [start, end), keyed by start.
+    std::map<uint64_t, uint64_t> live;
+
+    auto subtract = [&live](uint64_t s, uint64_t t) {
+        auto it = live.lower_bound(s);
+        if (it != live.begin()) {
+            auto prev = std::prev(it);
+            if (prev->second > s)
+                it = prev;
         }
-        if (!matched)
-            leftover.push_back(m);
+        while (it != live.end() && it->first < t) {
+            uint64_t ls = it->first;
+            uint64_t le = it->second;
+            it = live.erase(it);
+            if (ls < s)
+                live[ls] = s;
+            if (le > t)
+                live[t] = le; // tail remainder; lies before `it`
+        }
+    };
+
+    for (const MapEvent &e : events) {
+        if (e.len == 0)
+            continue;
+        const uint64_t s = e.addr;
+        const uint64_t t = e.addr + e.len;
+        // A new mapping implicitly replaces anything it overlaps
+        // (the kernel did the same when it handed the address out).
+        subtract(s, t);
+        if (!e.unmap)
+            live[s] = t;
     }
-    return leftover;
+
+    std::vector<MapRange> result;
+    for (const auto &kv : live) {
+        MapRange r;
+        r.addr = kv.first;
+        r.len = kv.second - kv.first;
+        result.push_back(r);
+    }
+    return result;
+}
+
+// Which pthread keys are still live after the recorded history:
+// creates minus deletes per key number. Darwin reuses key slots, so
+// a key the VM itself deleted must never be re-deleted by reclaim -
+// the slot may since belong to a foreign library's live TLS key.
+inline std::vector<uint64_t> liveKeys(const std::vector<uint64_t> &creates,
+                                      const std::vector<uint64_t> &deletes) {
+    std::map<uint64_t, int> net;
+    for (uint64_t k : creates)
+        net[k] += 1;
+    for (uint64_t k : deletes)
+        net[k] -= 1;
+    std::vector<uint64_t> live;
+    for (const auto &kv : net) {
+        if (kv.second > 0)
+            live.push_back(kv.first);
+    }
+    return live;
 }
 
 class IslandStateMachine {

@@ -49,6 +49,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <mach/mach.h>
+#include <mach/mach_time.h>
 #include <malloc/malloc.h>
 
 #include "../src/island_alloc_abi.h"
@@ -179,52 +180,66 @@ static inline int mkxpz_island_asprintf(char **out, const char *fmt, ...) {
 // pthread keys created by the VM (Init_native_thread & co) are
 // process-global and capped at 512 on Darwin; without cleanup,
 // "unlimited sessions" would abort after a few hundred. Record each
-// created key as a tagged zone allocation; retire deletes them
-// (Ruby's keys have NULL destructors, so deletion is safe).
+// create - and each delete, so reclaim never re-deletes a key number
+// the VM already released (Darwin reuses slots; a blind re-delete
+// could destroy a foreign library's live TLS key). Retire deletes
+// keys whose create count exceeds their delete count (Ruby's keys
+// have NULL destructors, so deletion is safe).
+static inline void mkxpz_island_record_key(uint64_t magic, pthread_key_t key) {
+    MkxpzIslandKeyRec *rec = (MkxpzIslandKeyRec *)malloc_zone_malloc(
+        mkxpz_island_zone(), sizeof(MkxpzIslandKeyRec));
+    if (rec) {
+        rec->magic = magic;
+        rec->key = (uint64_t)key;
+    }
+}
+
 static inline int mkxpz_island_key_create(pthread_key_t *key,
                                           void (*dtor)(void *)) {
     int r = (pthread_key_create)(key, dtor);
-    if (r == 0) {
-        MkxpzIslandKeyRec *rec = (MkxpzIslandKeyRec *)malloc_zone_malloc(
-            mkxpz_island_zone(), sizeof(MkxpzIslandKeyRec));
-        if (rec) {
-            rec->magic = MKXPZ_ISLAND_KEYREC_MAGIC;
-            rec->key = (uint64_t)*key;
-        }
-    }
+    if (r == 0)
+        mkxpz_island_record_key(MKXPZ_ISLAND_KEYREC_MAGIC, *key);
     return r;
 }
 
-// GC heap pages on 64-bit are mmap'd, bypassing malloc entirely.
-// Record each map, and each unmap as a tombstone; retire munmaps
-// records without a matching tombstone. Append-only (no lookups on
-// the hot path); the reclaimer does the matching once per session.
+static inline int mkxpz_island_key_delete(pthread_key_t key) {
+    int r = (pthread_key_delete)(key);
+    if (r == 0)
+        mkxpz_island_record_key(MKXPZ_ISLAND_KEYDEL_MAGIC, key);
+    return r;
+}
+
+// GC heap pages on 64-bit are mmap'd, bypassing malloc entirely -
+// and Ruby's page allocator maps oversized regions, trims the
+// misaligned head/tail with PARTIAL munmaps, and the kernel reuses
+// addresses. So each call records an event stamped with
+// mach_absolute_time(); the reclaimer sorts by time and replays the
+// interval algebra (island_state.h replayMappings) to find what is
+// genuinely still mapped. Append-only: no lookups on the hot path.
+static inline void mkxpz_island_record_map(uint64_t magic, void *addr,
+                                           size_t len) {
+    MkxpzIslandMapRec *rec = (MkxpzIslandMapRec *)malloc_zone_malloc(
+        mkxpz_island_zone(), sizeof(MkxpzIslandMapRec));
+    if (rec) {
+        rec->magic = magic;
+        rec->addr = (uint64_t)(uintptr_t)addr;
+        rec->len = (uint64_t)len;
+        rec->time = mach_absolute_time();
+    }
+}
+
 static inline void *mkxpz_island_mmap(void *addr, size_t len, int prot,
                                       int flags, int fd, off_t offset) {
     void *p = (mmap)(addr, len, prot, flags, fd, offset);
-    if (p != MAP_FAILED) {
-        MkxpzIslandMapRec *rec = (MkxpzIslandMapRec *)malloc_zone_malloc(
-            mkxpz_island_zone(), sizeof(MkxpzIslandMapRec));
-        if (rec) {
-            rec->magic = MKXPZ_ISLAND_MAPREC_MAGIC;
-            rec->addr = (uint64_t)(uintptr_t)p;
-            rec->len = (uint64_t)len;
-        }
-    }
+    if (p != MAP_FAILED)
+        mkxpz_island_record_map(MKXPZ_ISLAND_MAPREC_MAGIC, p, len);
     return p;
 }
 
 static inline int mkxpz_island_munmap(void *addr, size_t len) {
     int r = (munmap)(addr, len);
-    if (r == 0) {
-        MkxpzIslandMapRec *rec = (MkxpzIslandMapRec *)malloc_zone_malloc(
-            mkxpz_island_zone(), sizeof(MkxpzIslandMapRec));
-        if (rec) {
-            rec->magic = MKXPZ_ISLAND_UNMAPREC_MAGIC;
-            rec->addr = (uint64_t)(uintptr_t)addr;
-            rec->len = (uint64_t)len;
-        }
-    }
+    if (r == 0)
+        mkxpz_island_record_map(MKXPZ_ISLAND_UNMAPREC_MAGIC, addr, len);
     return r;
 }
 
@@ -243,6 +258,7 @@ static inline int mkxpz_island_munmap(void *addr, size_t len) {
 #define mmap(a, l, pr, fl, fd, o) mkxpz_island_mmap(a, l, pr, fl, fd, o)
 #define munmap(a, l)             mkxpz_island_munmap(a, l)
 #define pthread_key_create(k, d) mkxpz_island_key_create(k, d)
+#define pthread_key_delete(k)    mkxpz_island_key_delete(k)
 
 #endif // __APPLE__
 

@@ -547,6 +547,8 @@ void EventThread::process(RGSSThreadData &rtData)
                     case REQUEST_WINRENAME :
                         rtData.config.windowTitle = (const char*)event.user.data1;
                         SDL_SetWindowTitle(win, rtData.config.windowTitle.c_str());
+                        /* Copied by requestWindowRename; see there. */
+                        SDL_free(event.user.data1);
                         break;
                         
                     case REQUEST_TEXTMODE :
@@ -788,7 +790,11 @@ void EventThread::requestWindowRename(const char *title)
 {
     SDL_Event event;
     event.type = usrIdStart + REQUEST_WINRENAME;
-    event.user.data1 = (void*)title;
+    /* Own the string: the caller's pointer is Ruby heap memory
+     * (RSTRING_PTR) that the GC - or the island zone reclaim at
+     * session retire - can invalidate before the main thread drains
+     * the queue. The consumer frees the copy. */
+    event.user.data1 = SDL_strdup(title ? title : "");
     SDL_PushEvent(&event);
 }
 

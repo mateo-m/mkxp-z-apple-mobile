@@ -297,6 +297,10 @@ static void testCopyAndLoadFallback() {
     CHECK(!m.activeIsCanonical());
     CHECK_EQ_STR(m.diagnostics(), "island 31 #2 (copy-and-load)");
     CHECK(w.countEvents("opencopy:31:gen1") == 1);
+    // Copies are never snapshot: only the resident canonical image
+    // is a reset-in-place candidate. (One failed capture from the
+    // canonical session, nothing after.)
+    CHECK(w.countEvents("capture:31") == 1);
 
     int canaries = w.countEvents("canary");
     m.markExecuting();
@@ -551,42 +555,179 @@ static void testDiagnosticsDoubleBuffer() {
     CHECK_EQ_STR(p2, "island 31 #2 (reset-in-place)");
 }
 
-// leftoverMappings: tombstone matching for the mmap reclaim.
-static void testLeftoverMappings() {
-    std::vector<MapRange> maps, unmaps;
-    auto mk = [](uint64_t a, uint64_t l) {
-        MapRange r;
-        r.addr = a;
-        r.len = l;
-        return r;
+// replayMappings: faithful interval replay for the mmap reclaim.
+// The reclaimer munmaps whatever this returns, so an over-report
+// here is a wild munmap of someone else's memory - the tests bias
+// toward proving NOTHING extra survives.
+static void testReplayMappings() {
+    using mkxpi::MapEvent;
+    uint64_t clock = 0;
+    auto ev = [&clock](uint64_t a, uint64_t l, bool unmap) {
+        MapEvent e;
+        e.addr = a;
+        e.len = l;
+        e.time = ++clock;
+        e.unmap = unmap;
+        return e;
     };
 
-    // Simple match + one leftover.
-    maps = {mk(0x1000, 0x4000), mk(0x8000, 0x4000)};
-    unmaps = {mk(0x1000, 0x4000)};
-    auto left = mkxpi::leftoverMappings(maps, unmaps);
-    CHECK(left.size() == 1);
-    CHECK(left[0].addr == 0x8000);
+    // Ruby 3.1's GC page pattern: mmap oversized, trim the
+    // misaligned head and tail with partial munmaps, later free the
+    // aligned page with a page-sized munmap that matches NO recorded
+    // map range. Everything must be gone.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x10000, 0x8000, false),  // map [0x10000, 0x18000)
+            ev(0x10000, 0x2000, true),   // trim head
+            ev(0x16000, 0x2000, true),   // trim tail -> page [0x12000, 0x16000)
+            ev(0x12000, 0x4000, true),   // free the aligned page
+        };
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
 
-    // Length mismatch is not a match.
-    maps = {mk(0x1000, 0x4000)};
-    unmaps = {mk(0x1000, 0x2000)};
-    CHECK(mkxpi::leftoverMappings(maps, unmaps).size() == 1);
+    // Same pattern but the page stays live: exactly the aligned
+    // middle survives - not the original full range.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x10000, 0x8000, false),
+            ev(0x10000, 0x2000, true),
+            ev(0x16000, 0x2000, true),
+        };
+        auto left = mkxpi::replayMappings(events);
+        CHECK(left.size() == 1);
+        CHECK(left[0].addr == 0x12000);
+        CHECK(left[0].len == 0x4000);
+    }
 
-    // Address reuse: two identical map records with one tombstone
-    // leave exactly one live mapping (tombstones are consumed).
-    maps = {mk(0x1000, 0x4000), mk(0x1000, 0x4000)};
-    unmaps = {mk(0x1000, 0x4000)};
-    CHECK(mkxpi::leftoverMappings(maps, unmaps).size() == 1);
+    // Address reuse across map/unmap cycles: the kernel hands the
+    // same range out again; only the LIVE generation survives.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x4000, false),
+            ev(0x1000, 0x4000, true),
+            ev(0x1000, 0x4000, false), // reuse, still live
+        };
+        auto left = mkxpi::replayMappings(events);
+        CHECK(left.size() == 1);
+        CHECK(left[0].addr == 0x1000);
+        CHECK(left[0].len == 0x4000);
+    }
 
-    // Fully balanced: nothing left.
-    maps = {mk(0x1000, 0x4000), mk(0x1000, 0x4000)};
-    unmaps = {mk(0x1000, 0x4000), mk(0x1000, 0x4000)};
-    CHECK(mkxpi::leftoverMappings(maps, unmaps).empty());
+    // Reuse then freed again: nothing survives.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x4000, false),
+            ev(0x1000, 0x4000, true),
+            ev(0x1000, 0x4000, false),
+            ev(0x1000, 0x4000, true),
+        };
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
 
-    // Empty inputs.
-    CHECK(mkxpi::leftoverMappings({}, {}).empty());
-    CHECK(mkxpi::leftoverMappings({}, {mk(1, 2)}).empty());
+    // Enumeration order is arbitrary: the same history shuffled must
+    // replay identically (timestamps recover the sequence).
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x4000, false), // t1 map
+            ev(0x1000, 0x4000, true),  // t2 unmap
+            ev(0x1000, 0x4000, false), // t3 map again -> live
+        };
+        std::swap(events[0], events[2]);
+        auto left = mkxpi::replayMappings(events);
+        CHECK(left.size() == 1);
+    }
+
+    // Order-sensitivity proof: [map, unmap] shuffled to [unmap, map]
+    // must STILL replay as map-then-unmap (empty). An implementation
+    // that trusts enumeration order would resurrect the mapping.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x4000, false), // t1 map
+            ev(0x1000, 0x4000, true),  // t2 unmap -> empty history
+        };
+        std::swap(events[0], events[1]); // enumerator saw unmap first
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
+
+    // A partial unmap splits a live range in two.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x9000, false),  // [0x1000, 0xA000)
+            ev(0x4000, 0x2000, true),   // hole [0x4000, 0x6000)
+        };
+        auto left = mkxpi::replayMappings(events);
+        CHECK(left.size() == 2);
+        CHECK(left[0].addr == 0x1000);
+        CHECK(left[0].len == 0x3000);
+        CHECK(left[1].addr == 0x6000);
+        CHECK(left[1].len == 0x4000);
+    }
+
+    // An unmap spanning several live ranges clears them all.
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x1000, false),
+            ev(0x3000, 0x1000, false),
+            ev(0x5000, 0x1000, false),
+            ev(0x0000, 0x7000, true),
+        };
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
+
+    // An unmap of something never recorded is a no-op.
+    {
+        std::vector<MapEvent> events = {ev(0x1000, 0x1000, true)};
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
+
+    // A new map implicitly replaces what it overlaps (no
+    // double-count of the overlapped bytes).
+    {
+        std::vector<MapEvent> events = {
+            ev(0x1000, 0x4000, false),
+            ev(0x2000, 0x1000, false), // overlays the middle
+            ev(0x1000, 0x4000, true),  // unmap the whole range
+        };
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
+
+    // Zero-length events are ignored.
+    {
+        std::vector<MapEvent> events = {ev(0x1000, 0, false)};
+        CHECK(mkxpi::replayMappings(events).empty());
+    }
+
+    CHECK(mkxpi::replayMappings({}).empty());
+}
+
+// liveKeys: creates minus deletes per key number. Re-deleting a key
+// the VM released itself could destroy a foreign library's live TLS
+// key (Darwin reuses slots), so deleted keys must drop out.
+static void testLiveKeys() {
+    // Simple: created, never deleted -> live.
+    CHECK(mkxpi::liveKeys({7}, {}).size() == 1);
+    // Created and deleted -> NOT live.
+    CHECK(mkxpi::liveKeys({7}, {7}).empty());
+    // Slot reuse within a session: create K, delete K, create K
+    // again -> exactly one delete owed.
+    {
+        auto live = mkxpi::liveKeys({7, 7}, {7});
+        CHECK(live.size() == 1);
+        CHECK(live[0] == 7);
+    }
+    // Multiple distinct keys, one deleted.
+    {
+        auto live = mkxpi::liveKeys({3, 5, 9}, {5});
+        CHECK(live.size() == 2);
+        CHECK(live[0] == 3);
+        CHECK(live[1] == 9);
+    }
+    // A stray delete with no create must not go negative into a
+    // later create of the same number... it does consume it: the VM
+    // deleting a key it got from elsewhere is out of scope, but the
+    // net computation must simply never produce a key with net <= 0.
+    CHECK(mkxpi::liveKeys({}, {4}).empty());
+    CHECK(mkxpi::liveKeys({}, {}).empty());
 }
 
 // The full mixed-corpus story: a 3.1 PE fork, then a 1.8 vintage
@@ -636,7 +777,8 @@ int runAll() {
     testNothingAvailable();
     testAcquireWhileActive();
     testDiagnosticsDoubleBuffer();
-    testLeftoverMappings();
+    testReplayMappings();
+    testLiveKeys();
     testMixedCorpusCycle();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
