@@ -21,6 +21,7 @@
 
 #include "sharedstate.h"
 
+#include "app_bridge.h"
 #include "util.h"
 #include "filesystem.h"
 #include "graphics.h"
@@ -376,6 +377,13 @@ void SharedState::checkShutdown()
 	if (!p->rtData.rqTerm)
 		return;
 
+	/* During the session-end VM quiesce (ruby_cleanup running
+	 * at_exit/END procs), the session is already terminating -
+	 * throwing the terminate exception here would unwind through
+	 * ruby_cleanup's C frames and poison the Ruby instance. */
+	if (mkxp_isVMQuiescing())
+		return;
+
 	p->rtData.rqTermAck.set();
 	p->texPool.disable();
 	getActiveScriptBinding()->terminate();
@@ -384,6 +392,10 @@ void SharedState::checkShutdown()
 void SharedState::checkReset()
 {
 	if (!p->rtData.rqReset)
+		return;
+
+	/* See checkShutdown: no reset dispatch mid-quiesce. */
+	if (mkxp_isVMQuiescing())
 		return;
 
 	p->rtData.rqReset.clear();

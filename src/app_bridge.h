@@ -250,6 +250,16 @@ int mkxp_isSessionRecoverable(void);
 // threads may be alive, so the instance must not be recycled.
 void mkxp_noteVMQuiesceFailed(void);
 
+// Set by the binding around ruby_cleanup at session end. While
+// true, the engine's terminate/reset dispatch points (checkShutdown
+// / checkReset / GraphicsPrivate::shutdown) return without throwing,
+// so an at_exit/END proc that calls Graphics.update mid-quiesce
+// cannot fling the terminate exception through ruby_cleanup's C
+// frames. The session is already ending - there is nothing for
+// those dispatch points to do.
+void        mkxp_setVMQuiescing(int quiescing);
+int         mkxp_isVMQuiescing(void);
+
 // Engine termination
 
 void        mkxp_requestTerminate(void);
@@ -640,6 +650,8 @@ static inline MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion versi
 static inline const char *mkxp_getRubyInstanceDiagnostics(void) { return "single-session build"; }
 static inline int mkxp_isSessionRecoverable(void) { return 0; }
 static inline void mkxp_noteVMQuiesceFailed(void) {}
+static inline void mkxp_setVMQuiescing(int quiescing) { (void)quiescing; }
+static inline int  mkxp_isVMQuiescing(void) { return 0; }
 
 static inline void        mkxp_requestTerminate(void) {}
 static inline int         mkxp_isEngineTerminated(void) { return 0; }

@@ -949,6 +949,16 @@ void mkxp_noteVMQuiesceFailed(void) {
     mkxpi_poisonActiveRubyInstance();
 }
 
+static std::atomic<bool> s_vmQuiescing{false};
+
+void mkxp_setVMQuiescing(int quiescing) {
+    s_vmQuiescing.store(quiescing != 0, std::memory_order_release);
+}
+
+int mkxp_isVMQuiescing(void) {
+    return s_vmQuiescing.load(std::memory_order_acquire) ? 1 : 0;
+}
+
 void mkxp_setUseInGameKeyboard(bool enabled) {
     s_useInGameKeyboard.store(enabled, std::memory_order_release);
 }

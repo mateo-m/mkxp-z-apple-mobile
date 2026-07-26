@@ -874,9 +874,15 @@ struct GraphicsPrivate {
     }
     
     void shutdown() {
+        /* No terminate dispatch mid-quiesce: the session is already
+         * ending and the throw would unwind through ruby_cleanup
+         * (see SharedState::checkShutdown). */
+        if (mkxp_isVMQuiescing())
+            return;
+
         threadData->rqTermAck.set();
         shState->texPool().disable();
-        
+
         getActiveScriptBinding()->terminate();
     }
     
@@ -1349,7 +1355,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
             return;
         }
         
-        if (p->threadData->rqReset) {
+        if (p->threadData->rqReset && !mkxp_isVMQuiescing()) {
             glState.blend.pop();
             delete transMap;
             getActiveScriptBinding()->reset();

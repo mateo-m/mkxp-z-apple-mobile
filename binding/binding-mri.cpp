@@ -2081,22 +2081,25 @@ static void mriBindingExecute() {
 #else
     rb_gv_set("$!", Qnil);
 #endif
-    /* Backstop: an at_exit/END proc that touches the engine while a
-     * terminate request is pending can reach checkShutdown() ->
-     * mriBindingTerminate() -> a C++ throw that unwinds through
-     * ruby_cleanup's C frames. Catch it here instead of letting it
-     * escape into the crash guard: the cleanup is incomplete (island
-     * threads may be alive), so poison the instance - retire then
-     * leaves it checked out and the host degrades to the honest
-     * restart alert instead of corrupting the next session. */
+    /* The quiescing flag disarms the engine's terminate/reset
+     * dispatch points (checkShutdown / checkReset / graphics
+     * shutdown) so an at_exit/END proc that calls Graphics.update
+     * mid-cleanup runs harmlessly instead of throwing the terminate
+     * exception through ruby_cleanup's C frames. The try/catch is
+     * the backstop for any other non-Ruby exception: cleanup is then
+     * incomplete (island threads may be alive), so the instance gets
+     * poisoned - retire leaves it checked out and the host degrades
+     * to the honest restart alert instead of corrupting the next
+     * session. */
+    mkxp_setVMQuiescing(1);
     try {
         ruby_cleanup(0);
     } catch (...) {
-        Debug() << "ruby_cleanup aborted by a non-Ruby exception"
-                << "(at_exit touched the engine mid-terminate);"
+        Debug() << "ruby_cleanup aborted by a non-Ruby exception;"
                 << "instance poisoned.";
         mkxp_noteVMQuiesceFailed();
     }
+    mkxp_setVMQuiescing(0);
     /* The VM is gone (or abandoned); drop the binding-data pointer
      * so nothing can mistake the dead stack-scoped RbData for a
      * live one. */

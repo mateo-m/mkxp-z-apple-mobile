@@ -1,5 +1,11 @@
-// ruby_instance.cpp - per-session Ruby VM instance manager.
-// See ruby_instance.h for the design rationale.
+// ruby_instance.cpp - per-session Ruby VM instance manager: the
+// real-OS layer. All lifecycle decisions live in the OS-free state
+// machine (island_state.h, unit-tested in tests/); this file supplies
+// the ops - dlopen/dlclose, the RTLD_NOLOAD unload canary,
+// copy-and-load, the Mach-O writable-segment snapshot/restore, the
+// malloc-zone reclaim (island_alloc_abi.h), sigaction hygiene - plus
+// the process-wide lock and the C API. See ruby_instance.h for the
+// design rationale.
 
 #include "ruby_instance.h"
 
@@ -14,7 +20,10 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <copyfile.h>
 #include <mach-o/loader.h>
+#include <mach/mach.h>
 #include <mach/vm_prot.h>
+#include <malloc/malloc.h>
+#include "island_alloc_abi.h"
 #endif
 
 #include <cstdint>
@@ -25,165 +34,178 @@
 #include <string>
 #include <vector>
 
+#include "island_state.h"
 #include "util/debugwriter.h"
 
-// Static island entry points (merged.o). On builds where the project
-// pre-build script stubbed a version out, the entry returns NULL.
-// Declared here instead of via binding.h to avoid an include cycle
-// (binding.h's iOS branch includes ruby_instance.h).
+// Static island entry points (merged.o, or the host app's
+// NULL-returning stubs on framework-only builds). Declared here
+// instead of via binding.h to avoid an include cycle (binding.h's
+// iOS branch includes ruby_instance.h).
 extern "C" ScriptBinding *mkxp_get_script_binding_18(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_19(void);
 extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
 
 namespace {
 
-// A pristine byte image of one writable segment of an island image,
-// captured after dlopen (static ctors done) but before the first
-// ruby_init. Restoring every one of these puts the island's globals
-// back into legal-first-ruby_init state - the "factory reset" that
-// lets a resident image host another session without dlclose ever
-// working (plan Stage 3 core).
+// Guards all machine state. acquire/retire run on the RGSS thread;
+// capability queries come from the host's main thread.
+std::mutex s_mutex;
+
+// ---------------------------------------------------------------------------
+// Sigaction hygiene: ruby_init installs handlers (SEGV, PIPE, INT,
+// ...) that would otherwise point into a retired - possibly unloaded
+// - image. Snapshot at acquire, restore at retire.
+// ---------------------------------------------------------------------------
+
+struct sigaction s_savedSigactions[NSIG];
+bool s_sigactionsSaved = false;
+
+void opSaveSigactions(void *) {
+    for (int sig = 1; sig < NSIG; ++sig)
+        sigaction(sig, nullptr, &s_savedSigactions[sig]);
+    s_sigactionsSaved = true;
+}
+
+void opRestoreSigactions(void *) {
+    if (!s_sigactionsSaved)
+        return;
+    for (int sig = 1; sig < NSIG; ++sig) {
+        if (sig == SIGKILL || sig == SIGSTOP)
+            continue;
+        sigaction(sig, &s_savedSigactions[sig], nullptr);
+    }
+    s_sigactionsSaved = false;
+}
+
+// ---------------------------------------------------------------------------
+// Loader ops.
+// ---------------------------------------------------------------------------
+
+bool opResolveDylibPath(void *, int slot, std::string *outPath) {
+#ifdef __APPLE__
+    CFBundleRef bundle = CFBundleGetMainBundle();
+    if (!bundle)
+        return false;
+    CFURLRef fwURL = CFBundleCopyPrivateFrameworksURL(bundle);
+    if (!fwURL)
+        return false;
+    char fwPath[1024] = {0};
+    bool ok = CFURLGetFileSystemRepresentation(fwURL, true, (UInt8 *)fwPath,
+                                               sizeof(fwPath));
+    CFRelease(fwURL);
+    if (!ok)
+        return false;
+
+    const char *suffix = mkxpi::IslandStateMachine::slotSuffix(slot);
+    std::string path = std::string(fwPath) + "/RubyIsland" + suffix +
+                       ".framework/RubyIsland" + suffix;
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0)
+        return false;
+    *outPath = path;
+    return true;
+#else
+    (void)slot;
+    (void)outPath;
+    return false;
+#endif
+}
+
+void *opOpenImage(void *, int, const char *path) {
+    void *handle = dlopen(path, RTLD_LOCAL | RTLD_NOW);
+    if (!handle)
+        Debug() << "ruby_instance: dlopen" << path << "failed:" << dlerror();
+    return handle;
+}
+
+// Copy-and-load: a byte-identical copy at a unique path is a distinct
+// dyld image with fresh statics. The copy keeps the original's
+// embedded code signature (content-hashed, path-independent), and the
+// file is unlinked right after load - the mapping survives, so there
+// is no disk accumulation across sessions.
+void *opOpenImageCopy(void *, int slot, const char *path, int generation) {
+#ifdef __APPLE__
+    const char *tmpDir = getenv("TMPDIR");
+    if (!tmpDir || !tmpDir[0])
+        tmpDir = "/tmp";
+    char copyPath[1024];
+    snprintf(copyPath, sizeof(copyPath), "%s/RubyIsland%s.gen%d.dylib",
+             tmpDir, mkxpi::IslandStateMachine::slotSuffix(slot), generation);
+    unlink(copyPath);
+    if (copyfile(path, copyPath, nullptr, COPYFILE_ALL) != 0) {
+        Debug() << "ruby_instance: copyfile to" << copyPath << "failed";
+        return nullptr;
+    }
+    void *handle = dlopen(copyPath, RTLD_LOCAL | RTLD_NOW);
+    unlink(copyPath);
+    if (!handle)
+        Debug() << "ruby_instance: dlopen (copy)" << copyPath
+                << "failed:" << dlerror();
+    return handle;
+#else
+    (void)slot;
+    (void)path;
+    (void)generation;
+    return nullptr;
+#endif
+}
+
+void opCloseImage(void *, void *handle) {
+    dlclose(handle);
+}
+
+// Unload canary. RTLD_NOLOAD returns the existing handle (refcount
+// bumped, balance it) when the image is still resident.
+bool opImageResident(void *, const char *path) {
+    void *probe = dlopen(path, RTLD_LOCAL | RTLD_LAZY | RTLD_NOLOAD);
+    if (!probe)
+        return false;
+    dlclose(probe);
+    return true;
+}
+
+void *opResolveBinding(void *, void *handle, int slot) {
+    std::string sym = std::string("mkxp_get_script_binding_") +
+                      mkxpi::IslandStateMachine::slotSuffix(slot);
+    typedef ScriptBinding *(*EntryFn)(void);
+    EntryFn entry = (EntryFn)dlsym(handle, sym.c_str());
+    if (!entry) {
+        Debug() << "ruby_instance: dlsym" << sym << "failed:" << dlerror();
+        return nullptr;
+    }
+    return entry();
+}
+
+void *opStaticBinding(void *, int slot) {
+    switch (slot) {
+    case mkxpi::kSlot18: return mkxp_get_script_binding_18();
+    case mkxpi::kSlot19: return mkxp_get_script_binding_19();
+    default:             return mkxp_get_script_binding_31();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3 reset-in-place: pristine byte image of the canonical
+// image's writable segments, captured after dlopen (static ctors
+// done) but before the first ruby_init. Restoring every one of these
+// puts the island's globals back into legal-first-ruby_init state.
+// ---------------------------------------------------------------------------
+
 struct SegmentSnapshot {
     void *base;
     size_t size;
     std::vector<unsigned char> bytes;
 };
 
-struct IslandSlot {
-    const char *suffix;                  // "18" / "19" / "31"
-    ScriptBinding *(*staticEntry)(void);
+std::vector<SegmentSnapshot> s_segments[mkxpi::kSlotCount];
 
-    // Static-fallback bookkeeping: one session per process.
-    bool staticUsed = false;
-
-    // Dylib island state.
-    bool dylibChecked = false;
-    bool dylibPresent = false;
-    std::string dylibPath;
-    int generation = 0;         // fresh instances minted so far
-    // The canonical image survived a dlclose (RTLD_NOLOAD canary saw
-    // it still resident). Its statics are dirty unless a segment
-    // restore made it pristine again (canonicalPristine).
-    bool canonicalResident = false;
-    // The resident canonical image's writable segments were restored
-    // to their pre-ruby_init snapshot; the next acquire may reuse it
-    // as a fresh instance.
-    bool canonicalPristine = false;
-    // Pristine snapshot of the resident canonical image. Addresses
-    // are only valid for that specific load; a genuine unload
-    // invalidates it (cleared in retire).
-    std::vector<SegmentSnapshot> pristineSegments;
-    bool snapshotValid = false;
-};
-
-IslandSlot s_slots[3] = {
-    {"18", mkxp_get_script_binding_18},
-    {"19", mkxp_get_script_binding_19},
-    {"31", mkxp_get_script_binding_31},
-};
-
-// Guards all slot state. acquire/retire run on the RGSS thread;
-// capability queries come from the host's main thread.
-std::mutex s_mutex;
-
-// Active session (write under s_mutex; currentScriptBinding reads
-// the binding pointer without it - it's stable for the whole
-// acquire..retire window, which brackets every reader).
-IslandSlot *s_activeSlot = nullptr;
-void *s_activeHandle = nullptr;          // NULL for static fallback
-ScriptBinding *s_activeBinding = nullptr;
-bool s_activeIsCanonical = false;
-// execute() started: Ruby code has run on this instance. A failure
-// before this point leaves the instance pristine (ruby_init never
-// ran) and safe to retire; after it, a failure means unknown island
-// state and the instance stays checked out.
-bool s_activeExecuted = false;
-// The VM quiesce (ruby_cleanup) failed mid-way: island threads may
-// be alive. Retire must not dlclose or reset this instance; it stays
-// checked out so the capability gate blocks further sessions.
-bool s_activePoisoned = false;
-
-// Process sigaction table snapshot, taken at acquire and restored at
-// retire. ruby_init installs handlers (SEGV, PIPE, INT, ...) that
-// would otherwise point into a retired - possibly unloaded - image.
-struct sigaction s_savedSigactions[NSIG];
-bool s_sigactionsSaved = false;
-
-IslandSlot *slotFor(MKXPRubyVersion version) {
-    switch (version) {
-    case MKXP_RUBY_18: return &s_slots[0];
-    case MKXP_RUBY_19: return &s_slots[1];
-    // UNSET / 30 (folded onto 3.1 + Legacy) / 31 / unknown -> 3.1,
-    // mirroring the historical getActiveScriptBinding dispatch.
-    default:           return &s_slots[2];
-    }
-}
-
-void resolveDylib(IslandSlot &slot) {
-    if (slot.dylibChecked)
-        return;
-    slot.dylibChecked = true;
-
-#ifdef __APPLE__
-    CFBundleRef bundle = CFBundleGetMainBundle();
-    if (!bundle)
-        return;
-    CFURLRef fwURL = CFBundleCopyPrivateFrameworksURL(bundle);
-    if (!fwURL)
-        return;
-    char fwPath[1024] = {0};
-    bool ok = CFURLGetFileSystemRepresentation(
-        fwURL, true, (UInt8 *)fwPath, sizeof(fwPath));
-    CFRelease(fwURL);
-    if (!ok)
-        return;
-
-    std::string path = std::string(fwPath) + "/RubyIsland" + slot.suffix +
-                       ".framework/RubyIsland" + slot.suffix;
-    struct stat st;
-    if (stat(path.c_str(), &st) == 0) {
-        slot.dylibPath = path;
-        slot.dylibPresent = true;
-    }
-#endif
-}
-
-// Human-readable state of the most recent acquire, for the debug
-// overlay ("island 31 #3 (reset-in-place)"). Double-buffered with an
-// atomic publish pointer: the writer (RGSS thread, under s_mutex)
-// fills the inactive buffer and swaps, so the lock-free reader (main
-// thread) always sees a fully NUL-terminated string - never a buffer
-// whose terminator is mid-overwrite.
-char s_diagBufs[2][128] = {"no session yet", "no session yet"};
-std::atomic<const char *> s_diagPublished{s_diagBufs[0]};
-int s_diagWriteIdx = 1;
-
-void publishDiagnostics(const char *fmt, const char *suffix, int generation,
-                        const char *mechanism) {
-    snprintf(s_diagBufs[s_diagWriteIdx], sizeof(s_diagBufs[0]), fmt,
-             suffix, generation, mechanism);
-    s_diagPublished.store(s_diagBufs[s_diagWriteIdx],
-                          std::memory_order_release);
-    s_diagWriteIdx ^= 1;
-}
-
-#ifdef __APPLE__
-
-// Capture the pristine writable segments of the image that contains
-// `addrInImage`. Called right after dlopen, before ruby_init runs,
-// so the snapshot is exactly the state a fresh load would produce
-// (static ctors included - they ran at dlopen).
-//
 // Skipped segments: __DATA_CONST / __AUTH_CONST and anything with
 // SG_READ_ONLY - dyld write-protects them after fixups (memcpy would
 // fault) and their content never changes post-load, so there is
 // nothing to restore. Zerofill (bss) sections live inside a
 // segment's vmsize, so copying vmsize covers them.
-bool captureSnapshot(IslandSlot &slot, void *addrInImage) {
-#if !defined(__LP64__)
-    (void)slot; (void)addrInImage;
-    return false;
-#else
+bool opCaptureSnapshot(void *, int slot, void *addrInImage) {
+#if defined(__APPLE__) && defined(__LP64__)
     Dl_info info;
     if (!dladdr(addrInImage, &info) || !info.dli_fbase)
         return false;
@@ -212,7 +234,8 @@ bool captureSnapshot(IslandSlot &slot, void *addrInImage) {
     if (!haveSlide)
         return false;
 
-    slot.pristineSegments.clear();
+    std::vector<SegmentSnapshot> &segments = s_segments[slot];
+    segments.clear();
     cursor = (const char *)header + sizeof(struct mach_header_64);
     for (uint32_t i = 0; i < header->ncmds; ++i) {
         const struct load_command *lc = (const struct load_command *)cursor;
@@ -233,258 +256,162 @@ bool captureSnapshot(IslandSlot &slot, void *addrInImage) {
         snap.size = (size_t)seg->vmsize;
         snap.bytes.assign((unsigned char *)snap.base,
                           (unsigned char *)snap.base + snap.size);
-        slot.pristineSegments.push_back(std::move(snap));
+        segments.push_back(std::move(snap));
     }
 
-    slot.snapshotValid = !slot.pristineSegments.empty();
-    if (slot.snapshotValid) {
-        size_t total = 0;
-        for (const SegmentSnapshot &s : slot.pristineSegments)
-            total += s.size;
-        Debug() << "ruby_instance: island" << slot.suffix << "snapshot:"
-                << (int)slot.pristineSegments.size() << "segments,"
-                << (int)(total / 1024) << "KiB";
-    }
-    return slot.snapshotValid;
+    if (segments.empty())
+        return false;
+    size_t total = 0;
+    for (const SegmentSnapshot &s : segments)
+        total += s.size;
+    Debug() << "ruby_instance: island"
+            << mkxpi::IslandStateMachine::slotSuffix(slot) << "snapshot:"
+            << (int)segments.size() << "segments," << (int)(total / 1024)
+            << "KiB";
+    return true;
+#else
+    (void)slot;
+    (void)addrInImage;
+    return false;
 #endif
 }
 
-// Factory-reset the resident canonical image: memcpy every writable
-// segment back to its pre-ruby_init snapshot. Every interpreter
-// global - class tables, symbol table, GC bookkeeping, parser state -
-// returns to byte-for-byte day-one state, making the next ruby_init
-// legal by CRuby's own rules. Preconditions owned by the caller: the
-// session ran ruby_cleanup (island threads stopped) and sigactions
-// were restored. The retired VM's surviving heap is orphaned, not
-// dangling - restored statics hold pre-init values, so nothing
-// references it. (The heap itself mostly went back in ruby_cleanup;
-// the planned arena allocator reclaims the remainder.)
-bool restoreSnapshot(IslandSlot &slot) {
-    if (!slot.snapshotValid)
+// Preconditions owned by the state machine: the VM ran ruby_cleanup
+// (island threads stopped), the instance is not poisoned, and the
+// zone reclaim already returned the retired heap - so nothing can
+// observe the restore mid-copy, and the orphaned heap is not
+// referenced afterwards (restored statics hold pre-init values).
+bool opRestoreSnapshot(void *, int slot) {
+    std::vector<SegmentSnapshot> &segments = s_segments[slot];
+    if (segments.empty())
         return false;
-    for (const SegmentSnapshot &snap : slot.pristineSegments)
+    for (const SegmentSnapshot &snap : segments)
         memcpy(snap.base, snap.bytes.data(), snap.size);
     return true;
 }
 
+void opDiscardSnapshot(void *, int slot) {
+    s_segments[slot].clear();
+}
+
+// ---------------------------------------------------------------------------
+// Zone reclaim: everything the retired VM allocated lives in one
+// named malloc zone (multiruby/alloc_redirect.h routes every Ruby
+// allocation entry point there), with pthread keys and mmap'd GC
+// pages recorded as magic-tagged allocations inside it. One walk
+// recovers the records; then keys are deleted, unmatched mappings
+// munmapped, and the zone destroyed - the VM's entire footprint
+// returned with zero knowledge of Ruby's internals.
+// ---------------------------------------------------------------------------
+
+#ifdef __APPLE__
+
+struct ZoneScanState {
+    std::vector<uint64_t> keys;
+    std::vector<mkxpi::MapRange> maps;
+    std::vector<mkxpi::MapRange> unmaps;
+};
+
+kern_return_t zoneScanReader(task_t, vm_address_t addr, vm_size_t,
+                             void **out) {
+    *out = (void *)addr; // in-process: memory is directly readable
+    return KERN_SUCCESS;
+}
+
+void zoneScanRecorder(task_t, void *ctx, unsigned /*type*/,
+                      vm_range_t *ranges, unsigned count) {
+    ZoneScanState *state = (ZoneScanState *)ctx;
+    for (unsigned i = 0; i < count; ++i) {
+        // Allocation sizes are rounded up to the zone quantum, so
+        // identify records by magic, not by exact size.
+        if (ranges[i].size < sizeof(uint64_t))
+            continue;
+        const uint64_t magic = *(const uint64_t *)ranges[i].address;
+        if (magic == MKXPZ_ISLAND_KEYREC_MAGIC &&
+            ranges[i].size >= sizeof(MkxpzIslandKeyRec)) {
+            state->keys.push_back(
+                ((const MkxpzIslandKeyRec *)ranges[i].address)->key);
+        } else if ((magic == MKXPZ_ISLAND_MAPREC_MAGIC ||
+                    magic == MKXPZ_ISLAND_UNMAPREC_MAGIC) &&
+                   ranges[i].size >= sizeof(MkxpzIslandMapRec)) {
+            const MkxpzIslandMapRec *rec =
+                (const MkxpzIslandMapRec *)ranges[i].address;
+            mkxpi::MapRange range;
+            range.addr = rec->addr;
+            range.len = rec->len;
+            (magic == MKXPZ_ISLAND_MAPREC_MAGIC ? state->maps : state->unmaps)
+                .push_back(range);
+        }
+    }
+}
+
 #endif // __APPLE__
 
-ScriptBinding *loadEntry(void *handle, const IslandSlot &slot) {
-    std::string sym = std::string("mkxp_get_script_binding_") + slot.suffix;
-    typedef ScriptBinding *(*EntryFn)(void);
-    EntryFn entry = (EntryFn)dlsym(handle, sym.c_str());
-    if (!entry) {
-        Debug() << "ruby_instance: dlsym" << sym << "failed:" << dlerror();
-        return nullptr;
-    }
-    return entry();
-}
-
-// Mint a fresh image for the slot. Returns the dlopen handle and
-// fills *outBinding / *outIsCanonical. Caller holds s_mutex.
-void *openFreshImage(IslandSlot &slot, ScriptBinding **outBinding,
-                     bool *outIsCanonical) {
-    // Canonical path first. Its statics are pristine in three cases:
-    // before the first load, after a verified unload (fresh mapping),
-    // or after retire factory-reset a resident image's writable
-    // segments back to the pre-ruby_init snapshot.
-    if (!slot.canonicalResident || slot.canonicalPristine) {
-        void *handle = dlopen(slot.dylibPath.c_str(), RTLD_LOCAL | RTLD_NOW);
-        if (!handle) {
-            Debug() << "ruby_instance: dlopen" << slot.dylibPath
-                    << "failed:" << dlerror();
-            return nullptr;
-        }
-        ScriptBinding *binding = loadEntry(handle, slot);
-        if (!binding) {
-            dlclose(handle);
-            return nullptr;
-        }
+void opReclaimAllocations(void *) {
 #ifdef __APPLE__
-        // Snapshot the fresh image before any Ruby code dirties it.
-        // A reused (reset) resident image needs no recapture: its
-        // current bytes ARE the snapshot that was just restored.
-        if (!slot.snapshotValid)
-            captureSnapshot(slot, (void *)binding);
-#endif
-        slot.canonicalPristine = false; // in use -> dirty until reset
-        *outBinding = binding;
-        *outIsCanonical = true;
-        return handle;
+    vm_address_t *zones = nullptr;
+    unsigned zoneCount = 0;
+    if (malloc_get_all_zones(mach_task_self(), nullptr, &zones,
+                             &zoneCount) != KERN_SUCCESS)
+        return;
+    malloc_zone_t *zone = nullptr;
+    for (unsigned i = 0; i < zoneCount; ++i) {
+        malloc_zone_t *z = (malloc_zone_t *)zones[i];
+        const char *name = malloc_get_zone_name(z);
+        if (name && strcmp(name, MKXPZ_ISLAND_ZONE_NAME) == 0) {
+            zone = z;
+            break;
+        }
     }
+    if (!zone)
+        return; // session never allocated (e.g. pre-execute failure)
 
-    // Copy-and-load: the canonical image is resident with dirty
-    // statics. A byte-identical copy at a unique path is a distinct
-    // dyld image with fresh statics. The copy keeps the original's
-    // embedded code signature (content-hashed, path-independent),
-    // and we unlink it right after load - the mapping survives, so
-    // there is no disk accumulation across sessions.
-#ifdef __APPLE__
-    const char *tmpDir = getenv("TMPDIR");
-    if (!tmpDir || !tmpDir[0])
-        tmpDir = "/tmp";
-    char copyPath[1024];
-    snprintf(copyPath, sizeof(copyPath), "%s/RubyIsland%s.gen%d.dylib",
-             tmpDir, slot.suffix, slot.generation);
-    unlink(copyPath);
-    if (copyfile(slot.dylibPath.c_str(), copyPath, nullptr, COPYFILE_ALL) != 0) {
-        Debug() << "ruby_instance: copyfile to" << copyPath << "failed";
-        return nullptr;
-    }
-    void *handle = dlopen(copyPath, RTLD_LOCAL | RTLD_NOW);
-    unlink(copyPath);
-    if (!handle) {
-        Debug() << "ruby_instance: dlopen (copy)" << copyPath
-                << "failed:" << dlerror();
-        return nullptr;
-    }
-    ScriptBinding *binding = loadEntry(handle, slot);
-    if (!binding) {
-        dlclose(handle);
-        return nullptr;
-    }
-    *outBinding = binding;
-    *outIsCanonical = false;
-    return handle;
-#else
-    return nullptr;
+    ZoneScanState state;
+    if (zone->introspect && zone->introspect->enumerator)
+        zone->introspect->enumerator(mach_task_self(), &state,
+                                     MALLOC_PTR_IN_USE_RANGE_TYPE,
+                                     (vm_address_t)zone, zoneScanReader,
+                                     zoneScanRecorder);
+
+    for (uint64_t key : state.keys)
+        pthread_key_delete((pthread_key_t)key);
+
+    std::vector<mkxpi::MapRange> leftover =
+        mkxpi::leftoverMappings(state.maps, state.unmaps);
+    for (const mkxpi::MapRange &m : leftover)
+        munmap((void *)(uintptr_t)m.addr, (size_t)m.len);
+
+    malloc_destroy_zone(zone);
+    Debug() << "ruby_instance: reclaimed island zone -"
+            << (int)state.keys.size() << "pthread keys,"
+            << (int)leftover.size() << "leftover mappings";
 #endif
 }
 
-// Try to make `slot` the active session's island. Caller holds
-// s_mutex.
-bool acquireSlot(IslandSlot &slot) {
-    resolveDylib(slot);
-
-    if (slot.dylibPresent) {
-        // Which freshness mechanism this acquire will use, for the
-        // diagnostics line. Decided before openFreshImage mutates
-        // the slot state it reads.
-        const char *mechanism =
-            !slot.canonicalResident ? "canonical"
-            : slot.canonicalPristine ? "reset-in-place"
-                                     : "copy-and-load";
-        ScriptBinding *binding = nullptr;
-        bool isCanonical = false;
-        void *handle = openFreshImage(slot, &binding, &isCanonical);
-        if (!handle)
-            return false;
-        slot.generation++;
-        s_activeSlot = &slot;
-        s_activeHandle = handle;
-        s_activeBinding = binding;
-        s_activeIsCanonical = isCanonical;
-        s_activeExecuted = false;
-        s_activePoisoned = false;
-        publishDiagnostics("island %s #%d (%s)", slot.suffix,
-                           slot.generation, mechanism);
-        Debug() << "ruby_instance:"
-                << s_diagPublished.load(std::memory_order_relaxed);
-        return true;
-    }
-
-    // Static fallback: the island is linked into the executable.
-    // Its globals exist once per process, so exactly one session.
-    ScriptBinding *binding = slot.staticEntry();
-    if (!binding || slot.staticUsed)
-        return false;
-    slot.staticUsed = true;
-    s_activeSlot = &slot;
-    s_activeHandle = nullptr;
-    s_activeBinding = binding;
-    s_activeIsCanonical = false;
-    s_activeExecuted = false;
-    s_activePoisoned = false;
-    publishDiagnostics("island %s #%d (%s)", slot.suffix, 1,
-                       "static, single-shot");
-    Debug() << "ruby_instance:"
-            << s_diagPublished.load(std::memory_order_relaxed);
-    return true;
+void opLog(void *, const char *msg) {
+    Debug() << "ruby_instance:" << msg;
 }
 
-void saveSigactions() {
-    for (int sig = 1; sig < NSIG; ++sig)
-        sigaction(sig, nullptr, &s_savedSigactions[sig]);
-    s_sigactionsSaved = true;
-}
-
-void restoreSigactions() {
-    if (!s_sigactionsSaved)
-        return;
-    for (int sig = 1; sig < NSIG; ++sig) {
-        if (sig == SIGKILL || sig == SIGSTOP)
-            continue;
-        sigaction(sig, &s_savedSigactions[sig], nullptr);
-    }
-    s_sigactionsSaved = false;
-}
-
-// Retire the active instance. Caller holds s_mutex.
-void retireLocked() {
-    if (!s_activeSlot)
-        return;
-
-    // Ruby's handlers must not outlive the image they live in.
-    // Restores the host's fatal-report handlers as a side effect.
-    restoreSigactions();
-
-    if (s_activePoisoned) {
-        // The quiesce failed; island threads may be alive. dlclose
-        // or a segment reset here would rip code and globals out
-        // from under them. Leave the instance checked out: the
-        // capability gate then reports DIRTY and the host asks for
-        // an app restart.
-        Debug() << "ruby_instance: instance poisoned (quiesce failed);"
-                << "left checked out";
-        return;
-    }
-
-    IslandSlot &slot = *s_activeSlot;
-    if (s_activeHandle) {
-        dlclose(s_activeHandle);
-
-        // Unload canary: only a genuinely unloaded canonical image
-        // may be re-dlopened as a fresh mapping. RTLD_NOLOAD returns
-        // the existing handle (refcount bumped, balance it) when the
-        // image is still resident.
-        if (s_activeIsCanonical) {
-            void *probe = dlopen(slot.dylibPath.c_str(),
-                                 RTLD_LOCAL | RTLD_LAZY | RTLD_NOLOAD);
-            if (probe) {
-                dlclose(probe);
-                slot.canonicalResident = true;
-#ifdef __APPLE__
-                // The image would not unload. Factory-reset it in
-                // place: with the VM quiesced (ruby_cleanup) and
-                // sigactions restored, restoring the pre-ruby_init
-                // segment snapshot makes the resident image a legal
-                // host for the next session's ruby_init - no unload,
-                // no copy, no growth in mapped images.
-                slot.canonicalPristine = restoreSnapshot(slot);
-#endif
-                Debug() << "ruby_instance: island" << slot.suffix
-                        << (slot.canonicalPristine
-                                ? "did not unload; segments reset in place"
-                                : "did not unload and has no valid snapshot;"
-                                  " future sessions use copy-and-load");
-            } else {
-                slot.canonicalResident = false;
-                slot.canonicalPristine = false;
-                // A future load lands at a fresh address with fresh
-                // statics; the old snapshot's addresses are stale.
-                slot.pristineSegments.clear();
-                slot.snapshotValid = false;
-                Debug() << "ruby_instance: island" << slot.suffix
-                        << "unloaded cleanly";
-            }
-        }
-    }
-
-    s_activeSlot = nullptr;
-    s_activeHandle = nullptr;
-    s_activeBinding = nullptr;
-    s_activeIsCanonical = false;
-    s_activeExecuted = false;
+mkxpi::IslandStateMachine &machine() {
+    static mkxpi::IslandStateMachine *m = [] {
+        mkxpi::IslandOps ops;
+        ops.openImage = opOpenImage;
+        ops.openImageCopy = opOpenImageCopy;
+        ops.closeImage = opCloseImage;
+        ops.imageResident = opImageResident;
+        ops.resolveBinding = opResolveBinding;
+        ops.staticBinding = opStaticBinding;
+        ops.resolveDylibPath = opResolveDylibPath;
+        ops.captureSnapshot = opCaptureSnapshot;
+        ops.restoreSnapshot = opRestoreSnapshot;
+        ops.discardSnapshot = opDiscardSnapshot;
+        ops.saveSigactions = opSaveSigactions;
+        ops.restoreSigactions = opRestoreSigactions;
+        ops.reclaimAllocations = opReclaimAllocations;
+        ops.log = opLog;
+        return new mkxpi::IslandStateMachine(ops);
+    }();
+    return *m;
 }
 
 } // namespace
@@ -493,110 +420,46 @@ extern "C" {
 
 ScriptBinding *mkxpi_acquireRubyInstance(MKXPRubyVersion requested) {
     std::lock_guard<std::mutex> lock(s_mutex);
-
-    if (s_activeBinding) {
-        Debug() << "ruby_instance: acquire while a session is active";
-        return nullptr;
-    }
-
-    saveSigactions();
-
-    if (acquireSlot(*slotFor(requested)))
-        return s_activeBinding;
-
-    // Fallback chain, newest first, mirroring the historical
-    // dispatcher: a stubbed or exhausted requested version falls
-    // through to whichever island can still mint an instance.
-    for (IslandSlot *slot : {&s_slots[2], &s_slots[1], &s_slots[0]}) {
-        if (slot == slotFor(requested))
-            continue;
-        if (acquireSlot(*slot)) {
-            Debug() << "ruby_instance: requested island unavailable,"
-                    << "fell back to" << slot->suffix;
-            return s_activeBinding;
-        }
-    }
-
-    restoreSigactions();
-    Debug() << "ruby_instance: no fresh Ruby instance available";
-    return nullptr;
+    return (ScriptBinding *)machine().acquire((int)requested);
 }
 
 ScriptBinding *mkxpi_currentScriptBinding(void) {
-    return s_activeBinding;
+    return (ScriptBinding *)machine().currentBinding();
 }
 
 const char *mkxpi_rubyInstanceDiagnostics(void) {
-    return s_diagPublished.load(std::memory_order_acquire);
+    return machine().diagnostics();
 }
 
 void mkxpi_markRubyInstanceExecuting(void) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    s_activeExecuted = true;
+    machine().markExecuting();
 }
 
 void mkxpi_poisonActiveRubyInstance(void) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    s_activePoisoned = true;
+    machine().poison();
 }
 
 int mkxpi_hasStuckRubyInstance(void) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    return s_activeBinding != nullptr;
+    return machine().hasStuckInstance() ? 1 : 0;
 }
 
 void mkxpi_retireRubyInstance(void) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    retireLocked();
+    machine().retire();
 }
 
 void mkxpi_retireRubyInstanceIfUnexecuted(void) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    if (!s_activeSlot || s_activeExecuted)
-        return;
-    // The session failed before execute() - engine init errors like
-    // missing game files or GL failures - so ruby_init never ran and
-    // the instance is still factory-fresh. Retire it so one bad game
-    // doesn't cost the process its session loop. A static island is
-    // even still virgin: un-mark it so the capability gate keeps
-    // reporting FRESH.
-    if (!s_activeHandle)
-        s_activeSlot->staticUsed = false;
-    retireLocked();
+    machine().retireIfUnexecuted();
 }
 
 MKXPSessionCapability mkxpi_sessionCapability(MKXPRubyVersion version) {
     std::lock_guard<std::mutex> lock(s_mutex);
-
-    // A terminated engine with an instance still checked out means
-    // the RGSS thread crashed past the retire path. The island's
-    // threads and state are unknown; block all further sessions.
-    //
-    // An active instance on a live engine is NOT dirty: the host
-    // asks about the *next* session (the "Quit and play" flow
-    // queries while the current session runs or tears down), and
-    // the evaluation below already predicts the post-retire answer -
-    // a dylib island mints a fresh image, a static island was marked
-    // used at acquire.
-    if (s_activeBinding && mkxp_isEngineTerminated())
-        return MKXP_SESSION_CAP_DIRTY;
-
-    // Same resolution order as acquire, so the answer reflects the
-    // island a session would actually run on.
-    IslandSlot *requested = slotFor(version);
-    IslandSlot *chain[4] = {requested, &s_slots[2], &s_slots[1], &s_slots[0]};
-    for (int i = 0; i < 4; ++i) {
-        IslandSlot *slot = chain[i];
-        if (i > 0 && slot == requested)
-            continue;
-        resolveDylib(*slot);
-        if (slot->dylibPresent)
-            return MKXP_SESSION_CAP_FRESH;
-        if (slot->staticEntry())
-            return slot->staticUsed ? MKXP_SESSION_CAP_DIRTY
-                                    : MKXP_SESSION_CAP_FRESH;
-    }
-    return MKXP_SESSION_CAP_UNAVAILABLE;
+    return (MKXPSessionCapability)machine().capability(
+        (int)version, mkxp_isEngineTerminated() != 0);
 }
 
 } // extern "C"

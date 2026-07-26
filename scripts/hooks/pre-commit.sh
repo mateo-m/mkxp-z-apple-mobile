@@ -41,6 +41,17 @@ if [ -n "$RUBY_STAGED" ]; then
         die "rubocop failed"
 fi
 
+# Host-runnable unit tests for the Ruby instance manager's state
+# machine. Cheap (one TU, sub-second) - run whenever the machine, its
+# real-ops layer, or the tests themselves are staged.
+ISLAND_STAGED=$(printf '%s\n' "$STAGED" |
+    grep -E '^(src/island_state\.h|src/ruby_instance\.(h|cpp)|src/island_alloc_abi\.h|multiruby/alloc_redirect\.h|tests/)' || true)
+if [ -n "$ISLAND_STAGED" ]; then
+    section "island state machine tests"
+    require_tool c++
+    tests/run-tests.sh || die "island state machine tests failed"
+fi
+
 MD_FILES=$(printf '%s\n' "$STAGED" | grep -E '\.md$' | grep -Ev '^(src/theoraplay/|hmode7/)' || true)
 if [ -n "$MD_FILES" ]; then
     section "markdownlint (Markdown)"

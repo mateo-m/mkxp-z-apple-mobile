@@ -1,0 +1,22 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+jobs:
+  island-state:
+    name: Island state machine (host-runnable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      # The tested code (src/island_state.h) is deliberately OS-free:
+      # the Ruby instance manager's whole lifecycle state machine runs
+      # under a fake ops layer with a plain C++ compiler, no Apple SDK
+      # needed. tests/run-tests.sh builds one TU and executes it.
+      - name: Build + run
+        run: tests/run-tests.sh
