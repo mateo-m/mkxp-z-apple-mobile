@@ -42,6 +42,7 @@
 #include <SDL_syswm.h>
 
 #include "binding.h"
+#include "ruby_instance.h"
 #include "sharedstate.h"
 #include "eventthread.h"
 #include "display/graphics.h"
@@ -165,18 +166,15 @@ void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
     mkxp_refreshANGLENativeLayerSize(win, w, h);
 }
 
-/* Single-shot RGSS thread.
+/* Per-session RGSS thread.
  *
- * Runs the game session once and exits. Once the user returns to
- * the Library, the engine is fully torn down and the user must
- * close + reopen the host app to play another game (per App Store
- * guideline 2.5.1, we can't terminate the process programmatically).
- *
- * Ruby's VM has process-global state (signal handlers, atexit,
- * parser, symbol table) that doesn't unwind cleanly via
- * `ruby_cleanup`, so even if the persistent-thread architecture
- * worked we couldn't ruby_init twice in one process. Single-shot
- * matches what actually happens at runtime. */
+ * One thread per game session; EngineHost's session loop spawns a
+ * fresh one for each game the user starts. Ruby state never crosses
+ * sessions: the thread acquires a factory-fresh Ruby VM instance
+ * from the instance manager (src/ruby_instance.cpp) at start and
+ * retires it on exit. A VM instance is never re-entered - CRuby
+ * cannot re-init against used globals - so "another session" always
+ * means "another instance". */
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
 static void rgssThreadShutdown(RGSSThreadData *threadData);
 
@@ -211,6 +209,28 @@ static void rgssThreadShutdown(RGSSThreadData *threadData) {
 static int rgssThreadFunImpl(void *userdata) {
   RGSSThreadData *threadData = static_cast<RGSSThreadData *>(userdata);
 
+#if MKXPZ_MOBILE
+  /* Check out this session's Ruby VM instance before any engine
+   * state comes up. Every later dispatch (including terminate/reset
+   * from sharedstate.cpp / graphics.cpp) goes through
+   * getActiveScriptBinding() -> mkxpi_currentScriptBinding(). The
+   * host gates game launches on mkxp_sessionCapability(), so a
+   * failure here means the gate was bypassed or the island failed
+   * to load - surface it instead of crashing on a null vtable. */
+  ScriptBinding *sessionBinding =
+      mkxpi_acquireRubyInstance(mkxp_getActiveRubyVersion());
+  if (!sessionBinding) {
+    mkxp_noteRgssThreadFailure(
+        userdata,
+        "No fresh Ruby interpreter is available for this session. "
+        "Close Empo from the app switcher and reopen it to play.");
+    return 0;
+  }
+#else
+  /* Desktop: single session on the statically-linked binding. */
+  ScriptBinding *sessionBinding = getActiveScriptBinding();
+#endif
+
   mkxpGL_MakeCurrent(threadData->window, threadData->glContext);
 
   /* Set the screen framebuffer ID and reset the binding tracker. */
@@ -243,18 +263,19 @@ static int rgssThreadFunImpl(void *userdata) {
   }
 #endif
 
-  /* Run game scripts.
-   *
-   * Dispatch through `getActiveScriptBinding()` (binding.h) instead
-   * of the global `scriptBinding` directly so the host's
-   * `mkxp_setActiveRubyVersion()` setting picks which Ruby
-   * interpreter runs. The default keeps using the legacy 3.1
-   * binding via the global pointer; other versions go through the
-   * per-version `_mkxp_get_script_binding_NN()` entry points
-   * exported by their merged .o files. */
-  getActiveScriptBinding()->execute();
+  /* Run game scripts on this session's acquired Ruby instance.
+   * Mid-session terminate/reset dispatch reaches the same instance
+   * through getActiveScriptBinding(). */
+  sessionBinding->execute();
 
   rgssThreadShutdown(threadData);
+
+  /* The VM is quiesced (binding-mri.cpp runs ruby_cleanup on iOS
+   * before execute() returns) and the engine state it could touch is
+   * gone. Retire the instance: restore the pre-session sigaction
+   * table, dlclose the island image, and let the unload canary
+   * decide how the next session's instance gets minted. */
+  mkxpi_retireRubyInstance();
 
   threadData->rqTermAck.set();
   threadData->ethread->requestTerminate();
@@ -281,9 +302,14 @@ static void printRgssVersion(int ver) {
 }
 
 static void initSyntaxTransform(Config &conf) {
-#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-  extern unsigned int mkxp_syntax_transform_target_ruby_version_major, mkxp_syntax_transform_target_ruby_version_minor, mkxp_syntax_transform_target_ruby_version_teeny;
-#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+  // This function only computes conf.syntaxTransformCustomVersion*.
+  // The actual parser globals
+  // (mkxp_syntax_transform_target_ruby_version_*) live inside the
+  // Ruby 3.1 island and are set from these conf fields by
+  // binding-mri.cpp at session start, on the island instance the
+  // session acquired. The engine core must not reference island
+  // symbols directly: islands load via dlopen (ruby_instance.cpp),
+  // so a link-time reference from here would not resolve.
 
   // Host-bridge override. The host app sets this per-game so
   // syntaxTransform doesn't have to live inside mkxp.json (which is
@@ -322,21 +348,7 @@ static void initSyntaxTransform(Config &conf) {
       break;
   }
 
-#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
-  mkxp_syntax_transform_target_ruby_version_major = conf.syntaxTransformCustomVersionMajor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMajor;
-  mkxp_syntax_transform_target_ruby_version_minor = conf.syntaxTransformCustomVersionMinor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMinor;
-  mkxp_syntax_transform_target_ruby_version_teeny = conf.syntaxTransformCustomVersionTeeny == INT_MAX ? -1 : conf.syntaxTransformCustomVersionTeeny;
   Debug() << "Syntax transform:" << buf;
-#else
-  // The user configured a syntax-transform mode but this build was
-  // compiled against an unpatched Ruby runtime. The setting has no
-  // effect; make it loud in the logs so the mismatch doesn't look
-  // like a silent misconfiguration.
-  if (conf.syntaxTransform != MKXP_SYNTAX_TRANSFORM_DISABLED)
-    Debug() << "Syntax transform: requested" << buf << "but patches"
-               " are not compiled in (MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES"
-               " undefined); setting will be ignored.";
-#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 }
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
@@ -489,11 +501,15 @@ static bool waitForRGSSAck(RGSSThreadData &rtData) {
 
 /* EngineHost owns the process-wide engine resources (window, EGL
  * context, OpenAL device/context, RGSS thread). Lifecycle:
- * init() -> runSession() -> shutdown(). The three phases must be
- * called in that order; init() returning false means the host is
- * already torn down and runSession/shutdown must not be called.
- * Single-shot: once runSession returns, the engine is dead and the
- * user has to relaunch the host app to play another game. */
+ * init() -> runSession()... -> shutdown(). init() returning false
+ * means the host is already torn down and runSession/shutdown must
+ * not be called.
+ *
+ * runSession() is re-entrant across sessions: window, EGL context,
+ * and OpenAL device/context persist; SharedState, EventThread, and
+ * the RGSS thread (with its per-session Ruby VM instance, see
+ * src/ruby_instance.cpp) are per-session. On iOS, main() loops
+ * waitForGamePath -> runSession until the process ends. */
 class EngineHost {
 public:
   bool init(int argc, char *argv[]);
@@ -640,6 +656,17 @@ void EngineHost::runSession(int argc, char *argv[]) {
 
   eventThread.cleanup();
 
+  /* Clear the persistent window to black so the previous session's
+   * last frame never bleeds into the next session's first frame.
+   * The RGSS thread released the EGL context in rgssThreadShutdown;
+   * claim it briefly from this (main) thread. */
+  mkxpGL_MakeCurrent(persistWin_, persistGLCtx_);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, s_screenFBO);
+  gl.ClearColor(0, 0, 0, 1);
+  gl.Clear(GL_COLOR_BUFFER_BIT);
+  mkxpGL_SwapWindow(persistWin_);
+  mkxpGL_MakeCurrent(persistWin_, NULL);
+
   Debug() << "Game session ended.";
   mkxp_setEngineTerminated();
 }
@@ -676,6 +703,27 @@ int main(int argc, char *argv[]) {
     if (!host.init(argc, argv))
       return 0;
     host.runSession(argc, argv);
+
+#if TARGET_OS_IPHONE
+    /* Session loop: after each session ends (clean exit, quit from
+     * the toolbar, or `Reset`), park until the Library posts the
+     * next game path, then run another session. Each iteration gets
+     * a fresh Ruby VM instance (see ruby_instance.cpp), so switching
+     * games - or restarting the same game - never reuses Ruby state.
+     * The loop has no exit: an iOS app never terminates itself
+     * (guideline 2.5.1); the process ends when the user closes it
+     * or the system reclaims it. */
+    for (;;) {
+      const char *nextPath = mkxp_waitForGamePath();
+      if (!nextPath || !nextPath[0]) {
+        Debug() << "Session loop: empty game path, ignoring.";
+        continue;
+      }
+      mkxp_fs::setCurrentDirectory(nextPath);
+      host.runSession(argc, argv);
+    }
+#endif
+
     host.shutdown();
 
     Debug() << "Shutting down.";

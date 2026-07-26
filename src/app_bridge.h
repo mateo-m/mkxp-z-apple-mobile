@@ -182,6 +182,22 @@ typedef struct {
     bool networkEnabled;
 } MKXPSessionConfig;
 
+// Whether the engine can start a session for a given Ruby version
+// without reusing a dirty VM. CRuby cannot be re-initialized against
+// used VM globals, so a fresh session needs a fresh VM instance (see
+// src/ruby_instance.h for how instances are minted).
+typedef enum {
+    // A pristine VM instance is available; launching is safe.
+    MKXP_SESSION_CAP_FRESH       = 0,
+    // Only an already-used VM remains for this version. Launching
+    // would leak the previous game's classes/monkey-patches into the
+    // new session. The host should refuse and ask for an app restart.
+    MKXP_SESSION_CAP_DIRTY       = 1,
+    // This build ships no interpreter for the version (stubbed
+    // merged.o and no island dylib). Treat like DIRTY host-side.
+    MKXP_SESSION_CAP_UNAVAILABLE = 2,
+} MKXPSessionCapability;
+
 #if MKXPZ_MOBILE
 
 // ---------------------------------------------------------------------------
@@ -199,9 +215,23 @@ void        mkxp_setGameReady(void);
 int         mkxp_isGameReady(void);
 
 // Game selection (Library -> Engine)
+//
+// `mkxp_setGamePath` also resets all per-session bridge state
+// (terminated/hung/ready flags, pause state, snapshot) so a session
+// after the first starts from the same blank slate as a cold boot.
+// `mkxp_waitForGamePath` consumes the pending path: after it
+// returns, the engine's session loop can call it again and block
+// until the host posts the next game.
 
 void        mkxp_setGamePath(const char *path);
 const char *mkxp_waitForGamePath(void);
+
+// Cross-session capability (Library -> Engine query). The host asks
+// before offering "play" for a game whose scripts need `version`.
+// Backed by the Ruby instance manager (src/ruby_instance.cpp): FRESH
+// whenever a pristine VM instance can be minted (island dylib
+// present), or when the statically-linked island has not run yet.
+MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version);
 
 // Engine termination
 
@@ -586,6 +616,10 @@ static inline void        mkxp_setGameReady(void) {}
 static inline int         mkxp_isGameReady(void) { return 1; }
 static inline void        mkxp_setGamePath(const char *path) { (void)path; }
 static inline const char *mkxp_waitForGamePath(void) { return NULL; }
+// Desktop is single-session by construction (one game per process
+// invocation), and its statically-linked binding has not run before
+// the session starts, so FRESH is always truthful here.
+static inline MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version) { (void)version; return MKXP_SESSION_CAP_FRESH; }
 
 static inline void        mkxp_requestTerminate(void) {}
 static inline int         mkxp_isEngineTerminated(void) { return 0; }

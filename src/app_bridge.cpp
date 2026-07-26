@@ -23,6 +23,8 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 
+#include "ruby_instance.h"
+
 #if TARGET_OS_IPHONE
 #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -266,11 +268,28 @@ int mkxp_isGameReady(void) {
 void mkxp_setGamePath(const char *path) {
     std::lock_guard<std::mutex> lock(s_pathMutex);
     s_gamePath = path ? path : "";
-    s_pathSet.store(true, std::memory_order_release);
-    // A fresh session: clear any clean-exit flag set by the
-    // previous session so the termination callback for this one
-    // starts from the default "unclean unless proven clean" state.
+    // Reset every per-session bridge flag before publishing the
+    // path. The engine's session loop only wakes once s_pathSet
+    // flips, so ordering here guarantees session N+1 observes the
+    // same blank slate a cold boot would. The host must never call
+    // this while a session is still running: the handshake is
+    // "engine-terminated callback fired, then set the next path"
+    // (EngineTerminationCoordinator.awaitEngineTermination).
     s_engineExitedCleanly.store(false, std::memory_order_release);
+    s_engineTerminated.store(false, std::memory_order_release);
+    s_terminateRequested.store(false, std::memory_order_release);
+    s_engineHung.store(false, std::memory_order_release);
+    s_gameReady.store(false, std::memory_order_release);
+    s_pauseRequested.store(false, std::memory_order_release);
+    s_paused.store(false, std::memory_order_release);
+    s_needsFrameRenderedSignal.store(false, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> snapLock(s_snapshotMutex);
+        s_snapshotData.clear();
+        s_snapshotWidth = 0;
+        s_snapshotHeight = 0;
+    }
+    s_pathSet.store(true, std::memory_order_release);
 }
 
 const char *mkxp_waitForGamePath(void) {
@@ -291,6 +310,10 @@ const char *mkxp_waitForGamePath(void) {
     thread_local std::string pathCopy;
     std::lock_guard<std::mutex> lock(s_pathMutex);
     pathCopy = s_gamePath;
+    // Consume the pending path. The session loop in main.cpp calls
+    // this again after each session ends and must block until the
+    // host posts the next game, not re-run the previous one.
+    s_pathSet.store(false, std::memory_order_release);
     return pathCopy.c_str();
 }
 
@@ -907,6 +930,10 @@ void mkxp_setActiveRubyVersion(MKXPRubyVersion version) {
 
 MKXPRubyVersion mkxp_getActiveRubyVersion(void) {
     return (MKXPRubyVersion)s_activeRubyVersion.load(std::memory_order_acquire);
+}
+
+MKXPSessionCapability mkxp_sessionCapability(MKXPRubyVersion version) {
+    return mkxpi_sessionCapability(version);
 }
 
 void mkxp_setUseInGameKeyboard(bool enabled) {

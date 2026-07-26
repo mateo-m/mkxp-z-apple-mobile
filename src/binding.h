@@ -42,52 +42,31 @@ struct ScriptBinding
 };
 
 #ifdef MKXPZ_BUILD_XCODE
-/* Multi-Ruby Phase D dispatch.
+/* Multi-Ruby dispatch, per-session instance edition.
  *
  * The host's `mkxp_setActiveRubyVersion()` selects which Ruby
  * interpreter + matching binding code runs for the active game.
- * Each Ruby version's binding + libruby is bundled in a
- * per-version merged .o (see ios/Dependencies/multiruby/wrapper.cpp +
- * the `mkxpNN-merged` make targets in ios/Dependencies/common.make).
- * Each merged .o exports exactly one symbol,
- * `_mkxp_get_script_binding_NN()`, returning a pointer to that
- * version's `ScriptBinding` vtable.
+ * Each Ruby version's binding + libruby is a symbol-islanded unit
+ * (see ios/Dependencies/multiruby/wrapper.cpp + the make targets in
+ * ios/Dependencies/common.make) whose single export,
+ * `_mkxp_get_script_binding_NN()`, returns that version's
+ * `ScriptBinding` vtable.
  *
- * Default fallback: 3.1, since the legacy path used Ruby 3.1 with
- * syntax-transform applied. UNSET / MKXP_RUBY_18 / MKXP_RUBY_19
- * also fall through to 3.1 today (1.8 / 1.9 native builds aren't
- * wired yet; see MULTI_RUBY_PLAN.md).
- *
- * The merged .o files might not exist on a given SDK build (e.g.
- * fresh device build that hasn't run `make mkxp-merged` for that
- * SDK). The pre-build script in project.yml stubs out missing
- * merged.o files with `mkxp_get_script_binding_NN()` returning
- * nullptr; the runtime check here detects that and falls through
- * to whichever binding does exist.
- */
+ * Session lifecycle moved into src/ruby_instance.cpp: main.cpp's
+ * RGSS thread acquires a fresh instance of the right island per
+ * session (dlopen'd RubyIsland<NN> dylib when shipped, the
+ * statically-linked merged.o as single-shot fallback) and retires it
+ * at session end. This accessor serves mid-session dispatch only -
+ * terminate/reset calls from sharedstate.cpp / graphics.cpp between
+ * acquire and retire. Version selection, stub fallback (a build
+ * whose SDK lacks some island gets a nullptr-returning stub entry
+ * from the project.yml pre-build script), and freshness tracking all
+ * live in the instance manager. */
 #include "app_bridge.h"
-
-extern "C" ScriptBinding *mkxp_get_script_binding_18(void);
-extern "C" ScriptBinding *mkxp_get_script_binding_19(void);
-extern "C" ScriptBinding *mkxp_get_script_binding_31(void);
+#include "ruby_instance.h"
 
 inline ScriptBinding *getActiveScriptBinding(void) {
-    ScriptBinding *sb = nullptr;
-    switch (mkxp_getActiveRubyVersion()) {
-    case MKXP_RUBY_18: sb = mkxp_get_script_binding_18(); break;
-    case MKXP_RUBY_19: sb = mkxp_get_script_binding_19(); break;
-    /* UNSET / MKXP_RUBY_30 (deprecated, routed to 3.1 + Legacy
-     * compat) / MKXP_RUBY_31 / unknown → 3.1 (default modern). */
-    default:           sb = mkxp_get_script_binding_31(); break;
-    }
-    /* Last-resort fallback if the chosen merged.o is a build-time
-     * stub (returning nullptr because that SDK didn't ship it).
-     * Order: prefer 3.1, then 1.9, then 1.8; newest available
-     * wins so script-engine features stay maximal. */
-    if (!sb) sb = mkxp_get_script_binding_31();
-    if (!sb) sb = mkxp_get_script_binding_19();
-    if (!sb) sb = mkxp_get_script_binding_18();
-    return sb;
+    return mkxpi_currentScriptBinding();
 }
 #else
 /* Non-iOS build: the legacy global `scriptBinding` is set by

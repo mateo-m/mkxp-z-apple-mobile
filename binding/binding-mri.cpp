@@ -45,6 +45,7 @@
 #include <vector>
 #include <regex>
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -1814,18 +1815,43 @@ static void showExc(VALUE exc, const BacktraceData &btData) {
 }
 
 
-/* Single-shot game session: ruby_init + script execute + return.
+/* Per-instance game session: ruby_init + script execute + quiesce.
  *
- * Called once per app process by `getActiveScriptBinding()->execute()`
- * in main.cpp's rgssThreadFun. Once this returns, the engine is dead
- * for the remainder of the process — App Store guideline 2.5.1 stops
- * us from terminating ourselves, so the user has to close + reopen
- * the app to play another game. Ruby's VM has process-global state
- * (signal handlers, atexit, parser, symbol table) that doesn't
- * unwind cleanly via ruby_cleanup, and a second ruby_init in the
- * same process would crash anyway. */
+ * Called once per Ruby VM *instance* by the RGSS thread in main.cpp.
+ * A VM instance is never re-entered: CRuby cannot ruby_init twice
+ * against used globals, so cross-session play mints a fresh island
+ * instance per session (src/ruby_instance.cpp) instead of reusing
+ * this one. On iOS this function ends with ruby_cleanup so the
+ * instance retires with its threads stopped, FDs closed, and as much
+ * heap returned as CRuby will give back. */
 static void mriBindingExecute() {
     Config &conf = shState->rtData().config;
+
+    /* Push the session's syntax-transform target into this island's
+     * patched parser. The globals live inside the island's libruby,
+     * so they must be set from island-compiled code: the engine core
+     * (main.cpp) computes the conf fields but cannot reference the
+     * symbols - islands load via dlopen (src/ruby_instance.cpp) and
+     * a core-side link reference would not resolve. Only the Ruby
+     * 3.1 island carries the patches; the others log-and-ignore. */
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+    {
+        extern unsigned int mkxp_syntax_transform_target_ruby_version_major,
+                            mkxp_syntax_transform_target_ruby_version_minor,
+                            mkxp_syntax_transform_target_ruby_version_teeny;
+        mkxp_syntax_transform_target_ruby_version_major =
+            conf.syntaxTransformCustomVersionMajor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMajor;
+        mkxp_syntax_transform_target_ruby_version_minor =
+            conf.syntaxTransformCustomVersionMinor == INT_MAX ? -1 : conf.syntaxTransformCustomVersionMinor;
+        mkxp_syntax_transform_target_ruby_version_teeny =
+            conf.syntaxTransformCustomVersionTeeny == INT_MAX ? -1 : conf.syntaxTransformCustomVersionTeeny;
+    }
+#else
+    if (conf.syntaxTransform != MKXP_SYNTAX_TRANSFORM_DISABLED &&
+        conf.syntaxTransform != MKXP_SYNTAX_TRANSFORM_UNSET)
+        Debug() << "Syntax transform requested but this Ruby island"
+                << "has no parser patches; setting ignored.";
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 
     /* Point Ruby's openssl ext at the host-provided CA bundle before
      * the VM boots; the baked-in openssldir from the cross-compile
@@ -2033,10 +2059,33 @@ static void mriBindingExecute() {
             mkxp_setErrorMessage(s_lastKernelPrintText.c_str());
     }
 
-    /* No ruby_cleanup: Ruby's VM has process-global state (signal
-     * handlers, atexit, parser, symbol table) that doesn't unwind
-     * cleanly. The whole process exits when the user closes the app
-     * from the app switcher, which is what does the actual cleanup. */
+#ifdef MKXPZ_BUILD_XCODE
+    /* Quiesce the VM so the instance can retire (main.cpp calls
+     * mkxpi_retireRubyInstance after shutdown). ruby_cleanup stops
+     * VM threads (the island image must have no live threads before
+     * dlclose), runs END/at_exit blocks and finalizers, closes VM
+     * FDs, and tears the VM down - returning most of the GC heap
+     * even when the image itself stays resident.
+     *
+     * Ordering: the pending exception must be cleared first
+     * (SystemExit was already classified above; cleanup with a
+     * pending exception would re-raise it), and nothing may call
+     * into Ruby after this point - SharedState teardown runs later
+     * but is Ruby-free. at_exit blocks run here for the first time
+     * on iOS (single-shot never cleaned up); the exit!/Thread.critical
+     * preload shims in platform_compat.rb keep the known offenders
+     * safe. Desktop builds keep the historical behavior (process
+     * exit does the cleanup). */
+#if RAPI_FULL > 187
+    rb_set_errinfo(Qnil);
+#else
+    rb_gv_set("$!", Qnil);
+#endif
+    ruby_cleanup(0);
+    /* The VM is gone; drop the binding-data pointer so nothing can
+     * mistake the dead stack-scoped RbData for a live one. */
+    shState->setBindingData(0);
+#endif
 
     shState->rtData().rqTermAck.set();
 }
