@@ -274,10 +274,16 @@ unless defined?(MKXPSaveFS)
   module MKXPSaveFS
     module_function
 
-    # Canonical save-directory names: Save, SaveData, Save Data (tab allowed).
-    SAVE_DIR_FRAGMENT = 'Save(?:[ \t]?Data)?'.freeze
-    SAVE_SUBDIR_RE = %r{\A(?:\./)?(?:#{SAVE_DIR_FRAGMENT})/?\z}i.freeze
-    SAVE_SUBDIR_GLOB_RE = %r{\A(#{SAVE_DIR_FRAGMENT})(/.+)\z}i.freeze
+    # Portable-mode save folder (Reborn/Rejuvenation convention). It
+    # is LITERAL: a real, game-managed directory in the game folder,
+    # exactly like on Windows and JoiPlay. The game creates, lists,
+    # and deletes it itself; the engine does not remap it. Only two
+    # things get remapped into UserData: bare save filenames written
+    # to the working directory (decade-old Essentials builds), and
+    # nothing else - System.data_directory / faked env vars already
+    # point non-portable games at UserData directly.
+    PORTABLE_SAVE_DIR = 'Save Data'.freeze
+    PORTABLE_MARKER = "#{PORTABLE_SAVE_DIR}/.portable".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
 
     def root
@@ -297,17 +303,6 @@ unless defined?(MKXPSaveFS)
       path.strip.gsub('\\', '/')
     end
 
-    def normalize_save_dir_token(name)
-      name.downcase.gsub("\t", ' ')
-    end
-
-    def save_dir_name?(name)
-      case normalize_save_dir_token(name)
-      when 'save', 'save data', 'savedata' then true
-      else false
-      end
-    end
-
     def save_filename?(name)
       lower = name.downcase
       return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
@@ -315,12 +310,6 @@ unless defined?(MKXPSaveFS)
       return true if lower.end_with?('.bak')
 
       false
-    end
-
-    def save_directory_path?(path)
-      return false unless path.is_a?(String)
-
-      normalize_path(path) =~ SAVE_SUBDIR_RE
     end
 
     def engine_internal_entry?(name)
@@ -348,40 +337,6 @@ unless defined?(MKXPSaveFS)
       save_filename?(stripped)
     end
 
-    def save_relative_path?(path)
-      return false unless path.is_a?(String)
-
-      stripped = normalize_path(path)
-      return false if stripped.empty?
-      return false if stripped.start_with?('/', '~')
-      return false if stripped =~ /\A[A-Za-z]:/
-
-      parts = stripped.split('/')
-      return true if parts.length == 1 && (save_filename?(parts[0]) || save_dir_name?(parts[0]))
-      return true if parts.length >= 2 && save_dir_name?(parts[0])
-
-      false
-    end
-
-    def needs_save_remap?(normalized, base)
-      return true if save_relative_path?(normalized)
-      return true if base && normalized.start_with?("#{base}/")
-
-      false
-    end
-
-    def flatten_save_relative(relative)
-      parts = relative.split('/')
-      if parts.length == 1
-        return '' if save_dir_name?(parts[0])
-
-        return parts[0]
-      end
-      return parts[1..-1].join('/') if save_dir_name?(parts[0])
-
-      relative
-    end
-
     def orig_exist?(path)
       return FileTest._mkxp_orig_exist(path) if defined?(FileTest) && FileTest.respond_to?(:_mkxp_orig_exist)
       return File._mkxp_orig_exist(path) if File.respond_to?(:_mkxp_orig_exist)
@@ -391,28 +346,12 @@ unless defined?(MKXPSaveFS)
       false
     end
 
-    def remap_to_userdata(normalized, base)
-      if normalized.start_with?("#{base}/")
-        tail = normalized[(base.length + 1)..-1]
-        flattened = flatten_save_relative(tail)
-        return base if flattened.empty?
-
-        return "#{base}/#{flattened}"
-      end
-
-      if save_relative_path?(normalized)
-        flattened = flatten_save_relative(normalized)
-        return base if flattened.empty?
-
-        return "#{base}/#{flattened}"
-      end
-
-      nil
-    end
-
-    # Remap Windows-style save paths into per-game UserData/. When the
-    # remapped file is missing but the original relative path exists under
-    # Game/ (shipped starter saves), fall back to the original path.
+    # Remap bare working-directory save filenames ("Game.rxdata",
+    # "Save01.rvdata2") into per-game UserData/. Everything else -
+    # including the portable "Save Data/" folder and any path inside
+    # it - resolves literally, exactly as on Windows. When the
+    # remapped file is missing but the original relative path exists
+    # under Game/ (shipped starter saves), fall back to the original.
     def path_for(path)
       return path unless path.is_a?(String)
 
@@ -424,11 +363,9 @@ unless defined?(MKXPSaveFS)
 
       base = root
       return path unless base
-      return path unless needs_save_remap?(normalized, base)
+      return path unless candidate?(normalized)
 
-      remapped = remap_to_userdata(normalized, base)
-      return path unless remapped
-
+      remapped = "#{base}/#{normalized}"
       return remapped if orig_exist?(remapped)
       return normalized if orig_exist?(normalized)
 
@@ -467,35 +404,32 @@ unless defined?(MKXPSaveFS)
       normalized = normalize_path(pattern)
       return nil if normalized.empty?
 
-      if (match = SAVE_SUBDIR_GLOB_RE.match(normalized))
-        tail = match[2].sub(%r{\A/}, '')
-        return "#{base}/#{tail}"
-      end
-
       return "#{base}/#{normalized}" if candidate?(normalized)
 
       nil
     end
 
-    def dir_target(path)
-      return nil unless path.is_a?(String)
-
+    # True when a resolved directory target IS the per-game UserData
+    # root - the game using System.data_directory (trailing separator
+    # included) or a faked env var pointing at it. Callers use this
+    # to (a) filter engine-internal entries out of listings of the
+    # root and (b) no-op mkdir/rmdir of the root: the host owns that
+    # directory, games must never remove it, and "create my data
+    # folder" is always already satisfied.
+    def save_root_target?(target)
       base = root
-      return base if base && save_directory_path?(path)
+      return false unless base && target.is_a?(String)
 
-      nil
+      target.gsub(%r{[\\/]+\z}, '') == base
     end
 
-    def normalize_glob_results(result, pattern)
+    def normalize_glob_results(result, _pattern)
       return result unless result.respond_to?(:map)
 
       base = root
       return result unless base
 
-      normalized_pattern = normalize_path(pattern)
-      save_subdir = SAVE_SUBDIR_GLOB_RE.match(normalized_pattern)
       normalized_prefix = "#{base}/"
-      dir_prefix = save_subdir ? save_subdir[1] : nil
 
       mapped = result.map do |entry|
         rel = if entry.start_with?(normalized_prefix)
@@ -505,13 +439,81 @@ unless defined?(MKXPSaveFS)
               end
         next nil if engine_internal_entry?(rel)
 
-        if dir_prefix
-          "#{dir_prefix}/#{rel}"
-        else
-          rel
-        end
+        rel
       end
       mapped.compact
+    end
+
+    # --- Portable-save migration (virtual alias -> literal) ---
+    # Earlier builds virtualized the portable save dir: games in
+    # JoiPlay-compat mode wrote "Save Data/..." and the shim
+    # flattened it into the UserData root (and even with a real
+    # imported Save Data folder, files that did not exist yet were
+    # created at the root). "Save Data" is literal now, so on the
+    # first literal-mode boot move those root-level save files into
+    # the folder the game is about to read. Runs only when the game
+    # will actually resolve saves through the portable dir ($joiplay,
+    # or a shipped Save Data/.portable marker) - exactly the
+    # population the alias used to serve. On a name collision the
+    # newer mtime wins the canonical name (ties go to the root copy,
+    # which the alias preferred for both reads and writes); the loser
+    # is kept beside it as *.pre-literal.bak. The sweep repeats on
+    # every portable boot so alias-era stragglers keep converging,
+    # and the mtime rule keeps a repeat sweep from displacing a save
+    # the player has since written into the literal folder.
+    # Paths resolve against the engine cwd (the game folder, set by
+    # main.cpp/config.cpp before the binding boots), the same base
+    # the game's own "Save Data/" strings resolve against.
+    def migrate_portable_saves!
+      base = root
+      return if base.nil? || base == '.'
+      # Degenerate host config: data dir pointing at the game folder
+      # itself would shuffle shipped root saves into Save Data.
+      return if File.expand_path(base) == File.expand_path('.')
+
+      names = begin
+        Dir._mkxp_orig_entries(base)
+      rescue StandardError
+        nil
+      end
+      return if names.nil?
+
+      movable = names.select do |name|
+        save_filename?(name) && File._mkxp_orig_file("#{base}/#{name}")
+      end
+      return if movable.empty?
+
+      Dir._mkxp_orig_mkdir(PORTABLE_SAVE_DIR) unless orig_exist?(PORTABLE_SAVE_DIR)
+      movable.each do |name|
+        migrate_save_file("#{base}/#{name}", "#{PORTABLE_SAVE_DIR}/#{name}")
+      end
+    rescue StandardError
+      nil
+    end
+
+    def migrate_save_file(src, dst)
+      unless orig_exist?(dst)
+        File._mkxp_orig_rename(src, dst)
+        return
+      end
+
+      if migrate_source_newer?(src, dst)
+        File._mkxp_orig_rename(dst, "#{dst}.pre-literal.bak")
+        File._mkxp_orig_rename(src, dst)
+      else
+        File._mkxp_orig_rename(src, "#{dst}.pre-literal.bak")
+      end
+    rescue StandardError
+      nil
+    end
+
+    # Ties go to the root (src) copy: on the first alias->literal
+    # boot equal stamps mean copies of the same file, and the alias
+    # treated the root as authoritative.
+    def migrate_source_newer?(src, dst)
+      File._mkxp_orig_mtime(src) >= File._mkxp_orig_mtime(dst)
+    rescue StandardError
+      true
     end
   end
 end
@@ -996,25 +998,31 @@ class << Dir
   ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
 
   def entries(path = '.', *args)
-    target = MKXPSaveFS.dir_target(path) || path
+    # path_for remaps bare save filenames and passes everything else
+    # through literally (the portable "Save Data/" folder is a real,
+    # game-managed directory - see the note above mkdir). Filtering
+    # keys off the RESOLVED target so listings of the UserData root
+    # (System.data_directory, faked env var spellings) hide
+    # engine-internal entries.
+    target = MKXPSaveFS.path_for(path)
     result = _mkxp_orig_entries(target, *args)
-    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_directory_path?(path)
+    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
 
     result
   end
   ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
 
   def foreach(path = '.', *args, &block)
-    target = MKXPSaveFS.dir_target(path) || path
+    target = MKXPSaveFS.path_for(path)
     unless block
-      if MKXPSaveFS.save_directory_path?(path)
+      if MKXPSaveFS.save_root_target?(target)
         return MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each
       end
 
       return _mkxp_orig_foreach(target, *args)
     end
 
-    if MKXPSaveFS.save_directory_path?(path)
+    if MKXPSaveFS.save_root_target?(target)
       MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each(&block)
     else
       _mkxp_orig_foreach(target, *args, &block)
@@ -1028,9 +1036,9 @@ class << Dir
     alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
 
     def children(path, *args)
-      target = MKXPSaveFS.dir_target(path) || path
+      target = MKXPSaveFS.path_for(path)
       result = _mkxp_orig_children(target, *args)
-      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_directory_path?(path)
+      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
 
       result
     end
@@ -1041,16 +1049,16 @@ class << Dir
     alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
 
     def each_child(path, *args, &block)
-      target = MKXPSaveFS.dir_target(path) || path
+      target = MKXPSaveFS.path_for(path)
       unless block
-        if MKXPSaveFS.save_directory_path?(path)
+        if MKXPSaveFS.save_root_target?(target)
           return MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each
         end
 
         return _mkxp_orig_each_child(target, *args)
       end
 
-      if MKXPSaveFS.save_directory_path?(path)
+      if MKXPSaveFS.save_root_target?(target)
         MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each(&block)
       else
         _mkxp_orig_each_child(target, *args, &block)
@@ -1061,17 +1069,51 @@ class << Dir
 
   if method_defined?(:exist?) || private_method_defined?(:exist?)
     def exist?(path)
-      return true if MKXPSaveFS.dir_target(path)
-
-      _mkxp_orig_exist(path)
+      _mkxp_orig_exist(MKXPSaveFS.path_for(path))
     end
   end
 
-  def mkdir(path, *args)
-    return 0 if MKXPSaveFS.dir_target(path)
+  if (method_defined?(:exists?) || private_method_defined?(:exists?)) && !method_defined?(:_mkxp_orig_exists)
+    alias _mkxp_orig_exists exists?
 
-    _mkxp_orig_mkdir(path, *args)
+    def exists?(path)
+      _mkxp_orig_exists(MKXPSaveFS.path_for(path))
+    end
   end
+
+  # The portable save dir is LITERAL: Pokemon Rejuvenation's
+  # portable mode (isPortable -> getSaveFolder == "Save Data/")
+  # creates it with
+  #   Dir.mkdir("Save Data/") unless File.exists?("Save Data/")
+  # and then runs
+  #   Dir.mkdir(RTP.getSaveFolder + "Battle Debug Logs/")
+  # at the start of every battle, unrescued. Both resolve relative
+  # to the game folder and must really create the directories there,
+  # exactly as on Windows/JoiPlay - an earlier alias scheme answered
+  # the first mkdir with a virtual success, which left the second
+  # one without a parent and black-screened the battle transition
+  # with Errno::ENOENT.
+  # The wrappers exist for two reasons: bare-save-filename paths
+  # still route through path_for, and the UserData root itself is
+  # host-owned - "create it" reports success instead of
+  # Errno::EEXIST, and "remove it" must never actually happen.
+  def mkdir(path, *args)
+    target = MKXPSaveFS.path_for(path)
+    return 0 if MKXPSaveFS.save_root_target?(target)
+
+    _mkxp_orig_mkdir(target, *args)
+  end
+
+  alias _mkxp_orig_rmdir rmdir unless method_defined?(:_mkxp_orig_rmdir)
+
+  def rmdir(path)
+    target = MKXPSaveFS.path_for(path)
+    return 0 if MKXPSaveFS.save_root_target?(target)
+
+    _mkxp_orig_rmdir(target)
+  end
+  alias delete rmdir
+  alias unlink rmdir
 end
 
 module Kernel
@@ -1543,3 +1585,13 @@ if network_off
     end
   end
 end
+
+# --- Portable-save migration trigger ---
+# Runs once per boot, after every File/Dir wrapper above is armed
+# (migrate_portable_saves! calls the _mkxp_orig_* aliases directly).
+# Gate mirrors the Reborn/Rejuvenation isPortable check: the host's
+# JoiPlay-compat toggle, or a shipped Save Data/.portable marker.
+# Games that stay non-portable keep their saves at the UserData root
+# untouched.
+portable_boot = $joiplay || MKXPSaveFS.orig_exist?(MKXPSaveFS::PORTABLE_MARKER)
+MKXPSaveFS.migrate_portable_saves! if portable_boot

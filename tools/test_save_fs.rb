@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
-# Unit tests for MKXPSaveFS save-path remapping in platform_compat.rb.
+# Unit tests for MKXPSaveFS save-path handling in platform_compat.rb:
+# bare-filename remap into UserData, literal portable "Save Data",
+# UserData-root protections, and the alias->literal save migration.
 # Run: ruby mkxp-z-apple-mobile/tools/test_save_fs.rb
 
 require 'fileutils'
@@ -15,14 +17,34 @@ def reset_workspace!
   FileUtils.mkdir_p(GAME)
 end
 
-def load_platform_compat!
-  reset_workspace!
+# platform_compat.rb targets the in-game VMs (1.8 / 1.9 / 3.1), which
+# all still have the `exists?` aliases; Ruby 3.2 removed them. Restore
+# them so this harness also runs on a modern host Ruby.
+def ensure_ruby31_compat_aliases!
+  class << File
+    alias_method :exists?, :exist? unless method_defined?(:exists?)
+  end
+  FileTest.singleton_class.class_eval do
+    alias_method :exists?, :exist? unless method_defined?(:exists?)
+  end
+  class << Dir
+    alias_method :exists?, :exist? unless method_defined?(:exists?)
+  end
+end
+
+# Loads (or reloads) platform_compat.rb. Does NOT reset the
+# workspace - callers seed files first so the boot-time portable-save
+# migration sees them, and must chdir into GAME when the migration's
+# cwd-relative behavior is under test.
+def load_platform_compat!(joiplay = false)
+  ensure_ruby31_compat_aliases!
   Object.send(:remove_const, :System) if defined?(System)
   Object.const_set(:System, Module.new do
     module_function
 
     define_method(:data_directory) { USERDATA }
     define_method(:puts) { |*args| Kernel.puts(*args) }
+    define_method(:joiplay_compat?) { joiplay }
   end)
   unless Kernel.method_defined?(:load_data)
     Kernel.module_eval do
@@ -30,7 +52,15 @@ def load_platform_compat!
       def save_data(_obj, _path, *_args); end
     end
   end
-  load File.join(ROOT, 'scripts', 'preload', 'platform_compat.rb')
+  # Reloading the whole file re-evaluates constants that production
+  # only defines once per VM; silence the redefinition warnings.
+  prev_verbose = $VERBOSE
+  $VERBOSE = nil
+  begin
+    load File.join(ROOT, 'scripts', 'preload', 'platform_compat.rb')
+  ensure
+    $VERBOSE = prev_verbose
+  end
 end
 
 def assert_eq(actual, expected, label)
@@ -48,98 +78,245 @@ def assert_false(value, label)
   assert_eq(value, false, label)
 end
 
+# Raw filesystem probes that bypass every wrapper.
+def raw_entries(dir)
+  Dir._mkxp_orig_entries(dir)
+end
+
+def raw_dir?(path)
+  File._mkxp_orig_directory(path)
+end
+
+def set_mtime(path, time)
+  File.utime(time, time, path)
+end
+
+reset_workspace!
 load_platform_compat!
 
 base = MKXPSaveFS.root
 assert_eq(base, USERDATA, 'root')
 
+# --- Bare working-directory save filenames remap into UserData ---
 assert_eq(
   MKXPSaveFS.path_for('Save01.rvdata2'),
   File.join(USERDATA, 'Save01.rvdata2'),
   'bare save filename'
 )
+twice = MKXPSaveFS.path_for(MKXPSaveFS.path_for('Save01.rvdata2'))
+assert_eq(twice, File.join(USERDATA, 'Save01.rvdata2'), 'idempotent path_for')
+
+# --- Everything else is literal ---
 assert_eq(
   MKXPSaveFS.path_for('Save/Save01.rvdata2'),
-  File.join(USERDATA, 'Save01.rvdata2'),
-  'Save/ prefix flatten'
+  'Save/Save01.rvdata2',
+  'save-dir-prefixed path is literal'
 )
 assert_eq(
   MKXPSaveFS.path_for('Save Data/Save01.rvdata2'),
-  File.join(USERDATA, 'Save01.rvdata2'),
-  'Save Data/ prefix flatten'
+  'Save Data/Save01.rvdata2',
+  'portable path is literal'
 )
-assert_eq(
-  MKXPSaveFS.path_for('Save\\Save01.rvdata2'),
-  File.join(USERDATA, 'Save01.rvdata2'),
-  'backslash path'
-)
-assert_eq(MKXPSaveFS.path_for('Save'), USERDATA, 'save directory')
-
-twice = MKXPSaveFS.path_for(MKXPSaveFS.path_for('Save/Save01.rvdata2'))
-assert_eq(twice, File.join(USERDATA, 'Save01.rvdata2'), 'idempotent path_for')
-
+assert_eq(MKXPSaveFS.path_for('Save'), 'Save', 'save dir name is literal')
 assert_eq(MKXPSaveFS.path_for('Data/Map001.rvdata2'), 'Data/Map001.rvdata2', 'non-save passthrough')
 assert_eq(MKXPSaveFS.path_for('/etc/passwd'), '/etc/passwd', 'absolute passthrough')
 
+# --- Glob: only bare save-file patterns remap ---
 File.write(File.join(USERDATA, 'Save01.rvdata2'), 'x')
+assert_eq(MKXPSaveFS.glob_for('Save Data/*.rvdata2'), nil, 'portable glob is literal')
 assert_eq(
-  MKXPSaveFS.glob_for('Save Data/*.rvdata2'),
+  MKXPSaveFS.glob_for('*.rvdata2'),
   File.join(USERDATA, '*.rvdata2'),
-  'glob remap tail'
+  'bare glob remap'
 )
 globbed = MKXPSaveFS.normalize_glob_results(
   [File.join(USERDATA, 'Save01.rvdata2')],
-  'Save Data/*.rvdata2'
+  '*.rvdata2'
 )
-assert_eq(globbed, ['Save Data/Save01.rvdata2'], 'glob prefix echo')
+assert_eq(globbed, ['Save01.rvdata2'], 'glob results relative to root')
 
-FileUtils.mkdir_p(File.join(GAME, 'Save'))
-shipped = File.join(GAME, 'Save', 'Save02.rvdata2')
-File.write(shipped, 'shipped')
+# Shipped starter save in the game folder wins while UserData has no copy.
+File.write(File.join(GAME, 'Game.rxdata'), 'shipped')
 Dir.chdir(GAME) do
-  assert_eq(
-    MKXPSaveFS.path_for('Save/Save02.rvdata2'),
-    'Save/Save02.rvdata2',
-    'read-fallback to Game/Save'
-  )
+  assert_eq(MKXPSaveFS.path_for('Game.rxdata'), 'Game.rxdata', 'read-fallback to shipped save')
 end
 
+# --- UserData root listings hide engine-internal entries ---
 File.write(File.join(USERDATA, 'keybindings.mkxp3'), '')
 File.write(File.join(USERDATA, 'Save03.rvdata2'), 'x')
-entries = MKXPSaveFS.filter_dir_entries(Dir.entries(USERDATA))
+entries = Dir.entries(USERDATA)
 assert_false(entries.include?('keybindings.mkxp3'), 'engine file filtered')
 assert_true(entries.include?('Save03.rvdata2'), 'save file kept')
+root_list = Dir.entries("#{USERDATA}/")
+assert_false(root_list.include?('keybindings.mkxp3'), 'data_directory listing filters engine file')
+assert_true(root_list.include?('Save03.rvdata2'), 'data_directory listing keeps saves')
 
-assert_true(File.exist?('Save01.rvdata2'), 'File.exist? remapped')
-assert_true(FileTest.exist?('Save01.rvdata2'), 'FileTest.exist? remapped')
-assert_true(Dir.exist?('Save'), 'Dir.exist? save folder')
+# --- UserData root is host-owned: mkdir/rmdir no-op, never destroy ---
+assert_eq(Dir.mkdir(USERDATA), 0, 'mkdir of root no-op')
+assert_eq(Dir.mkdir("#{USERDATA}/"), 0, 'mkdir of root (trailing sep) no-op')
+assert_eq(Dir.rmdir(USERDATA), 0, 'rmdir of root no-op')
+assert_eq(Dir.delete("#{USERDATA}/"), 0, 'Dir.delete of root no-op')
+assert_true(raw_dir?(USERDATA), 'UserData survives root rmdir')
 
+assert_true(File.exist?('Save01.rvdata2'), 'File.exist? remapped bare save')
+assert_true(FileTest.exist?('Save01.rvdata2'), 'FileTest.exist? remapped bare save')
+
+# --- Portable mode is literal: the Rejuvenation PBDebug flow ---
+#   getSaveFolder: Dir.mkdir("Save Data/") unless File.exists?("Save Data/")
+#   PBDebug:       Dir.mkdir("Save Data/" + "Battle Debug Logs/") unless ...
+# Both must really create directories in the game folder, like on
+# Windows/JoiPlay.
 Dir.chdir(GAME) do
-  assert_eq(Dir.mkdir('Save'), 0, 'Dir.mkdir Save no-op')
-end
+  # rubocop:disable Lint/DeprecatedClassMethods -- the deprecated
+  # aliases are exactly what Reborn-lineage getSaveFolder/PBDebug
+  # call; exercise their wrappers.
+  assert_false(File.exists?('Save Data/'), 'portable dir absent before mkdir')
+  assert_false(Dir.exist?('Save Data/'), 'Dir.exist? portable dir absent')
+  Dir.mkdir('Save Data/')
+  assert_true(raw_dir?(File.join(GAME, 'Save Data')), 'portable dir created in game folder')
+  assert_true(Dir.exist?('Save Data'), 'Dir.exist? sees literal portable dir')
+  assert_true(Dir.exists?('Save Data'), 'Dir.exists? sees literal portable dir')
 
-# Pokemon Rejuvenation NG+ pattern: Dir.each_child("Save Data/") on a
-# folder that only exists as the remapped UserData root.
-Dir.chdir(GAME) do
-  children = []
-  Dir.each_child('Save Data/') { |entry| children << entry }
-  assert_true(children.include?('Save03.rvdata2'), 'each_child lists remapped save')
-  assert_false(children.include?('keybindings.mkxp3'), 'each_child filters engine file')
+  logdir = 'Save Data/Battle Debug Logs/'
+  assert_false(File.exists?(logdir), 'log subdir absent before mkdir')
+  # rubocop:enable Lint/DeprecatedClassMethods
+  Dir.mkdir(logdir)
+  assert_true(
+    raw_dir?(File.join(GAME, 'Save Data', 'Battle Debug Logs')),
+    'log subdir created in game folder'
+  )
 
-  enum = Dir.each_child('Save Data/')
-  assert_true(enum.to_a.include?('Save03.rvdata2'), 'each_child enumerator remapped')
+  logfile = "#{logdir}battlelog - test.txt"
+  File.open(logfile, 'a+b') { |f| f.write("x\r\n") }
+  assert_true(
+    File.exist?(File.join(GAME, 'Save Data', 'Battle Debug Logs', 'battlelog - test.txt')),
+    'log file written in game folder'
+  )
+  assert_false(
+    raw_entries(USERDATA).include?('Battle Debug Logs'),
+    'UserData untouched by portable logging'
+  )
 
-  listed = Dir.children('Save')
-  assert_true(listed.include?('Save03.rvdata2'), 'children lists remapped save')
-  assert_false(listed.include?('keybindings.mkxp3'), 'children filters engine file')
+  assert_true(
+    Dir.entries('Save Data/Battle Debug Logs').include?('battlelog - test.txt'),
+    'entries lists literal log subdir'
+  )
+  assert_true(
+    Dir.children('Save Data').include?('Battle Debug Logs'),
+    'children lists literal portable dir'
+  )
+  ngplus = []
+  Dir.each_child('Save Data/') { |entry| ngplus << entry }
+  assert_true(ngplus.include?('Battle Debug Logs'), 'each_child lists literal portable dir')
+
+  globbed = Dir.glob('Save Data/Battle Debug Logs/battlelog - *.txt')
+  assert_eq(globbed.length, 1, 'glob finds literal log file')
+  File.delete(globbed[0])
+  Dir.rmdir(logdir)
+  Dir.rmdir('Save Data')
+  assert_false(raw_entries(GAME).include?('Save Data'), 'game can remove its portable dir')
 
   plain = File.join(GAME, 'PlainDir')
-  Dir.mkdir(plain) unless File.exist?(plain)
+  Dir.mkdir(plain)
   File.write(File.join(plain, 'a.txt'), '')
   assert_true(Dir.children('PlainDir').include?('a.txt'), 'children passthrough')
   passthrough = []
   Dir.each_child('PlainDir') { |entry| passthrough << entry }
   assert_true(passthrough.include?('a.txt'), 'each_child passthrough')
 end
+
+# --- Migration: $joiplay boot moves alias-era root saves into the
+# literal portable dir ---
+reset_workspace!
+File.write(File.join(USERDATA, 'Game.rxdata'), 'active root save')
+File.write(File.join(USERDATA, 'Save 1 - Aevis - 5h 3m - 2 badges.rxdata'), 'slot')
+File.write(File.join(USERDATA, 'Game.rxdata.bak'), 'root backup')
+File.write(File.join(USERDATA, 'keybindings.mkxp3'), '')
+File.write(File.join(USERDATA, 'notes.txt'), 'not a save')
+Dir.chdir(GAME) { load_platform_compat!(true) }
+
+migrated = File.join(GAME, 'Save Data')
+assert_true(raw_dir?(migrated), 'migration created portable dir')
+assert_eq(File.read(File.join(migrated, 'Game.rxdata')), 'active root save', 'save migrated')
+assert_true(
+  raw_entries(migrated).include?('Save 1 - Aevis - 5h 3m - 2 badges.rxdata'),
+  'slot save migrated'
+)
+assert_true(raw_entries(migrated).include?('Game.rxdata.bak'), 'backup migrated')
+leftover = raw_entries(USERDATA)
+assert_false(leftover.include?('Game.rxdata'), 'root save gone after migration')
+assert_true(leftover.include?('keybindings.mkxp3'), 'engine file stays at root')
+assert_true(leftover.include?('notes.txt'), 'non-save file stays at root')
+
+# Reload with the folder in place: nothing further moves.
+File.write(File.join(USERDATA, 'Save03.rvdata2'), 'post-migration root save')
+Dir.chdir(GAME) { load_platform_compat!(true) }
+assert_true(
+  raw_entries(migrated).include?('Save03.rvdata2'),
+  'later root saves keep migrating on boot'
+)
+
+# --- Migration collision, alias-era shape: the root copy is the
+# newer alias-active save, it wins; the stale literal copy is kept
+# as *.pre-literal.bak ---
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(GAME, 'Save Data', 'Game.rxdata'), 'old literal save')
+set_mtime(File.join(GAME, 'Save Data', 'Game.rxdata'), Time.now - 86_400)
+File.write(File.join(USERDATA, 'Game.rxdata'), 'root active save')
+Dir.chdir(GAME) { load_platform_compat!(true) }
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
+  'root active save',
+  'collision: newer root copy wins'
+)
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Game.rxdata.pre-literal.bak')),
+  'old literal save',
+  'collision: stale literal copy kept as backup'
+)
+
+# --- Migration collision, post-literal shape: a stale save-shaped
+# straggler at the root must NOT displace the newer save the player
+# has since written into the literal folder ---
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(GAME, 'Save Data', 'Game.rxdata'), 'current literal save')
+File.write(File.join(USERDATA, 'Game.rxdata'), 'stale root save')
+set_mtime(File.join(USERDATA, 'Game.rxdata'), Time.now - 86_400)
+Dir.chdir(GAME) { load_platform_compat!(true) }
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
+  'current literal save',
+  'collision: newer literal save keeps canonical name'
+)
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Game.rxdata.pre-literal.bak')),
+  'stale root save',
+  'collision: stale root copy archived'
+)
+assert_false(
+  raw_entries(USERDATA).include?('Game.rxdata'),
+  'collision: root straggler removed either way'
+)
+
+# --- Migration gate: .portable marker triggers it without $joiplay ---
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(GAME, 'Save Data', '.portable'), '')
+File.write(File.join(USERDATA, 'Game.rxdata'), 'marker save')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
+  'marker save',
+  'marker-gated migration ran'
+)
+
+# --- Migration gate: non-portable boots leave root saves alone ---
+reset_workspace!
+File.write(File.join(USERDATA, 'Game.rxdata'), 'non-portable save')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'non-portable root save untouched')
+assert_false(raw_entries(GAME).include?('Save Data'), 'non-portable boot creates no portable dir')
 
 puts 'OK: test_save_fs.rb passed'
