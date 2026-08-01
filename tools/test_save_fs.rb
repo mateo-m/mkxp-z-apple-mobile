@@ -501,11 +501,15 @@ end
 # --- Case-variant writes land on the on-disk spelling ---
 # The host filesystem folds case on its own, so this section emulates
 # the device: a strict-spelling exist? (the engine's
-# _mkxp_native_orig_exist?) and a case cache (System.resolve_case_path)
-# that walks the game directory. With both in place, write-mode opens,
-# whole-file writes, unlink, and rename must land on the existing
-# spelling instead of creating a duplicate - the Rejuvenation updater
-# extracts "Battle Open.wav" over "Battle Open.WAV" this way.
+# _mkxp_native_orig_exist?) and the engine's BOOT-TIME case cache
+# (System.resolve_case_path). The cache snapshot is taken when the
+# stubs install, so files created afterwards stay invisible to it -
+# exactly like the engine, where only the live-walk fallback in
+# case_variant can resolve them. With both in place, write-mode
+# opens, whole-file writes, mkdir, unlink, and rename must land on
+# the existing spelling instead of creating a duplicate - the
+# Rejuvenation updater extracts "Battle Open.wav" over
+# "Battle Open.WAV" this way.
 def device_strict_exist?(path)
   str = path.to_s
   Dir._mkxp_orig_entries(File.dirname(str)).include?(File.basename(str))
@@ -513,29 +517,57 @@ rescue StandardError
   false
 end
 
-def device_resolve_case(rel)
-  current = '.'
-  resolved = []
-  rel.to_s.split(%r{[\\/]+}).each do |part|
-    names = Dir._mkxp_orig_entries(current)
-    match = names.find { |name| name.downcase == part.downcase }
-    return nil unless match
+def build_boot_case_cache
+  cache = {}
+  walk = nil
+  walk = lambda do |dir, rel|
+    Dir._mkxp_orig_entries(dir).each do |name|
+      next if ['.', '..'].include?(name)
 
-    resolved << match
-    current = File.join(current, match)
+      path = rel.empty? ? name : "#{rel}/#{name}"
+      cache[path.downcase] = path
+      full = File.join(dir, name)
+      walk.call(full, path) if File._mkxp_orig_directory(full)
+    end
   end
-  resolved.join('/')
-rescue StandardError
-  nil
+  walk.call('.', '')
+  cache
 end
 
 def with_device_case_semantics
+  boot_cache = build_boot_case_cache
   File.define_singleton_method(:_mkxp_native_orig_exist?) { |p| device_strict_exist?(p) }
-  System.define_singleton_method(:resolve_case_path) { |p| device_resolve_case(p) }
+  System.define_singleton_method(:resolve_case_path) do |rel|
+    boot_cache[rel.to_s.gsub('\\', '/').downcase]
+  end
   yield
 ensure
   File.singleton_class.send(:remove_method, :_mkxp_native_orig_exist?)
   System.singleton_class.send(:remove_method, :resolve_case_path)
+end
+
+# Shadows the raw-syscall aliases with recorders so the assertions
+# can see the exact paths the wrappers hand down. The host filesystem
+# folds case, so disk state alone cannot prove the wiring.
+RECORDED_RAW_METHODS = [
+  [File, :_mkxp_orig_open], [File, :_mkxp_orig_delete],
+  [File, :_mkxp_orig_rename], [Dir, :_mkxp_orig_mkdir]
+].freeze
+
+def with_recorded_raw_paths
+  records = []
+  originals = {}
+  RECORDED_RAW_METHODS.each do |receiver, name|
+    original = receiver.method(name)
+    originals[[receiver, name]] = original
+    receiver.define_singleton_method(name) do |*args, &blk|
+      records << args[0].to_s
+      original.call(*args, &blk)
+    end
+  end
+  yield records
+ensure
+  originals.each { |(receiver, name), original| receiver.define_singleton_method(name, original) }
 end
 
 def assert_write_mode_classification
@@ -549,11 +581,16 @@ def assert_write_mode_classification
     'integer create flags are a write mode'
   )
   assert_false(MKXPSaveFS.write_mode?(File::RDONLY), 'RDONLY is not a write mode')
+  assert_false(
+    MKXPSaveFS.write_mode?('r:windows-1252'),
+    'encoding suffix letters do not classify a read as a write'
+  )
+  assert_true(MKXPSaveFS.write_mode?('w:utf-8'), 'write mode with encoding suffix')
+  assert_true(MKXPSaveFS.write_mode?({ :mode => 'wb' }), 'keyword-style mode hash')
+  assert_false(MKXPSaveFS.write_mode?({ :mode => 'rb' }), 'keyword-style read hash')
 end
 
-# The host filesystem folds case on its own, so disk-level checks
-# alone would pass with or without the resolution. These pin the
-# resolved paths themselves.
+# Boot-cache-resolvable spellings (the seed file predates the stubs).
 def assert_case_resolution
   assert_eq(
     MKXPSaveFS.resolve_case_target('Audio/BGS/Battle Open.wav'),
@@ -568,7 +605,7 @@ def assert_case_resolution
   assert_eq(
     MKXPSaveFS.resolve_case_target('/outside/the/game/File.wav'),
     '/outside/the/game/File.wav',
-    'absolute path outside the game dir stays literal'
+    'absolute path outside the known roots stays literal'
   )
   assert_eq(
     MKXPSaveFS.resolve_case_target('Audio/BGS/Battle Open.WAV'),
@@ -589,12 +626,11 @@ end
 # Write-mode File.open is the unit under test here, so the
 # File.binwrite style preference does not apply.
 # rubocop:disable Style/FileWrite
-def assert_case_variant_writes
+def assert_case_variant_writes(records)
   File.open('Audio/BGS/Battle Open.wav', 'wb') { |f| f.write('new') }
-  assert_eq(
-    raw_entries('Audio/BGS').sort - ['.', '..'],
-    ['Battle Open.WAV'],
-    'case-variant write leaves one file'
+  assert_true(
+    records.include?('Audio/BGS/Battle Open.WAV'),
+    'wrapper handed the resolved spelling to the raw open'
   )
   assert_eq(read_raw('Audio/BGS/Battle Open.WAV'), 'new', 'case-variant write reached the file')
 
@@ -603,47 +639,98 @@ def assert_case_variant_writes
 
   if File.respond_to?(:_mkxp_orig_binwrite)
     File.binwrite('Audio/BGS/Battle Open.wav', 'bin')
-    assert_eq(
-      raw_entries('Audio/BGS').sort - ['.', '..'],
-      ['Battle Open.WAV'],
-      'binwrite keeps one file'
-    )
+    assert_eq(read_raw('Audio/BGS/Battle Open.WAV'), 'bin', 'binwrite reached the file')
   end
 
   File.open('Audio/BGS/Fresh.wav', 'wb') { |f| f.write('fresh') }
   assert_true(
-    raw_entries('Audio/BGS').include?('Fresh.wav'),
-    'fresh name creates the literal file'
+    records.include?('Audio/BGS/Fresh.wav'),
+    'fresh name stays literal through the raw open'
+  )
+end
+
+# Files created after boot are invisible to the cache stub; only the
+# live walk can resolve them.
+def assert_session_created_resolution
+  File.open('Audio/BGS/New Track.WAV', 'wb') { |f| f.write('x') }
+  assert_eq(
+    MKXPSaveFS.resolve_case_target('Audio/BGS/new track.wav'),
+    'Audio/BGS/New Track.WAV',
+    'session-created file resolves through the live walk'
+  )
+  assert_eq(
+    MKXPSaveFS.resolve_case_target('audio/bgs/brand new.ogg'),
+    'Audio/BGS/brand new.ogg',
+    'new file in a case-variant directory resolves its parents'
   )
 end
 # rubocop:enable Style/FileWrite
 
-def assert_case_variant_removals
+def assert_case_variant_removals(records)
   # The updater's pre-extract unlink passes the new spelling.
   File.unlink('Audio/BGS/Battle Open.wav')
-  assert_false(
-    raw_entries('Audio/BGS').include?('Battle Open.WAV'),
+  assert_true(
+    records.include?('Audio/BGS/Battle Open.WAV'),
     'case-variant unlink removed the on-disk file'
   )
 
   File._mkxp_orig_open('Audio/BGS/Old Name.WAV', 'wb') { |f| f.write('x') }
   File.rename('Audio/BGS/Old Name.wav', 'Audio/BGS/Renamed.wav')
   assert_true(
+    records.include?('Audio/BGS/Old Name.WAV'),
+    'session-created rename source resolved through the live walk'
+  )
+  assert_true(
     raw_entries('Audio/BGS').include?('Renamed.wav'),
     'case-variant rename moved the on-disk file'
   )
 end
 
+def assert_dir_case_resolution(records)
+  FileUtils.mkdir_p('audio/bgs/deeper')
+  assert_true(
+    records.include?('Audio/BGS/deeper'),
+    'mkdir_p extends the on-disk tree instead of duplicating it'
+  )
+end
+
+def assert_userdata_case_resolution
+  File._mkxp_orig_open(File.join(USERDATA, 'Save09.rvdata2'), 'wb') { |f| f.write('x') }
+  assert_eq(
+    MKXPSaveFS.resolve_case_target(File.join(USERDATA, 'SAVE09.RVDATA2')),
+    File.join(USERDATA, 'Save09.rvdata2'),
+    'absolute case-variant under UserData resolves'
+  )
+end
+
+def assert_chdir_anchoring
+  FileUtils.mkdir_p('sub')
+  File._mkxp_orig_open('sub/Thing.WAV', 'wb') { |f| f.write('x') }
+  Dir.chdir('sub') do
+    assert_eq(
+      MKXPSaveFS.resolve_case_target('thing.wav'),
+      'Thing.WAV',
+      'relative resolution follows the working directory after chdir'
+    )
+  end
+end
+
 reset_workspace!
 Dir.chdir(GAME) { load_platform_compat!(false) }
 Dir.chdir(GAME) do
+  FileUtils.mkdir_p('Audio/BGS')
+  File._mkxp_orig_open('Audio/BGS/Battle Open.WAV', 'wb') { |f| f.write('old') }
   with_device_case_semantics do
     assert_write_mode_classification
-    FileUtils.mkdir_p('Audio/BGS')
-    File._mkxp_orig_open('Audio/BGS/Battle Open.WAV', 'wb') { |f| f.write('old') }
     assert_case_resolution
-    assert_case_variant_writes
-    assert_case_variant_removals
+    with_recorded_raw_paths do |records|
+      assert_case_variant_writes(records)
+      assert_session_created_resolution
+      assert_case_variant_removals(records)
+      assert_dir_case_resolution(records)
+    end
+    assert_userdata_case_resolution
+    assert_chdir_anchoring
   end
 end
 

@@ -285,6 +285,8 @@ unless defined?(MKXPSaveFS)
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
     PORTABLE_MARKER = "#{PORTABLE_SAVE_DIR}/.portable".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
+    # Rooted path: "/...", "\...", or a Windows drive prefix.
+    ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
 
     def root
       return @mkxp_save_root_memo if defined?(@mkxp_save_root_memo) && @mkxp_save_root_memo
@@ -385,7 +387,7 @@ unless defined?(MKXPSaveFS)
 
       candidate = path.to_s
       return nil if candidate.empty?
-      return nil if candidate =~ %r{\A(?:[A-Za-z]:[\\/]|[\\/])}
+      return nil if candidate =~ ABSOLUTE_PATH_RE
 
       resolved = System.resolve_case_path(candidate)
       return nil if resolved.nil? || resolved == candidate
@@ -426,34 +428,109 @@ unless defined?(MKXPSaveFS)
       end
     end
 
-    # On-disk spelling for a mismatched-case path, or nil. The
-    # engine's case cache is game-relative, so absolute paths only
-    # resolve when they point inside the game directory (the cwd).
+    # On-disk spelling for a mismatched-case path, or nil when the
+    # spelling already matches or nothing resolves. Absolute paths
+    # resolve when they point inside the game directory or inside
+    # UserData. The engine's boot-time case cache answers first; a
+    # live directory walk then covers what the cache cannot know -
+    # files the game created this session (a self-updater extracts
+    # files and touches them again under another spelling).
     def case_variant(str)
-      prefix = nil
-      rel = str
-      if str =~ %r{\A(?:[A-Za-z]:[\\/]|[\\/])}
-        base = "#{File.expand_path('.')}/"
-        return nil unless str.length > base.length && str[0, base.length] == base
+      prefix, rel = split_case_prefix(str)
+      return nil if rel.nil?
 
-        prefix = base
-        rel = str[base.length..-1]
+      fixed = nil
+      # The cache is game-root-relative: valid for absolute paths
+      # under the game root, and for relative paths only while the
+      # working directory IS the game root.
+      fixed = casefold_fallback(rel) if prefix == game_root_prefix || (prefix.nil? && cwd_at_game_root?)
+      if fixed.nil?
+        walked = live_case_walk(rel, prefix ? prefix[0, prefix.length - 1] : '.')
+        fixed = walked unless walked == rel
       end
-      fixed = casefold_fallback(rel)
       return nil unless fixed
 
       prefix ? "#{prefix}#{fixed}" : fixed
     end
 
+    # [prefix, rel] split of a path against the known roots. prefix
+    # is nil for relative paths; both are nil when an absolute path
+    # points outside every known root.
+    def split_case_prefix(str)
+      return [nil, str] unless str =~ ABSOLUTE_PATH_RE
+
+      [game_root_prefix, userdata_prefix].each do |base|
+        next unless base
+        next unless str.length > base.length && str[0, base.length] == base
+
+        return [base, str[base.length..-1]]
+      end
+      [nil, nil]
+    end
+
+    def userdata_prefix
+      base = root
+      base ? "#{base}/" : nil
+    end
+
+    def cwd_at_game_root?
+      "#{File.expand_path('.')}/" == game_root_prefix
+    rescue StandardError
+      true
+    end
+
+    # Case-insensitive component walk against the live filesystem,
+    # anchored at base. A component with an on-disk case variant
+    # takes that spelling; a component with no match stays literal
+    # (it is about to be created). Returns the input unchanged when
+    # nothing differs.
+    def live_case_walk(rel, base)
+      current = base
+      rel.split(%r{[\\/]+}).map do |part|
+        spelled = live_component_spelling(current, part)
+        current = "#{current}/#{spelled}"
+        spelled
+      end.join('/')
+    end
+
+    def live_component_spelling(dir, part)
+      return part if part.empty? || part == '.' || part == '..'
+
+      names = Dir._mkxp_orig_entries(dir)
+      return part if names.include?(part)
+
+      lower = part.downcase
+      names.find { |name| name.downcase == lower } || part
+    rescue StandardError
+      part
+    end
+
+    # The engine starts every session in the game directory, and this
+    # file loads before any game script can chdir away. The captured
+    # spelling anchors absolute-path case resolution to the game root
+    # even when a game changes the working directory later. The
+    # capture call sits at the end of this file, outside the module
+    # guard, so test harnesses that reload the file refresh it too.
+    def capture_game_root!
+      @mkxp_game_root_prefix = "#{File.expand_path('.')}/"
+    end
+
+    def game_root_prefix
+      @mkxp_game_root_prefix
+    end
+
     # True when an open mode creates, truncates, appends, or opens
     # for update - every case where the open must land on the
     # existing on-disk spelling instead of creating a duplicate.
+    # Encoding suffixes ("r:windows-1252") stay out of the check, and
+    # a keyword-style {mode: ...} hash contributes its :mode value.
     def write_mode?(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
       case mode
       when Integer
         (mode & (File::WRONLY | File::RDWR | File::APPEND | File::CREAT)) != 0
       when String, Symbol
-        mode.to_s =~ /[wa+]/ ? true : false
+        mode.to_s.split(':', 2)[0] =~ /[wa+]/ ? true : false
       else
         false
       end
@@ -463,6 +540,22 @@ unless defined?(MKXPSaveFS)
       return path unless write_mode?(mode)
 
       resolve_case_target(path)
+    end
+
+    # Shared File.open / File.new front: save remap first, then the
+    # write-mode case resolution.
+    def open_target(path, mode)
+      write_casefold(path_for(path), mode)
+    end
+
+    # Errno::ENOENT retry target for the open wrappers. The same
+    # resolution the write side uses, so absolute in-game paths and
+    # session-created files resolve for reads too.
+    def read_fallback_target(path)
+      fixed = case_variant(path.to_s)
+      fixed ? path_for(fixed) : nil
+    rescue StandardError
+      nil
     end
 
     def glob_for(pattern)
@@ -959,23 +1052,21 @@ class << File
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
   def open(path, *args, &block)
-    target = MKXPSaveFS.write_casefold(MKXPSaveFS.path_for(path), args[0])
-    _mkxp_orig_open(target, *args, &block)
+    _mkxp_orig_open(MKXPSaveFS.open_target(path, args[0]), *args, &block)
   rescue Errno::ENOENT
-    fixed = MKXPSaveFS.casefold_fallback(path)
+    fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_open(MKXPSaveFS.path_for(fixed), *args, &block)
+    _mkxp_orig_open(fixed, *args, &block)
   end
 
   def new(path, *args)
-    target = MKXPSaveFS.write_casefold(MKXPSaveFS.path_for(path), args[0])
-    _mkxp_orig_new(target, *args)
+    _mkxp_orig_new(MKXPSaveFS.open_target(path, args[0]), *args)
   rescue Errno::ENOENT
-    fixed = MKXPSaveFS.casefold_fallback(path)
+    fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_new(MKXPSaveFS.path_for(fixed), *args)
+    _mkxp_orig_new(fixed, *args)
   end
 
   def delete(*paths)
@@ -1257,7 +1348,9 @@ class << Dir
     target = MKXPSaveFS.path_for(path)
     return 0 if MKXPSaveFS.save_root_target?(target)
 
-    _mkxp_orig_mkdir(target, *args)
+    # Case-resolve so FileUtils.mkdir_p of "audio/bgs" extends the
+    # on-disk "Audio/BGS" tree instead of creating a duplicate one.
+    _mkxp_orig_mkdir(MKXPSaveFS.resolve_case_target(target), *args)
   end
 
   alias _mkxp_orig_rmdir rmdir unless method_defined?(:_mkxp_orig_rmdir)
@@ -1266,7 +1359,7 @@ class << Dir
     target = MKXPSaveFS.path_for(path)
     return 0 if MKXPSaveFS.save_root_target?(target)
 
-    _mkxp_orig_rmdir(target)
+    _mkxp_orig_rmdir(MKXPSaveFS.resolve_case_target(target))
   end
   alias delete rmdir
   alias unlink rmdir
@@ -1730,13 +1823,9 @@ network_off = defined?(System) &&
               System.respond_to?(:network_enabled?) &&
               !System.network_enabled?
 if network_off
-  # Force the socket ext to initialize now if this VM carries it:
-  # Ruby 3.1's statically-linked exts initialize lazily on first
-  # require, so the classes don't exist yet at preload time. On the
-  # 1.8/1.9 VMs without the ext registered, the require is absorbed
-  # by the interceptor above and the guards below stay no-ops.
-  require 'socket'
-
+  # The eager static extension load above already initialized the
+  # socket classes on the VMs that carry them. On the 1.8/1.9 VMs
+  # the classes stay absent and the guards below are no-ops.
   if defined?(TCPSocket)
     class << TCPSocket
       def open(*_args)
@@ -1784,5 +1873,6 @@ end
 # JoiPlay-compat toggle, or a shipped Save Data/.portable marker.
 # Games that stay non-portable keep their saves at the UserData root
 # untouched.
+MKXPSaveFS.capture_game_root!
 portable_boot = $joiplay || MKXPSaveFS.orig_exist?(MKXPSaveFS::PORTABLE_MARKER)
 MKXPSaveFS.migrate_portable_saves! if portable_boot
