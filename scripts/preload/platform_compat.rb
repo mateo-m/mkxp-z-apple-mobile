@@ -1394,8 +1394,34 @@ end
 # 2. Everything else becomes IOS::NullStub, which silently absorbs any
 #    method call and any nested constant lookup. This covers library
 #    namespaces like FmodEx, FmodEx::System, etc.
+#
+# NullStub is also raisable. Games sometimes raise a typo'd nested
+# constant that only resolves on iOS (Daybreak's downloader does
+# `raise Berka::NetErrorErr::ConIn`; `ConIn` has no error suffix, so
+# it resolves to NullStub). What `raise <stub>` does depends on the
+# VM:
+#
+# - Ruby 1.9+ coerces the argument through `to_str` first, so the
+#   stub raises as a RuntimeError with an empty message. Ugly, but
+#   not fatal.
+# - Ruby 1.8 accepts only real Strings, then requires the argument
+#   to respond to `exception`. method_missing does not satisfy that
+#   check, so the script's own raise dies with a fatal
+#   "exception class/object expected" TypeError.
+# - The two-argument form `raise <stub>, msg` requires `exception`
+#   on every VM.
+#
+# The explicit `exception` hook below makes the 1.8 and two-argument
+# paths produce a plain StandardError with a readable message.
 module IOS
   class NullStub
+    # Raise protocol hook: `raise NullStub` calls exception() and
+    # `raise NullStub, msg` calls exception(msg) on every VM we
+    # target (1.8 / 1.9 / 3.x).
+    def self.exception(message = nil)
+      StandardError.new(message || 'a Win32-only feature is unavailable on this platform')
+    end
+
     def self.method_missing(_name, *_args)
       self
     end
@@ -1425,6 +1451,13 @@ module IOS
 
     def self.inspect
       '#<IOS::NullStub>'
+    end
+
+    # Instance-level twin of the raise protocol hook. NullStub.new
+    # returns the class, so instances are rare - but a game can still
+    # obtain one (e.g. via allocate) and raise it.
+    def exception(message = nil)
+      self.class.exception(message)
     end
 
     def method_missing(_name, *_args)
