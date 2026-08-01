@@ -97,48 +97,12 @@ load_platform_compat!
 base = MKXPSaveFS.root
 assert_eq(base, USERDATA, 'root')
 
-# --- Bare working-directory save filenames remap into UserData ---
-assert_eq(
-  MKXPSaveFS.path_for('Save01.rvdata2'),
-  File.join(USERDATA, 'Save01.rvdata2'),
-  'bare save filename'
-)
-twice = MKXPSaveFS.path_for(MKXPSaveFS.path_for('Save01.rvdata2'))
-assert_eq(twice, File.join(USERDATA, 'Save01.rvdata2'), 'idempotent path_for')
-
-# --- Everything else is literal ---
-assert_eq(
-  MKXPSaveFS.path_for('Save/Save01.rvdata2'),
-  'Save/Save01.rvdata2',
-  'save-dir-prefixed path is literal'
-)
-assert_eq(
-  MKXPSaveFS.path_for('Save Data/Save01.rvdata2'),
-  'Save Data/Save01.rvdata2',
-  'portable path is literal'
-)
-assert_eq(MKXPSaveFS.path_for('Save'), 'Save', 'save dir name is literal')
-assert_eq(MKXPSaveFS.path_for('Data/Map001.rvdata2'), 'Data/Map001.rvdata2', 'non-save passthrough')
-assert_eq(MKXPSaveFS.path_for('/etc/passwd'), '/etc/passwd', 'absolute passthrough')
-
-# --- Glob: only bare save-file patterns remap ---
-File.write(File.join(USERDATA, 'Save01.rvdata2'), 'x')
-assert_eq(MKXPSaveFS.glob_for('Save Data/*.rvdata2'), nil, 'portable glob is literal')
-assert_eq(
-  MKXPSaveFS.glob_for('*.rvdata2'),
-  File.join(USERDATA, '*.rvdata2'),
-  'bare glob remap'
-)
-globbed = MKXPSaveFS.normalize_glob_results(
-  [File.join(USERDATA, 'Save01.rvdata2')],
-  '*.rvdata2'
-)
-assert_eq(globbed, ['Save01.rvdata2'], 'glob results relative to root')
-
-# Shipped starter save in the game folder wins while UserData has no copy.
-File.write(File.join(GAME, 'Game.rxdata'), 'shipped')
-Dir.chdir(GAME) do
-  assert_eq(MKXPSaveFS.path_for('Game.rxdata'), 'Game.rxdata', 'read-fallback to shipped save')
+# --- Every path resolves literally ---
+[
+  'Save01.rvdata2', 'Save/Save01.rvdata2', 'Save Data/Save01.rvdata2',
+  'Save', 'Data/Map001.rvdata2', '/etc/passwd'
+].each do |path|
+  assert_eq(MKXPSaveFS.path_for(path), path, "literal path_for: #{path}")
 end
 
 # --- UserData root listings hide engine-internal entries ---
@@ -157,9 +121,6 @@ assert_eq(Dir.mkdir("#{USERDATA}/"), 0, 'mkdir of root (trailing sep) no-op')
 assert_eq(Dir.rmdir(USERDATA), 0, 'rmdir of root no-op')
 assert_eq(Dir.delete("#{USERDATA}/"), 0, 'Dir.delete of root no-op')
 assert_true(raw_dir?(USERDATA), 'UserData survives root rmdir')
-
-assert_true(File.exist?('Save01.rvdata2'), 'File.exist? remapped bare save')
-assert_true(FileTest.exist?('Save01.rvdata2'), 'FileTest.exist? remapped bare save')
 
 # --- Portable mode is literal: the Rejuvenation PBDebug flow ---
 #   getSaveFolder: Dir.mkdir("Save Data/") unless File.exists?("Save Data/")
@@ -319,45 +280,95 @@ Dir.chdir(GAME) { load_platform_compat!(false) }
 assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'non-portable root save untouched')
 assert_false(raw_entries(GAME).include?('Save Data'), 'non-portable boot creates no portable dir')
 
-# --- Probe/enumeration gap closure ---
-# FileTest.exists? routes through the bare-name remap like every
-# other existence probe, and bare save globs see BOTH the UserData
-# remap and shipped/imported saves in the game folder.
+# --- Legacy-save recovery ---
+# Earlier builds redirected bare working-directory save names into
+# UserData, so upgraded installs have saves stranded at the UserData
+# root. The first bare-name access (probe, read, glob, load_data)
+# moves the stranded copy into the game folder; after that every
+# operation is literal. Modern games address UserData by absolute
+# path and never trigger it.
 reset_workspace!
 Dir.chdir(GAME) { load_platform_compat!(false) }
-File.write(File.join(USERDATA, 'Game.rxdata'), 'userdata copy')
-File.write(File.join(GAME, 'Game.rxdata'), 'shipped duplicate')
-File.write(File.join(GAME, 'Save02.rxdata'), 'shipped only')
+File.write(File.join(USERDATA, 'Game.rxdata'), 'stranded save')
+File.write(File.join(USERDATA, 'keybindings.mkxp3'), '')
 Dir.chdir(GAME) do
-  assert_true(FileTest.exists?('Game.rxdata'), 'FileTest.exists? sees remapped bare save')
-  assert_true(FileTest.exists?('Save02.rxdata'), 'FileTest.exists? read fallback')
+  assert_true(File.exist?('Game.rxdata'), 'probe recovers the stranded save')
+  assert_true(raw_entries(GAME).include?('Game.rxdata'), 'save now lives in the game folder')
+  assert_false(raw_entries(USERDATA).include?('Game.rxdata'), 'root copy gone')
+  assert_eq(File.read('Game.rxdata'), 'stranded save', 'recovered content intact')
 
-  merged = Dir.glob('*.rxdata')
-  assert_eq(merged.sort, ['Game.rxdata', 'Save02.rxdata'], 'bare glob merges both sides')
-  assert_eq(merged.length, 2, 'bare glob dedupes duplicated name')
-  assert_eq(merged[0], 'Game.rxdata', 'UserData side listed first')
+  # New writes are literal from the first byte.
+  File.write('Save05.rxdata', 'fresh')
+  assert_true(raw_entries(GAME).include?('Save05.rxdata'), 'new save lands in the game folder')
+  assert_false(raw_entries(USERDATA).include?('Save05.rxdata'), 'UserData untouched by new writes')
+  assert_eq(File.binread('Save05.rxdata'), 'fresh', 'binread agrees with the write')
+end
 
-  yielded = []
-  block_result = Dir.glob('*.rxdata') { |entry| yielded << entry }
-  assert_eq(yielded.sort, ['Game.rxdata', 'Save02.rxdata'], 'block form yields merged names')
-  assert_eq(block_result, nil, 'block form returns nil')
+# Recovery through glob: a bare save pattern sweeps matching stranded
+# saves in before the literal glob, so slot enumeration and the open
+# that follows agree. Engine-internal files never move.
+File.write(File.join(USERDATA, 'Save06.rxdata'), 'stranded slot')
+Dir.chdir(GAME) do
+  listed = Dir.glob('*.rxdata')
+  assert_true(listed.include?('Save06.rxdata'), 'glob lists the recovered slot')
+  assert_true(raw_entries(GAME).include?('Save06.rxdata'), 'glob recovery moved the file')
+  assert_eq(File.read('Save06.rxdata'), 'stranded slot', 'glob-recovered content intact')
 
-  # Each merged name resolves per file: the duplicated name opens the
-  # UserData copy, the shipped-only name falls back to the game folder.
-  assert_eq(File.read('Game.rxdata'), 'userdata copy', 'duplicated name resolves to UserData')
-  assert_eq(File.read('Save02.rxdata'), 'shipped only', 'shipped-only name resolves to game folder')
-  # rubocop:disable Style/FileRead -- deliberately comparing the
-  # File.open path against File.read's resolution.
-  assert_eq(File.open('Game.rxdata', 'rb', &:read), 'userdata copy', 'File.open agrees with File.read')
-  # rubocop:enable Style/FileRead
+  Dir.glob('*')
+  assert_true(
+    raw_entries(USERDATA).include?('keybindings.mkxp3'),
+    'bare * glob cannot drag engine files into the game folder'
+  )
+end
 
-  # Whole-file writes of bare save names land where File.open would.
-  File.write('Save03.rxdata', 'written')
-  assert_true(raw_entries(USERDATA).include?('Save03.rxdata'), 'File.write bare save goes to UserData')
-  assert_false(raw_entries(GAME).include?('Save03.rxdata'), 'File.write leaves game folder alone')
-  assert_eq(File.binread('Save03.rxdata'), 'written', 'File.binread resolves like File.open')
+# Recovery through load_data (how ancient games load saves).
+File.write(File.join(USERDATA, 'Save07.rxdata'), 'loadable')
+Dir.chdir(GAME) do
+  load_data('Save07.rxdata')
+  assert_true(raw_entries(GAME).include?('Save07.rxdata'), 'load_data recovers the stranded save')
+end
 
-  # Non-save patterns stay fully literal.
+# Collision: the newer copy keeps the canonical name; the loser is
+# kept as *.pre-literal.bak. Shipped starter save vs real progress:
+reset_workspace!
+Dir.chdir(GAME) { load_platform_compat!(false) }
+File.write(File.join(GAME, 'Game.rxdata'), 'shipped starter')
+set_mtime(File.join(GAME, 'Game.rxdata'), Time.now - 86_400)
+File.write(File.join(USERDATA, 'Game.rxdata'), 'real progress')
+Dir.chdir(GAME) do
+  assert_eq(File.read('Game.rxdata'), 'real progress', 'newer stranded save wins the name')
+  assert_eq(
+    File._mkxp_orig_open('Game.rxdata.pre-literal.bak', 'rb', &:read),
+    'shipped starter',
+    'starter save kept as backup'
+  )
+end
+
+# Reverse collision: a stale root straggler must not displace the
+# save the player has since written into the game folder.
+reset_workspace!
+Dir.chdir(GAME) { load_platform_compat!(false) }
+File.write(File.join(GAME, 'Game.rxdata'), 'current save')
+File.write(File.join(USERDATA, 'Game.rxdata'), 'stale straggler')
+set_mtime(File.join(USERDATA, 'Game.rxdata'), Time.now - 86_400)
+Dir.chdir(GAME) do
+  assert_eq(File.read('Game.rxdata'), 'current save', 'current save keeps the name')
+  assert_true(raw_entries(GAME).include?('Game.rxdata.pre-literal.bak'), 'straggler archived')
+  assert_false(raw_entries(USERDATA).include?('Game.rxdata'), 'root straggler removed')
+end
+
+# Modern games: absolute UserData paths never trigger recovery.
+reset_workspace!
+Dir.chdir(GAME) { load_platform_compat!(false) }
+modern = File.join(USERDATA, 'Game.rvdata2')
+File.write(modern, 'modern save')
+Dir.chdir(GAME) do
+  assert_true(File.exist?(modern), 'absolute UserData probe works')
+  assert_eq(File.read(modern), 'modern save', 'absolute UserData read works')
+  assert_true(raw_entries(USERDATA).include?('Game.rvdata2'), 'modern save stays in UserData')
+  assert_false(raw_entries(GAME).include?('Game.rvdata2'), 'modern save never moves')
+
+  # Non-save globs stay fully literal.
   File.write(File.join(GAME, 'readme.txt'), '')
   assert_eq(Dir.glob('*.txt'), ['readme.txt'], 'non-save glob passthrough')
 end
@@ -415,12 +426,7 @@ def assert_probes(probes, path, expected, label)
   end
 end
 
-# `cwd_listed: false` documents the one deliberate asymmetry: a bare
-# save filename remaps into UserData, and raw listings of the game
-# folder do NOT show it (a game enumerating its own install - a
-# self-updater, say - must not see phantom files). Save discovery
-# still agrees through every probe, reader, and save-shaped glob.
-def assert_lifecycle_consistent(file_path, label, cwd_listed = true)
+def assert_lifecycle_consistent(file_path, label)
   dir_path = File.dirname(file_path)
   basename = File.basename(file_path)
   content = "payload for #{label}"
@@ -435,7 +441,7 @@ def assert_lifecycle_consistent(file_path, label, cwd_listed = true)
   end
   File.mtime(file_path)
 
-  assert_listings(dir_path, basename, cwd_listed, file_path, label)
+  assert_listings(dir_path, basename, label)
 
   File.delete(file_path)
   assert_probes(FILE_PROBES, file_path, false, "#{label} after delete")
@@ -444,27 +450,21 @@ def assert_lifecycle_consistent(file_path, label, cwd_listed = true)
   end
 end
 
-def assert_listings(dir_path, basename, expected, file_path, label)
+def assert_listings(dir_path, basename, label)
   DIR_LISTERS.each do |name, lister|
-    assert_eq(
-      lister.call(dir_path).include?(basename), expected,
-      "#{label}: #{name} listing == #{expected}"
+    assert_true(
+      lister.call(dir_path).include?(basename),
+      "#{label}: #{name} lists the write"
     )
   end
   globbed = Dir.glob(File.join(dir_path, '*'))
-  assert_eq(
-    globbed.any? { |entry| File.basename(entry) == basename }, expected,
-    "#{label}: glob array form listing == #{expected}"
+  assert_true(
+    globbed.any? { |entry| File.basename(entry) == basename },
+    "#{label}: glob array form lists the write"
   )
   block_glob = []
   Dir.glob(File.join(dir_path, '*')) { |entry| block_glob << entry }
   assert_eq(block_glob, globbed, "#{label}: glob block form matches array form")
-  return if expected
-
-  assert_true(
-    Dir.glob("*#{File.extname(file_path)}").include?(basename),
-    "#{label}: save-shaped glob still finds the write"
-  )
 end
 
 def assert_dir_lifecycle_consistent(dir_path, label)
@@ -481,8 +481,8 @@ end
 reset_workspace!
 Dir.chdir(GAME) { load_platform_compat!(false) }
 Dir.chdir(GAME) do
-  # Bare save filename (the one shape that remaps into UserData).
-  assert_lifecycle_consistent('Matrix.rxdata', 'bare save name', false)
+  # Bare save filename - fully literal, no asymmetry left.
+  assert_lifecycle_consistent('Matrix.rxdata', 'bare save name')
 
   # The portable dir, a subdirectory of it, and files inside both.
   assert_dir_lifecycle_consistent('Save Data', 'portable dir')

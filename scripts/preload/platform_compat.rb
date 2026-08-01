@@ -274,14 +274,15 @@ unless defined?(MKXPSaveFS)
   module MKXPSaveFS
     module_function
 
-    # Portable-mode save folder (Reborn/Rejuvenation convention). It
-    # is LITERAL: a real, game-managed directory in the game folder,
-    # exactly like on Windows and JoiPlay. The game creates, lists,
-    # and deletes it itself; the engine does not remap it. Only two
-    # things get remapped into UserData: bare save filenames written
-    # to the working directory (decade-old Essentials builds), and
-    # nothing else - System.data_directory / faked env vars already
-    # point non-portable games at UserData directly.
+    # Everything inside the game folder is literal. Games create,
+    # list, write, and delete their own files with no interception;
+    # UserData is involved only when a game addresses it itself
+    # (System.data_directory, faked env vars). The two constants
+    # below serve one purpose: the alias-era migration
+    # (migrate_portable_saves!) that moves saves stranded by earlier
+    # builds into the portable folder those games read. They gate no
+    # runtime behavior and can go once no install carries stranded
+    # saves.
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
     PORTABLE_MARKER = "#{PORTABLE_SAVE_DIR}/.portable".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
@@ -326,7 +327,9 @@ unless defined?(MKXPSaveFS)
       entries.reject { |entry| engine_internal_entry?(entry) }
     end
 
-    # Bare save filenames only (legacy behaviour).
+    # Bare working-directory save filenames - the shape decade-old
+    # Essentials builds use, and the only shape the legacy-save
+    # recovery below reacts to.
     def candidate?(path)
       return false unless path.is_a?(String)
 
@@ -348,32 +351,77 @@ unless defined?(MKXPSaveFS)
       false
     end
 
-    # Remap bare working-directory save filenames ("Game.rxdata",
-    # "Save01.rvdata2") into per-game UserData/. Everything else -
-    # including the portable "Save Data/" folder and any path inside
-    # it - resolves literally, exactly as on Windows. When the
-    # remapped file is missing but the original relative path exists
-    # under Game/ (shipped starter saves), fall back to the original.
+    # Every path resolves literally - a game's writes inside its own
+    # folder land exactly where Windows would put them. This helper
+    # stays as the single file-API front for one compatibility side
+    # effect: earlier builds redirected bare working-directory save
+    # filenames ("Game.rxdata") into UserData, so affected installs
+    # have saves stranded at the UserData root. The first access of
+    # such a name moves the stranded copy back into the working
+    # directory; on a collision the newer mtime keeps the canonical
+    # name and the loser stays as *.pre-literal.bak. Modern games
+    # address UserData saves by absolute path, never match the
+    # bare-name gate, and keep their files where they are. Delete
+    # this recovery once no install carries stranded saves.
     def path_for(path)
-      return path unless path.is_a?(String)
+      recover_legacy_save(path)
+      path
+    end
 
-      stripped = path.strip
-      return path if stripped.empty?
+    def recover_legacy_save(path)
+      return unless path.is_a?(String)
 
-      normalized = normalize_path(stripped)
-      return path if normalized =~ /\A[A-Za-z]:/
+      normalized = normalize_path(path)
+      return unless candidate?(normalized)
 
       base = root
-      return path unless base
-      return path unless candidate?(normalized)
+      return unless base
+      # Degenerate host config: data dir pointing at the game folder.
+      return if File.expand_path(base) == File.expand_path('.')
 
-      remapped = "#{base}/#{normalized}"
-      return remapped if orig_exist?(remapped)
-      return normalized if orig_exist?(normalized)
+      stranded = "#{base}/#{normalized}"
+      return unless File._mkxp_orig_file(stranded)
 
-      remapped
+      migrate_save_file(stranded, normalized)
     rescue StandardError
-      path
+      nil
+    end
+
+    # Bare glob patterns enumerate the working directory (ancient
+    # slot pickers use "Save*.rxdata"); recover every stranded root
+    # save the pattern would match before the literal glob runs, so
+    # enumeration and open agree on one folder. Gated per name on the
+    # save shape so a bare "*" cannot drag engine-internal UserData
+    # files into the game folder.
+    def recover_saves_for_glob(pattern)
+      patterns = pattern.is_a?(Array) ? pattern : [pattern]
+      patterns.each do |pat|
+        next unless pat.is_a?(String)
+
+        normalized = normalize_path(pat)
+        next if normalized.empty? || normalized.include?('/')
+
+        recover_glob_matches(normalized)
+      end
+      nil
+    rescue StandardError
+      nil
+    end
+
+    def recover_glob_matches(normalized)
+      base = root
+      return unless base
+      return if File.expand_path(base) == File.expand_path('.')
+
+      Dir._mkxp_orig_entries(base).each do |name|
+        next unless save_filename?(name)
+        next unless File.fnmatch(normalized, name)
+        next unless File._mkxp_orig_file("#{base}/#{name}")
+
+        migrate_save_file("#{base}/#{name}", name)
+      end
+    rescue StandardError
+      nil
     end
 
     # iOS's filesystem is case-sensitive; Windows-authored games open
@@ -542,8 +590,8 @@ unless defined?(MKXPSaveFS)
       resolve_case_target(path)
     end
 
-    # Shared File.open / File.new front: save remap first, then the
-    # write-mode case resolution.
+    # Shared File.open / File.new front: legacy-save recovery first,
+    # then the write-mode case resolution.
     def open_target(path, mode)
       write_casefold(path_for(path), mode)
     end
@@ -555,20 +603,6 @@ unless defined?(MKXPSaveFS)
       fixed = case_variant(path.to_s)
       fixed ? path_for(fixed) : nil
     rescue StandardError
-      nil
-    end
-
-    def glob_for(pattern)
-      return nil unless pattern.is_a?(String)
-
-      base = root
-      return nil unless base
-
-      normalized = normalize_path(pattern)
-      return nil if normalized.empty?
-
-      return "#{base}/#{normalized}" if candidate?(normalized)
-
       nil
     end
 
@@ -584,27 +618,6 @@ unless defined?(MKXPSaveFS)
       return false unless base && target.is_a?(String)
 
       target.gsub(%r{[\\/]+\z}, '') == base
-    end
-
-    def normalize_glob_results(result, _pattern)
-      return result unless result.respond_to?(:map)
-
-      base = root
-      return result unless base
-
-      normalized_prefix = "#{base}/"
-
-      mapped = result.map do |entry|
-        rel = if entry.start_with?(normalized_prefix)
-                entry[normalized_prefix.length..-1] || entry
-              else
-                entry
-              end
-        next nil if engine_internal_entry?(rel)
-
-        rel
-      end
-      mapped.compact
     end
 
     # --- Portable-save migration (virtual alias -> literal) ---
@@ -1034,9 +1047,11 @@ module MKXP
   end
 end
 
-# --- Save-path remap into per-game UserData/ ---
-# IO.read / File.read are intentionally not hooked; no observed game reads
-# saves through them. load_data / save_data / File.open cover the paths we see.
+# --- File API front: legacy-save recovery + case resolution ---
+# Paths resolve literally. path_for only performs the one-time
+# legacy-save recovery side effect; the case helpers keep destructive
+# operations on the on-disk spelling. IO.read is not hooked; no
+# observed game reads saves through it.
 class << File
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_delete delete unless method_defined?(:_mkxp_orig_delete)
@@ -1073,7 +1088,7 @@ class << File
     _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(path)) })
   end
   # File.unlink is a distinct singleton method; without this alias it
-  # would bypass both the save remap and the case resolution.
+  # would bypass the legacy-save recovery and the case resolution.
   alias unlink delete
 
   def rename(from, to)
@@ -1217,40 +1232,22 @@ class << Dir
   end
   alias _mkxp_orig_mkdir mkdir unless method_defined?(:_mkxp_orig_mkdir)
 
-  # Bare save-file patterns ("Save*.rxdata") glob BOTH sides: the
-  # UserData remap and the literal working directory, so slot
-  # enumeration agrees with File.open's read fallback (UserData copy
-  # wins, else a shipped/imported copy in the game folder). Results
-  # merge to relative names, deduped with the UserData side first;
-  # each name then re-resolves per file through path_for on open,
-  # which picks the right copy. The block form yields the same
-  # normalized relative names as the array form.
+  # Globs are literal. The one side effect: a bare save-file pattern
+  # first recovers any legacy saves stranded at the UserData root
+  # into the working directory (see recover_saves_for_glob), so slot
+  # enumeration and the open that follows see the same folder.
   def glob(pattern, *args, &block)
-    remapped = MKXPSaveFS.glob_for(pattern)
-    return _mkxp_orig_glob(pattern, *args, &block) unless remapped
-
-    merged = MKXPSaveFS.normalize_glob_results(
-      _mkxp_orig_glob(remapped, *args), pattern
-    )
-    _mkxp_orig_glob(pattern, *args).each do |entry|
-      merged << entry unless merged.include?(entry)
-    end
-    return merged unless block
-
-    merged.each(&block)
-    nil
+    MKXPSaveFS.recover_saves_for_glob(pattern)
+    _mkxp_orig_glob(pattern, *args, &block)
   end
   # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
   # this) flowing through the *args wrapper; see the File note above.
   ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
 
   def entries(path = '.', *args)
-    # path_for remaps bare save filenames and passes everything else
-    # through literally (the portable "Save Data/" folder is a real,
-    # game-managed directory - see the note above mkdir). Filtering
-    # keys off the RESOLVED target so listings of the UserData root
+    # Listings are literal. Listings of the UserData root
     # (System.data_directory, faked env var spellings) hide
-    # engine-internal entries.
+    # engine-internal entries; everything else passes through.
     target = MKXPSaveFS.path_for(path)
     result = _mkxp_orig_entries(target, *args)
     return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
@@ -1340,8 +1337,7 @@ class << Dir
   # the first mkdir with a virtual success, which left the second
   # one without a parent and black-screened the battle transition
   # with Errno::ENOENT.
-  # The wrappers exist for two reasons: bare-save-filename paths
-  # still route through path_for, and the UserData root itself is
+  # The wrappers exist for one reason: the UserData root itself is
   # host-owned - "create it" reports success instead of
   # Errno::EEXIST, and "remove it" must never actually happen.
   def mkdir(path, *args)
