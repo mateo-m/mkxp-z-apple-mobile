@@ -715,6 +715,24 @@ def assert_chdir_anchoring
   end
 end
 
+# Daybreak regression: AudioUtilities probes MP3 sizes with the
+# game's own mismatched spelling after File.open already casefolded.
+def assert_filetest_size_casefold
+  FileUtils.mkdir_p('Audio/BGM')
+  File._mkxp_orig_open('Audio/BGM/Title.mp3', 'wb') { |f| f.write('12345') }
+  assert_eq(FileTest.size('Audio/BGM/TITLE.mp3'), 5, 'FileTest.size retries the on-disk spelling')
+  assert_eq(FileTest.size('Audio/BGM/Title.mp3'), 5, 'FileTest.size exact spelling still works')
+  assert_eq(FileTest.size?('Audio/BGM/TITLE.MP3'), 5, 'FileTest.size? retries the on-disk spelling')
+  assert_eq(FileTest.size?('Audio/BGM/missing.mp3'), nil, 'FileTest.size? still nil for missing files')
+  err = nil
+  begin
+    FileTest.size('Audio/BGM/missing.mp3')
+  rescue Errno::ENOENT => e
+    err = e
+  end
+  assert_eq(err.nil?, false, 'FileTest.size still raises ENOENT for missing files')
+end
+
 reset_workspace!
 Dir.chdir(GAME) { load_platform_compat!(false) }
 Dir.chdir(GAME) do
@@ -731,6 +749,7 @@ Dir.chdir(GAME) do
     end
     assert_userdata_case_resolution
     assert_chdir_anchoring
+    assert_filetest_size_casefold
   end
 end
 

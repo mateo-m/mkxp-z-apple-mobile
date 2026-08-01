@@ -1220,6 +1220,41 @@ module FileTest
     def directory?(path)
       _mkxp_orig_directory(MKXPSaveFS.path_for(path))
     end
+
+    # Size probes need the same ENOENT casefold retry File.open has.
+    # Daybreak's AudioUtilities scans MP3 frames through an already
+    # casefolded File.open, then calls FileTest.size with the
+    # game's own mismatched spelling ("Audio/BGM/TITLE.mp3" for
+    # Title.mp3) and dies at the title screen without the retry.
+    if (method_defined?(:size) || private_method_defined?(:size)) && !method_defined?(:_mkxp_orig_size)
+      alias _mkxp_orig_size size
+
+      def size(path)
+        _mkxp_orig_size(MKXPSaveFS.path_for(path))
+      rescue Errno::ENOENT
+        fixed = MKXPSaveFS.read_fallback_target(path)
+        raise unless fixed
+
+        _mkxp_orig_size(fixed)
+      end
+    end
+
+    if (method_defined?(:size?) || private_method_defined?(:size?)) && !method_defined?(:_mkxp_orig_size?)
+      alias _mkxp_orig_size? size?
+
+      # size? answers nil for a missing file instead of raising, so
+      # the casefold retry keys on that rather than on ENOENT.
+      # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+      # -- nil-for-missing is FileTest.size?'s documented contract.
+      def size?(path)
+        found = _mkxp_orig_size?(MKXPSaveFS.path_for(path))
+        return found unless found.nil?
+
+        fixed = MKXPSaveFS.read_fallback_target(path)
+        fixed ? _mkxp_orig_size?(fixed) : nil
+      end
+      # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
+    end
   end
 end
 
