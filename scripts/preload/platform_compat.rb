@@ -1571,6 +1571,41 @@ end
 # (gated in extinit so offline mode still matches this old
 # behavior).
 
+# --- Eager static extension load ---
+# The socket and openssl extensions are statically linked into the
+# Ruby 3.1 VM. They initialize lazily, on the first `require`. Some
+# games replace `Kernel#require` with a loader that searches the load
+# path for plain .rb files and evals them (Rejuvenation's
+# ScriptLoader does this). Such a loader cannot start a static
+# extension: `require 'socket.so'` finds no file and returns false.
+# The stdlib wrapper then evals into hollow classes, and the C-only
+# constants (IPSocket, the OpenSSL internals) never exist. The first
+# stdlib file that touches one crashes. Example: ipaddr.rb sees no
+# Socket::AF_INET6, takes its no-IPv6 branch, and its
+# `class << IPSocket` block raises a NameError inside the game's
+# update flow.
+#
+# Load both extensions here, through the real `require`, before any
+# game code runs. The real `require` records the absolute stdlib
+# paths in $LOADED_FEATURES. Replacement loaders honor that list, so
+# they skip these files and the real classes stay in place. The
+# eager load does not conflict with the stub-removal note above: the
+# 1.8/1.9 VMs do not link the extensions, and the version gate skips
+# them, so no class appears there. The gate reads System.ruby_version
+# (the C API version), not RUBY_VERSION, because the syntax-transform
+# layer can mimic an old RUBY_VERSION on the 3.1 VM. When networking
+# is off, the airplane-mode section below still patches the connect
+# surface.
+if defined?(System) && System.respond_to?(:ruby_version) &&
+   System.ruby_version.to_f >= 3.1
+  begin
+    require 'socket'
+    require 'openssl'
+  rescue StandardError
+    nil
+  end
+end
+
 # --- TLS trust store protection ---
 # Desktop-targeting games routinely do
 #   ENV['SSL_CERT_FILE'] = 'cacert.pem'
