@@ -29,6 +29,7 @@
 #include <SDL_ttf.h>
 
 #include <assert.h>
+#include <pthread/qos.h>
 #include <string.h>
 #include <string>
 #include <unistd.h>
@@ -263,6 +264,20 @@ static int rgssThreadFunImpl(void *userdata) {
 }
 
 int rgssThreadFun(void *userdata) {
+  /* This thread runs both the game's logic and its rendering (RGSS
+   * couples them), yet SDL spawns it with no QoS class. On
+   * asymmetric A-series chips the scheduler is free to keep
+   * unclassified threads on efficiency cores, and on A13-class
+   * devices that alone holds heavy games well under their target
+   * frame rate. Declare the thread user-interactive - it paces
+   * every visible frame - so it qualifies for performance cores. */
+  pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#ifdef MKXPZ_BUILD_XCODE
+  mkxp_debugLog("INFO", "main.cpp",
+                qos_class_self() == QOS_CLASS_USER_INTERACTIVE
+                    ? "rgss thread QoS: user-interactive"
+                    : "rgss thread QoS: elevation FAILED");
+#endif
 #if TARGET_OS_IPHONE
   return mkxp_guardedRgssThreadMain(userdata, rgssThreadFunImpl);
 #else
