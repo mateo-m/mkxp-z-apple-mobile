@@ -108,6 +108,23 @@ if defined?(Audio) && Audio.is_a?(Module)
   end
 end
 
+# Snapshot native Graphics methods the same way. Daybreak's "MKXP
+# Compatbility Fix" script replaces Graphics.snap_to_bitmap with a
+# delegate to Graphics.mkxp_snap_to_bitmap, and JoiPlay-targeting
+# games ship equivalent Ruby wrappers over the poke_* names. The
+# postload delegates (pokemon_graphics_compat.rb) must reach the
+# native methods, not the game's replacements - late binding there
+# makes the two wrappers call each other until the stack dies.
+if defined?(Graphics) && Graphics.is_a?(Module)
+  Graphics.instance_eval do
+    @__mkxp_native_snap_to_bitmap = method(:snap_to_bitmap) if respond_to?(:snap_to_bitmap)
+    @__mkxp_native_width          = method(:width)          if respond_to?(:width)
+    @__mkxp_native_height         = method(:height)         if respond_to?(:height)
+    @__mkxp_native_resize_screen  = method(:resize_screen)  if respond_to?(:resize_screen)
+    @__mkxp_native_play_movie     = method(:play_movie)     if respond_to?(:play_movie)
+  end
+end
+
 # Playback handle returned by `FmodEx.bgm_play` / etc. The actual
 # native audio is fire-and-forget on the Audio module (no real
 # handle), so this is mostly a duck-typed shell that satisfies the

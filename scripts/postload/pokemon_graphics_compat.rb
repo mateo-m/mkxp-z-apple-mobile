@@ -15,20 +15,48 @@
 # plugin API. Gate each on `respond_to?` + `method_defined?` so
 # re-running this script (reload during development) or games
 # that already define these names keep working.
+#
+# The delegates call the NATIVE methods snapshotted at preload
+# (pokemon_compat.rb), not the live names. Games redefine the live
+# names as wrappers over these compat names (Daybreak's
+# snap_to_bitmap returns Graphics.mkxp_snap_to_bitmap), so a
+# late-bound delegate closes a call loop that dies with
+# SystemStackError at the first battle transition. The live-name
+# fallback only covers a snapshot the preload could not take.
 
 module Graphics
   class << self
-    define_method(:poke_width) { Graphics.width } unless respond_to?(:poke_width)
+    unless respond_to?(:__mkxp_graphics_native, true)
+      define_method(:__mkxp_graphics_native) do |ivar, name, *args|
+        native = Graphics.instance_variable_get(ivar)
+        native ? native.call(*args) : Graphics.send(name, *args)
+      end
+      private :__mkxp_graphics_native
+    end
 
-    define_method(:poke_height) { Graphics.height } unless respond_to?(:poke_height)
+    unless respond_to?(:poke_width)
+      define_method(:poke_width) { __mkxp_graphics_native(:@__mkxp_native_width, :width) }
+    end
 
-    define_method(:poke_snap_to_bitmap) { Graphics.snap_to_bitmap } unless respond_to?(:poke_snap_to_bitmap)
+    unless respond_to?(:poke_height)
+      define_method(:poke_height) { __mkxp_graphics_native(:@__mkxp_native_height, :height) }
+    end
 
-    define_method(:mkxp_snap_to_bitmap) { Graphics.snap_to_bitmap } unless respond_to?(:mkxp_snap_to_bitmap)
+    unless respond_to?(:poke_snap_to_bitmap)
+      define_method(:poke_snap_to_bitmap) do
+        __mkxp_graphics_native(:@__mkxp_native_snap_to_bitmap, :snap_to_bitmap)
+      end
+    end
+
+    unless respond_to?(:mkxp_snap_to_bitmap)
+      define_method(:mkxp_snap_to_bitmap) do
+        __mkxp_graphics_native(:@__mkxp_native_snap_to_bitmap, :snap_to_bitmap)
+      end
+    end
 
     unless respond_to?(:poke_resize_screen)
       define_method(:poke_resize_screen) do |w, h|
-        Graphics.resize_screen(w, h)
+        __mkxp_graphics_native(:@__mkxp_native_resize_screen, :resize_screen, w, h)
       end
     end
 
@@ -42,7 +70,7 @@ module Graphics
     # we don't expose distinctly.
     unless respond_to?(:zeus_play_movie)
       define_method(:zeus_play_movie) do |filename, *_rest|
-        Graphics.play_movie(filename)
+        __mkxp_graphics_native(:@__mkxp_native_play_movie, :play_movie, filename)
       end
     end
   end
