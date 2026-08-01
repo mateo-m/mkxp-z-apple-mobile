@@ -362,4 +362,140 @@ Dir.chdir(GAME) do
   assert_eq(Dir.glob('*.txt'), ['readme.txt'], 'non-save glob passthrough')
 end
 
+# --- Cross-API consistency matrix ---
+# The property every savefs bug in this file's history violated:
+# every wrapped API must agree about where a given path points. The
+# matrix deliberately does NOT assert where anything lands on disk -
+# the targeted tests above own that - only that create/probe/write/
+# read/enumerate/delete see one coherent world through every spelling
+# a game might use. New wrappers must be added to these API lists.
+# rubocop:disable Lint/DeprecatedClassMethods -- the deprecated
+# spellings are part of the API surface games call; the matrix must
+# hold for them too.
+FILE_PROBES = {
+  'File.exist?' => lambda { |p| File.exist?(p) },
+  'File.exists?' => lambda { |p| File.exists?(p) },
+  'FileTest.exist?' => lambda { |p| FileTest.exist?(p) },
+  'FileTest.exists?' => lambda { |p| FileTest.exists?(p) },
+  'File.file?' => lambda { |p| File.file?(p) }
+}.freeze
+DIR_PROBES = {
+  'Dir.exist?' => lambda { |p| Dir.exist?(p) },
+  'Dir.exists?' => lambda { |p| Dir.exists?(p) },
+  'File.directory?' => lambda { |p| File.directory?(p) },
+  'FileTest.directory?' => lambda { |p| FileTest.directory?(p) }
+}.freeze
+# rubocop:enable Lint/DeprecatedClassMethods
+FILE_READERS = {
+  'File.read' => lambda { |p| File.read(p) },
+  'File.binread' => lambda { |p| File.binread(p) },
+  # rubocop:disable Style/FileRead -- File.open IS the API under comparison.
+  'File.open' => lambda { |p| File.open(p, 'rb', &:read) },
+  # rubocop:enable Style/FileRead
+  'File.readlines' => lambda { |p| File.readlines(p).join }
+}.freeze
+DIR_LISTERS = {
+  'Dir.entries' => lambda { |d| Dir.entries(d) - ['.', '..'] },
+  'Dir.children' => lambda { |d| Dir.children(d) },
+  'Dir.each_child(block)' => lambda { |d|
+    acc = []
+    Dir.each_child(d) { |e| acc << e }
+    acc
+  },
+  'Dir.foreach(block)' => lambda { |d|
+    acc = []
+    Dir.foreach(d) { |e| acc << e }
+    acc - ['.', '..']
+  }
+}.freeze
+
+def assert_probes(probes, path, expected, label)
+  probes.each do |name, probe|
+    assert_eq(probe.call(path), expected, "#{label}: #{name}(#{path.inspect}) == #{expected}")
+  end
+end
+
+# `cwd_listed: false` documents the one deliberate asymmetry: a bare
+# save filename remaps into UserData, and raw listings of the game
+# folder do NOT show it (a game enumerating its own install - a
+# self-updater, say - must not see phantom files). Save discovery
+# still agrees through every probe, reader, and save-shaped glob.
+def assert_lifecycle_consistent(file_path, label, cwd_listed = true)
+  dir_path = File.dirname(file_path)
+  basename = File.basename(file_path)
+  content = "payload for #{label}"
+
+  assert_probes(FILE_PROBES, file_path, false, "#{label} before write")
+
+  File.write(file_path, content)
+  assert_probes(FILE_PROBES, file_path, true, "#{label} after write")
+  assert_eq(File.size(file_path), content.length, "#{label}: File.size sees the write")
+  FILE_READERS.each do |name, reader|
+    assert_eq(reader.call(file_path), content, "#{label}: #{name} reads the write")
+  end
+  File.mtime(file_path)
+
+  assert_listings(dir_path, basename, cwd_listed, file_path, label)
+
+  File.delete(file_path)
+  assert_probes(FILE_PROBES, file_path, false, "#{label} after delete")
+  DIR_LISTERS.each do |name, lister|
+    assert_false(lister.call(dir_path).include?(basename), "#{label}: #{name} forgets the delete")
+  end
+end
+
+def assert_listings(dir_path, basename, expected, file_path, label)
+  DIR_LISTERS.each do |name, lister|
+    assert_eq(
+      lister.call(dir_path).include?(basename), expected,
+      "#{label}: #{name} listing == #{expected}"
+    )
+  end
+  globbed = Dir.glob(File.join(dir_path, '*'))
+  assert_eq(
+    globbed.any? { |entry| File.basename(entry) == basename }, expected,
+    "#{label}: glob array form listing == #{expected}"
+  )
+  block_glob = []
+  Dir.glob(File.join(dir_path, '*')) { |entry| block_glob << entry }
+  assert_eq(block_glob, globbed, "#{label}: glob block form matches array form")
+  return if expected
+
+  assert_true(
+    Dir.glob("*#{File.extname(file_path)}").include?(basename),
+    "#{label}: save-shaped glob still finds the write"
+  )
+end
+
+def assert_dir_lifecycle_consistent(dir_path, label)
+  assert_probes(DIR_PROBES, dir_path, false, "#{label} before mkdir")
+  Dir.mkdir(dir_path)
+  assert_probes(DIR_PROBES, dir_path, true, "#{label} after mkdir")
+
+  assert_lifecycle_consistent(File.join(dir_path, 'inner.rxdata'), "#{label}/inner")
+
+  Dir.rmdir(dir_path)
+  assert_probes(DIR_PROBES, dir_path, false, "#{label} after rmdir")
+end
+
+reset_workspace!
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  # Bare save filename (the one shape that remaps into UserData).
+  assert_lifecycle_consistent('Matrix.rxdata', 'bare save name', false)
+
+  # The portable dir, a subdirectory of it, and files inside both.
+  assert_dir_lifecycle_consistent('Save Data', 'portable dir')
+  Dir.mkdir('Save Data')
+  assert_dir_lifecycle_consistent('Save Data/Battle Debug Logs', 'portable subdir')
+  assert_lifecycle_consistent('Save Data/Slot 1.rxdata', 'portable save file')
+  Dir.rmdir('Save Data')
+
+  # Absolute spelling inside UserData.
+  assert_lifecycle_consistent(File.join(USERDATA, 'Abs.rxdata'), 'absolute UserData file')
+
+  # Plain non-save relative paths.
+  assert_dir_lifecycle_consistent('PlainMatrix', 'plain dir')
+end
+
 puts 'OK: test_save_fs.rb passed'
