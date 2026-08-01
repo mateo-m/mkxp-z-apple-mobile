@@ -16,6 +16,17 @@
 # - the classes exist, and requests fail with rescuable connection
 # errors when the native client refuses them.
 #
+# The facade class itself binds to the `Net::HTTP` constant LAZILY,
+# through `Net.const_missing`. Berka's downloader (Pokemon Daybreak
+# and friends) declares `module Net; module HTTP` at script load;
+# with an eagerly defined class in place, that declaration dies with
+# "HTTP is not a module" (TypeError). Lazy binding lets a game that
+# defines its own Net::HTTP own the constant, while a game that
+# only references Net::HTTP gets the facade on first use. The cost:
+# `defined?(Net::HTTP)` is nil until the first real reference, so
+# feature probes see it as absent - no known 1.8/1.9 game does
+# that, they all call it directly.
+#
 # Deliberate deviations from real Net::HTTP, all on the "keep old
 # games running" side:
 # - One-shot connections: `start` doesn't hold a socket open;
@@ -181,7 +192,8 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
       end
 
       def set_form_data(params, _sep = '&')
-        @body = params.map { |k, v| "#{HTTP.url_encode(k.to_s)}=#{HTTP.url_encode(v.to_s)}" }.join('&')
+        pairs = params.map { |k, v| "#{HTTPFacade.url_encode(k.to_s)}=#{HTTPFacade.url_encode(v.to_s)}" }
+        @body = pairs.join('&')
         @headers['Content-Type'] = 'application/x-www-form-urlencoded'
       end
       alias form_data= set_form_data
@@ -195,7 +207,10 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
       end
     end
 
-    class HTTP
+    # The Net::HTTP facade. Defined under a non-colliding name and
+    # bound to the `HTTP` constant lazily via Net.const_missing
+    # below - see the header comment.
+    class HTTPFacade
       class Get < HTTPRequestBase
         def initialize(path, initheader = nil)
           super('GET', path, initheader)
@@ -403,6 +418,17 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
 
     # Alias tree some scripts reference directly.
     HTTPGenericRequest = HTTPRequestBase
+
+    # Lazy binding for the HTTP constant: first real reference
+    # installs the facade; a game-defined `module Net; module HTTP`
+    # never triggers const_missing and simply owns the constant.
+    # Everything else falls through to the global stub hook in
+    # platform_compat.rb.
+    def self.const_missing(name)
+      return const_set(:HTTP, HTTPFacade) if name == :HTTP
+
+      super
+    end
   end
 
   # Games rescue SocketError on connection failures; define it when
@@ -434,6 +460,6 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
   end
 
   if defined?(MKXP) && MKXP.respond_to?(:puts)
-    MKXP.puts('[net_http_compat] Net::HTTP facade over HTTPLite installed')
+    MKXP.puts('[net_http_compat] Net::HTTP facade over HTTPLite installed (lazy bind)')
   end
 end
