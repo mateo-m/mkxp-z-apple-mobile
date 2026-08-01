@@ -776,6 +776,179 @@ module Win32API_Impl
     GetMessageA = GetMessage
     GetMessageW = GetMessage
   end
+
+  # wininet bridge for Berka's RGSS downloader (embedded by many
+  # Pokemon fangames, often as "LUKA DOWNLOADER MODULE"). The script
+  # opens a session at load time and aborts the whole script when
+  # the handle is 0:
+  #
+  #   IOA = Win32API.new('wininet','InternetOpenA','plppl','l')
+  #           .call('',0,'','',0)
+  #   raise ... if IOA == 0
+  #
+  # At download time it opens a request per URL and pumps it from a
+  # 1024-byte read loop, one call per frame:
+  #
+  #   @fs = IOU.call(IOA, url, nil, 0, 0, 0)
+  #   r = IRF.call(@fs, buf, size, o=[n].pack('i!'))
+  #   n = o.unpack('i!')[0]   # 0 bytes read = download complete
+  #
+  # Back the request functions with the engine's HTTPLite client:
+  # InternetOpenUrl performs the whole GET and buffers the body;
+  # InternetReadFile hands the body out in caller-sized chunks. The
+  # fetch is synchronous, so the game blocks for the duration of
+  # the transfer (bounded by the native client's 10s connect / 30s
+  # read timeouts). With networking unavailable or disabled the
+  # fetch fails, InternetOpenUrl returns 0, and the read loop
+  # reports 0 bytes - the same shape a dead connection produces on
+  # Windows, which these scripts already handle.
+  module Wininet
+    # Cross-call request state: handle -> buffered response.
+    module Requests
+      @@handles = {}
+      @@next_handle = 0x100
+
+      def self.open(body, status)
+        body = body.dup
+        # Reads slice and count BYTES. On 1.9+ VMs the body may
+        # arrive tagged UTF-8, where [] and length work in
+        # characters; retag as binary so both are byte-based.
+        body.force_encoding('ASCII-8BIT') if body.respond_to?(:force_encoding)
+        handle = @@next_handle
+        @@next_handle += 1
+        @@handles[handle] = { :body => body, :pos => 0, :status => status }
+        handle
+      end
+
+      def self.lookup(handle)
+        @@handles[handle]
+      end
+
+      def self.close(handle)
+        @@handles.delete(handle)
+        1
+      end
+    end
+
+    class InternetOpenA
+      def call(_args)
+        # Fake session handle. Any nonzero value passes the
+        # scripts' load-time handle checks; requests carry their
+        # own state keyed by the request handle, so the session
+        # handle is never dereferenced.
+        1
+      end
+    end
+    InternetOpenW = InternetOpenA
+    InternetOpen  = InternetOpenA
+
+    class InternetOpenUrl
+      def call(args)
+        url = args[1]
+        return 0 unless defined?(HTTPLite) && url.is_a?(String) && !url.empty?
+
+        response = begin
+          # Third arg: follow redirects. The http:// URLs these
+          # 2010s-era scripts embed commonly 301 to https now.
+          HTTPLite.get(url, nil, true)
+        rescue StandardError
+          nil
+        end
+        return 0 unless response.is_a?(Hash)
+
+        status = response[:status].to_i
+        return 0 if status.zero?
+
+        # HTTP error statuses still return a handle, like Windows:
+        # the caller reads the error body and can query the status.
+        Requests.open(response[:body].to_s, status)
+      end
+    end
+    InternetOpenUrlA = InternetOpenUrl
+    InternetOpenUrlW = InternetOpenUrl
+
+    class InternetReadFile
+      def call(args)
+        request = Requests.lookup(args[0])
+        buf = args[1]
+        out = args[3]
+        unless request && buf.is_a?(String)
+          write_count(out, 0)
+          return 0
+        end
+
+        want = args[2].to_i
+        want = buf.length if want > buf.length
+        want = 0 if want < 0
+        chunk = request[:body][request[:pos], want] || ''
+        request[:pos] += chunk.length
+        memcpy_string(buf, chunk)
+        write_count(out, chunk.length)
+        1
+      end
+
+      private
+
+      # The out-parameter is a packed 4-byte native int the caller
+      # unpacks with 'i!'. iOS is little-endian, so 'V' produces
+      # the same bytes on every VM.
+      def write_count(out, count)
+        memcpy_string(out, [count].pack('V')) if out.is_a?(String) && out.length >= 4
+      end
+    end
+
+    class HttpQueryInfo
+      HTTP_QUERY_CONTENT_LENGTH = 5
+      HTTP_QUERY_STATUS_CODE = 19
+      HTTP_QUERY_FLAG_NUMBER = 0x20000000
+
+      def call(args)
+        request = Requests.lookup(args[0])
+        buf = args[2]
+        return 0 unless request && buf.is_a?(String)
+
+        info = args[1].to_i
+        value = case info & 0xFFFF
+                when HTTP_QUERY_CONTENT_LENGTH then request[:body].length
+                when HTTP_QUERY_STATUS_CODE then request[:status]
+                else return 0
+                end
+        payload = if (info & HTTP_QUERY_FLAG_NUMBER).zero?
+                    # Headers are text on Windows unless FLAG_NUMBER
+                    # asks for a binary DWORD.
+                    "#{value}\0"
+                  else
+                    [value].pack('V')
+                  end
+        # Windows fails with ERROR_INSUFFICIENT_BUFFER rather than
+        # writing past the caller's buffer; writing anyway would
+        # raise IndexError inside the game script.
+        return 0 if payload.length > buf.length
+
+        memcpy_string(buf, payload)
+        1
+      end
+    end
+    HttpQueryInfoA = HttpQueryInfo
+    HttpQueryInfoW = HttpQueryInfo
+
+    class InternetCloseHandle
+      def call(args)
+        # Also succeeds for the fake session handle and for
+        # already-closed handles; callers only check for nonzero.
+        Requests.close(args[0])
+      end
+    end
+
+    class DeleteUrlCacheEntry
+      def call(_args)
+        # No cache exists, so every entry is already deleted.
+        1
+      end
+    end
+    DeleteUrlCacheEntryA = DeleteUrlCacheEntry
+    DeleteUrlCacheEntryW = DeleteUrlCacheEntry
+  end
 end
 
 def kappatalize(s)
