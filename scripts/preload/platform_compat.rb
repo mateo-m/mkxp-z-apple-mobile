@@ -946,6 +946,53 @@ class << File
     _mkxp_orig_mtime(MKXPSaveFS.path_for(path))
   end
 
+  # Whole-file read/write helpers must resolve bare save names the
+  # same way File.open does, or a game's File.read of a save sees a
+  # different copy than its File.open (guard/act disagreement).
+  # binread/binwrite/write are guarded: absent on Ruby 1.8.
+  alias _mkxp_orig_read read unless method_defined?(:_mkxp_orig_read)
+
+  def read(path, *args)
+    _mkxp_orig_read(MKXPSaveFS.path_for(path), *args)
+  end
+
+  alias _mkxp_orig_readlines readlines unless method_defined?(:_mkxp_orig_readlines)
+
+  def readlines(path, *args)
+    _mkxp_orig_readlines(MKXPSaveFS.path_for(path), *args)
+  end
+
+  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
+
+  def foreach(path, *args, &block)
+    _mkxp_orig_foreach(MKXPSaveFS.path_for(path), *args, &block)
+  end
+
+  if (method_defined?(:binread) || private_method_defined?(:binread)) && !method_defined?(:_mkxp_orig_binread)
+    alias _mkxp_orig_binread binread
+
+    def binread(path, *args)
+      _mkxp_orig_binread(MKXPSaveFS.path_for(path), *args)
+    end
+  end
+
+  if (method_defined?(:write) || private_method_defined?(:write)) && !method_defined?(:_mkxp_orig_write)
+    alias _mkxp_orig_write write
+
+    def write(path, *args)
+      _mkxp_orig_write(MKXPSaveFS.path_for(path), *args)
+    end
+  end
+
+  if (method_defined?(:binwrite) || private_method_defined?(:binwrite)) &&
+     !method_defined?(:_mkxp_orig_binwrite)
+    alias _mkxp_orig_binwrite binwrite
+
+    def binwrite(path, *args)
+      _mkxp_orig_binwrite(MKXPSaveFS.path_for(path), *args)
+    end
+  end
+
   # Ruby 3 separates keyword args from positionals; without the
   # ruby2_keywords flag these *args wrappers would collapse
   # `File.open(path, mode: 'rb')`-style kwargs into a positional
@@ -954,6 +1001,12 @@ class << File
   if respond_to?(:ruby2_keywords, true)
     ruby2_keywords :open
     ruby2_keywords :new
+    ruby2_keywords :read
+    ruby2_keywords :readlines
+    ruby2_keywords :foreach
+    ruby2_keywords :binread if method_defined?(:_mkxp_orig_binread)
+    ruby2_keywords :write if method_defined?(:_mkxp_orig_write)
+    ruby2_keywords :binwrite if method_defined?(:_mkxp_orig_binwrite)
   end
 end
 
@@ -965,6 +1018,15 @@ module FileTest
 
     def exist?(path)
       _mkxp_orig_exist(MKXPSaveFS.path_for(path))
+    end
+
+    if (method_defined?(:exists?) || private_method_defined?(:exists?)) &&
+       !method_defined?(:_mkxp_orig_exists)
+      alias _mkxp_orig_exists exists?
+
+      def exists?(path)
+        _mkxp_orig_exists(MKXPSaveFS.path_for(path))
+      end
     end
 
     def file?(path)
@@ -986,12 +1048,28 @@ class << Dir
   end
   alias _mkxp_orig_mkdir mkdir unless method_defined?(:_mkxp_orig_mkdir)
 
+  # Bare save-file patterns ("Save*.rxdata") glob BOTH sides: the
+  # UserData remap and the literal working directory, so slot
+  # enumeration agrees with File.open's read fallback (UserData copy
+  # wins, else a shipped/imported copy in the game folder). Results
+  # merge to relative names, deduped with the UserData side first;
+  # each name then re-resolves per file through path_for on open,
+  # which picks the right copy. The block form yields the same
+  # normalized relative names as the array form.
   def glob(pattern, *args, &block)
     remapped = MKXPSaveFS.glob_for(pattern)
-    result = _mkxp_orig_glob(remapped || pattern, *args, &block)
-    return result unless remapped
+    return _mkxp_orig_glob(pattern, *args, &block) unless remapped
 
-    MKXPSaveFS.normalize_glob_results(result, pattern)
+    merged = MKXPSaveFS.normalize_glob_results(
+      _mkxp_orig_glob(remapped, *args), pattern
+    )
+    _mkxp_orig_glob(pattern, *args).each do |entry|
+      merged << entry unless merged.include?(entry)
+    end
+    return merged unless block
+
+    merged.each(&block)
+    nil
   end
   # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
   # this) flowing through the *args wrapper; see the File note above.

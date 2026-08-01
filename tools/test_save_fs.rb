@@ -319,4 +319,47 @@ Dir.chdir(GAME) { load_platform_compat!(false) }
 assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'non-portable root save untouched')
 assert_false(raw_entries(GAME).include?('Save Data'), 'non-portable boot creates no portable dir')
 
+# --- Probe/enumeration gap closure ---
+# FileTest.exists? routes through the bare-name remap like every
+# other existence probe, and bare save globs see BOTH the UserData
+# remap and shipped/imported saves in the game folder.
+reset_workspace!
+Dir.chdir(GAME) { load_platform_compat!(false) }
+File.write(File.join(USERDATA, 'Game.rxdata'), 'userdata copy')
+File.write(File.join(GAME, 'Game.rxdata'), 'shipped duplicate')
+File.write(File.join(GAME, 'Save02.rxdata'), 'shipped only')
+Dir.chdir(GAME) do
+  assert_true(FileTest.exists?('Game.rxdata'), 'FileTest.exists? sees remapped bare save')
+  assert_true(FileTest.exists?('Save02.rxdata'), 'FileTest.exists? read fallback')
+
+  merged = Dir.glob('*.rxdata')
+  assert_eq(merged.sort, ['Game.rxdata', 'Save02.rxdata'], 'bare glob merges both sides')
+  assert_eq(merged.length, 2, 'bare glob dedupes duplicated name')
+  assert_eq(merged[0], 'Game.rxdata', 'UserData side listed first')
+
+  yielded = []
+  block_result = Dir.glob('*.rxdata') { |entry| yielded << entry }
+  assert_eq(yielded.sort, ['Game.rxdata', 'Save02.rxdata'], 'block form yields merged names')
+  assert_eq(block_result, nil, 'block form returns nil')
+
+  # Each merged name resolves per file: the duplicated name opens the
+  # UserData copy, the shipped-only name falls back to the game folder.
+  assert_eq(File.read('Game.rxdata'), 'userdata copy', 'duplicated name resolves to UserData')
+  assert_eq(File.read('Save02.rxdata'), 'shipped only', 'shipped-only name resolves to game folder')
+  # rubocop:disable Style/FileRead -- deliberately comparing the
+  # File.open path against File.read's resolution.
+  assert_eq(File.open('Game.rxdata', 'rb', &:read), 'userdata copy', 'File.open agrees with File.read')
+  # rubocop:enable Style/FileRead
+
+  # Whole-file writes of bare save names land where File.open would.
+  File.write('Save03.rxdata', 'written')
+  assert_true(raw_entries(USERDATA).include?('Save03.rxdata'), 'File.write bare save goes to UserData')
+  assert_false(raw_entries(GAME).include?('Save03.rxdata'), 'File.write leaves game folder alone')
+  assert_eq(File.binread('Save03.rxdata'), 'written', 'File.binread resolves like File.open')
+
+  # Non-save patterns stay fully literal.
+  File.write(File.join(GAME, 'readme.txt'), '')
+  assert_eq(Dir.glob('*.txt'), ['readme.txt'], 'non-save glob passthrough')
+end
+
 puts 'OK: test_save_fs.rb passed'
