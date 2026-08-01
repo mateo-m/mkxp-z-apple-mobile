@@ -395,6 +395,76 @@ unless defined?(MKXPSaveFS)
       nil
     end
 
+    # Windows-authored games write over their own files with
+    # mismatched case ("Battle Open.wav" over "Battle Open.WAV" -
+    # Rejuvenation's updater extracts patches this way) and delete or
+    # rename them the same way. On Windows both spellings are one
+    # file. Here a raw create makes a duplicate on the device and
+    # fails with Errno::EEXIST under the simulator's case-sensitivity
+    # emulation, and a raw delete or rename misses the file. Resolve
+    # the on-disk spelling first, so destructive file APIs hit the
+    # file the game means.
+    def resolve_case_target(path)
+      str = path.to_s
+      return path if str.empty?
+      return path if raw_exist?(str)
+
+      case_variant(str) || path
+    rescue StandardError
+      path
+    end
+
+    # Strict spelling probe. The engine keeps the pre-casefold
+    # exist? under `_mkxp_native_orig_exist?`. The `_mkxp_orig_*`
+    # aliases below capture the casefold-aware replacement, which
+    # reports true for any spelling and would defeat this check.
+    def raw_exist?(str)
+      if File.respond_to?(:_mkxp_native_orig_exist?)
+        File._mkxp_native_orig_exist?(str)
+      else
+        File._mkxp_orig_exist(str)
+      end
+    end
+
+    # On-disk spelling for a mismatched-case path, or nil. The
+    # engine's case cache is game-relative, so absolute paths only
+    # resolve when they point inside the game directory (the cwd).
+    def case_variant(str)
+      prefix = nil
+      rel = str
+      if str =~ %r{\A(?:[A-Za-z]:[\\/]|[\\/])}
+        base = "#{File.expand_path('.')}/"
+        return nil unless str.length > base.length && str[0, base.length] == base
+
+        prefix = base
+        rel = str[base.length..-1]
+      end
+      fixed = casefold_fallback(rel)
+      return nil unless fixed
+
+      prefix ? "#{prefix}#{fixed}" : fixed
+    end
+
+    # True when an open mode creates, truncates, appends, or opens
+    # for update - every case where the open must land on the
+    # existing on-disk spelling instead of creating a duplicate.
+    def write_mode?(mode)
+      case mode
+      when Integer
+        (mode & (File::WRONLY | File::RDWR | File::APPEND | File::CREAT)) != 0
+      when String, Symbol
+        mode.to_s =~ /[wa+]/ ? true : false
+      else
+        false
+      end
+    end
+
+    def write_casefold(path, mode)
+      return path unless write_mode?(mode)
+
+      resolve_case_target(path)
+    end
+
     def glob_for(pattern)
       return nil unless pattern.is_a?(String)
 
@@ -889,7 +959,8 @@ class << File
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
   def open(path, *args, &block)
-    _mkxp_orig_open(MKXPSaveFS.path_for(path), *args, &block)
+    target = MKXPSaveFS.write_casefold(MKXPSaveFS.path_for(path), args[0])
+    _mkxp_orig_open(target, *args, &block)
   rescue Errno::ENOENT
     fixed = MKXPSaveFS.casefold_fallback(path)
     raise unless fixed
@@ -898,7 +969,8 @@ class << File
   end
 
   def new(path, *args)
-    _mkxp_orig_new(MKXPSaveFS.path_for(path), *args)
+    target = MKXPSaveFS.write_casefold(MKXPSaveFS.path_for(path), args[0])
+    _mkxp_orig_new(target, *args)
   rescue Errno::ENOENT
     fixed = MKXPSaveFS.casefold_fallback(path)
     raise unless fixed
@@ -907,11 +979,17 @@ class << File
   end
 
   def delete(*paths)
-    _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.path_for(path) })
+    _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(path)) })
   end
+  # File.unlink is a distinct singleton method; without this alias it
+  # would bypass both the save remap and the case resolution.
+  alias unlink delete
 
   def rename(from, to)
-    _mkxp_orig_rename(MKXPSaveFS.path_for(from), MKXPSaveFS.path_for(to))
+    _mkxp_orig_rename(
+      MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(from)),
+      MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(to))
+    )
   end
 
   def exist?(path)
@@ -980,7 +1058,7 @@ class << File
     alias _mkxp_orig_write write
 
     def write(path, *args)
-      _mkxp_orig_write(MKXPSaveFS.path_for(path), *args)
+      _mkxp_orig_write(MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(path)), *args)
     end
   end
 
@@ -989,7 +1067,7 @@ class << File
     alias _mkxp_orig_binwrite binwrite
 
     def binwrite(path, *args)
-      _mkxp_orig_binwrite(MKXPSaveFS.path_for(path), *args)
+      _mkxp_orig_binwrite(MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(path)), *args)
     end
   end
 
