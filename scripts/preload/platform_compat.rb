@@ -598,9 +598,23 @@ unless defined?(MKXPSaveFS)
 
     # Errno::ENOENT retry target for the open wrappers. The same
     # resolution the write side uses, so absolute in-game paths and
-    # session-created files resolve for reads too.
+    # session-created files resolve for reads too. A path with a
+    # stray "\r" gets a second retry with those stripped: Windows
+    # forbids control characters in file names, so the "\r" can only
+    # come from CRLF text split with binary reads (Desolation's
+    # script loader parses its CSV listing this way). Windows' own
+    # text-mode reads drop the "\r" before the path is built.
     def read_fallback_target(path)
-      fixed = case_variant(path.to_s)
+      str = path.to_s
+      fixed = case_variant(str)
+      return path_for(fixed) if fixed
+
+      return nil unless str.include?("\r")
+
+      cleaned = str.delete("\r")
+      return path_for(cleaned) if raw_exist?(cleaned)
+
+      fixed = case_variant(cleaned)
       fixed ? path_for(fixed) : nil
     rescue StandardError
       nil
@@ -1047,6 +1061,47 @@ module MKXP
   end
 end
 
+# --- Windows text-mode read emulation ---
+# Windows Ruby opens files in text mode by default and folds CRLF to
+# LF on read. Games depend on that: Desolation's script loader splits
+# its CSV listing on "\n" and derives file paths and control flow
+# from the fields, and a kept "\r" breaks both. Fold the same way for
+# plain read-mode opens on the modern VM. Binary opens ('b' flag,
+# integer flags), update modes, write modes, and calls with explicit
+# extra arguments stay raw.
+unless defined?(MKXPTextMode)
+  module MKXPTextMode
+    module_function
+
+    def read_args(args)
+      opts = universal_newline_opts
+      return args unless opts
+      return ['r', opts] if args.empty?
+      return args unless args.length == 1
+
+      mode = args[0]
+      return args unless mode.is_a?(String)
+
+      flags = mode.split(':', 2)[0]
+      return args unless %w[r rt].include?(flags)
+
+      [mode, opts]
+    end
+
+    # The option hash carries the ruby2_keywords flag so the splat
+    # in the File wrappers passes it as keywords.
+    def universal_newline_opts
+      return @universal_newline_opts if defined?(@universal_newline_opts)
+
+      capable = defined?(System) && System.respond_to?(:ruby_version) &&
+                System.ruby_version.to_f >= 3.1 &&
+                Hash.respond_to?(:ruby2_keywords_hash)
+      @universal_newline_opts =
+        capable ? Hash.ruby2_keywords_hash({ :newline => :universal }) : nil
+    end
+  end
+end
+
 # --- File API front: legacy-save recovery + case resolution ---
 # Paths resolve literally. path_for only performs the one-time
 # legacy-save recovery side effect; the case helpers keep destructive
@@ -1067,6 +1122,7 @@ class << File
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
   def open(path, *args, &block)
+    args = MKXPTextMode.read_args(args)
     _mkxp_orig_open(MKXPSaveFS.open_target(path, args[0]), *args, &block)
   rescue Errno::ENOENT
     fixed = MKXPSaveFS.read_fallback_target(path)
@@ -1076,6 +1132,7 @@ class << File
   end
 
   def new(path, *args)
+    args = MKXPTextMode.read_args(args)
     _mkxp_orig_new(MKXPSaveFS.open_target(path, args[0]), *args)
   rescue Errno::ENOENT
     fixed = MKXPSaveFS.read_fallback_target(path)
