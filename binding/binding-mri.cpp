@@ -1701,6 +1701,48 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
 }
 
+/* The error-display path runs after script execution, outside every
+ * protective tag. A raise there has no handler to unwind to: the VM
+ * hits a null tag, calls rb_bug and aborts the whole process. Every
+ * Ruby call on this path must therefore go through rb_protect. */
+struct ProtectedCallArgs {
+    VALUE recv;
+    ID mid;
+    int argc;
+    const VALUE *argv;
+};
+
+static VALUE protectedCallBody(VALUE arg) {
+    const ProtectedCallArgs *a = (const ProtectedCallArgs *)arg;
+    return rb_funcall2(a->recv, a->mid, a->argc, a->argv);
+}
+
+/* Call a method and swallow any exception it raises; returns Qnil
+ * when the callee raised. */
+static VALUE protectedCall(VALUE recv, ID mid, int argc, const VALUE *argv) {
+    ProtectedCallArgs args = {recv, mid, argc, argv};
+    int state = 0;
+    VALUE ret = rb_protect(protectedCallBody, (VALUE)&args, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return Qnil;
+    }
+    return ret;
+}
+
+/* Convert a value to a display string without raising; a failed or
+ * non-string #to_s yields the fallback instead. */
+static std::string safeToStdString(VALUE v, const char *fallback) {
+    if (NIL_P(v))
+        return fallback;
+    VALUE s = RB_TYPE_P(v, T_STRING)
+                  ? v
+                  : protectedCall(v, rb_intern("to_s"), 0, NULL);
+    if (NIL_P(s) || !RB_TYPE_P(s, T_STRING))
+        return fallback;
+    return std::string(RSTRING_PTR(s), RSTRING_LEN(s));
+}
+
 // Best-effort human-readable detail for a Ruby exception. Pokemon
 // Essentials' EventScriptError stores its formatted script error in
 // @event_message and passes nil to Exception#initialize, so .message
@@ -1711,7 +1753,7 @@ static VALUE exceptionDetailMessage(VALUE exc) {
         return em;
 
     if (rb_respond_to(exc, rb_intern("event_message"))) {
-        em = rb_funcall(exc, rb_intern("event_message"), 0);
+        em = protectedCall(exc, rb_intern("event_message"), 0, NULL);
         if (!NIL_P(em) && RB_TYPE_P(em, T_STRING) && RSTRING_LEN(em) > 0)
             return em;
     }
@@ -1730,87 +1772,100 @@ static VALUE exceptionDetailMessage(VALUE exc) {
             rb_set_errinfo(Qnil);
     }
 
+    /* Exception#full_message takes keyword arguments only; a
+     * positional argument raises ArgumentError. Build the call in
+     * Ruby so the keywords pass through every supported API. */
     if (rb_respond_to(exc, rb_intern("full_message"))) {
-        VALUE fm = rb_funcall(exc, rb_intern("full_message"), 1, Qtrue);
-        if (!NIL_P(fm) && RB_TYPE_P(fm, T_STRING) && RSTRING_LEN(fm) > 0)
+        int state = 0;
+        rb_gv_set("$__mkxp_exc", exc);
+        VALUE fm = rb_eval_string_protect(
+            "begin; $__mkxp_exc.full_message(highlight: false, order: :top); "
+            "ensure; $__mkxp_exc = nil; end",
+            &state);
+        if (state)
+            rb_set_errinfo(Qnil);
+        else if (RB_TYPE_P(fm, T_STRING) && RSTRING_LEN(fm) > 0)
             return fm;
     }
 
-    VALUE msg = rb_funcall(exc, rb_intern("message"), 0);
+    VALUE msg = protectedCall(exc, rb_intern("message"), 0, NULL);
     if (!NIL_P(msg) && RB_TYPE_P(msg, T_STRING) && RSTRING_LEN(msg) > 0)
         return msg;
-    return rb_funcall(exc, rb_intern("to_s"), 0);
+    return protectedCall(exc, rb_intern("to_s"), 0, NULL);
 }
 
 static void showExc(VALUE exc, const BacktraceData &btData) {
-    VALUE bt = rb_funcall2(exc, rb_intern("backtrace"), 0, NULL);
+    VALUE bt = protectedCall(exc, rb_intern("backtrace"), 0, NULL);
+    if (!RB_TYPE_P(bt, T_ARRAY))
+        bt = Qnil;
     VALUE msg = exceptionDetailMessage(exc);
-    VALUE bt0 = rb_ary_entry(bt, 0);
+    VALUE bt0 = NIL_P(bt) ? Qnil : rb_ary_entry(bt, 0);
     VALUE name = rb_class_path(rb_obj_class(exc));
-    
-    VALUE ds = rb_sprintf("%" PRIsVALUE ": %" PRIsVALUE " (%" PRIsVALUE ")",
-#if RAPI_MAJOR >= 2
-                          bt0, exc, name);
-#else
-    // Ruby 1.9's version of this function needs char*
-    RSTRING_PTR(bt0), RSTRING_PTR(exc), RSTRING_PTR(name));
-#endif
+
+    /* Build the report from plain C++ strings: rb_sprintf and
+     * StringValueCStr can raise, and a raise here kills the app. */
+    std::string bt0Str = safeToStdString(bt0, "(unknown):?");
+    std::string excStr = safeToStdString(exc, "(no message)");
+    std::string nameStr = safeToStdString(name, "Error");
+    std::string msgStr =
+        safeToStdString(msg, "(could not retrieve the error message)");
+
+    std::string ds = bt0Str + ": " + excStr + " (" + nameStr + ")";
     /* omit "useless" last entry (from ruby:1:in `eval') */
-    for (long i = 1, btlen = RARRAY_LEN(bt) - 1; i < btlen; ++i)
-        rb_str_catf(ds, "\n\tfrom %" PRIsVALUE,
-#if RAPI_MAJOR >= 2
-                    rb_ary_entry(bt, i));
-#else
-    RSTRING_PTR(rb_ary_entry(bt, i)));
-#endif
-    Debug() << StringValueCStr(ds);
+    if (!NIL_P(bt))
+        for (long i = 1, btlen = RARRAY_LEN(bt) - 1; i < btlen; ++i)
+            ds += "\n\tfrom " + safeToStdString(rb_ary_entry(bt, i), "(unknown)");
+    Debug() << ds;
     // Also send the full backtrace to the per-game debug log so we can
     // inspect it post-crash without attaching a debugger.
-    mkxp_debugLog("BACKTRACE", "binding-mri.cpp [C++]", StringValueCStr(ds));
+    mkxp_debugLog("BACKTRACE", "binding-mri.cpp [C++]", ds.c_str());
 
-    char *s = RSTRING_PTR(bt0);
-    
-    char line[16];
-    std::string file(512, '\0');
-    
-    char *p = s + strlen(s);
-    char *e;
-    
-    while (p != s)
-        if (*--p == ':')
-            break;
-    
-    e = p;
-    
-    while (p != s)
-        if (*--p == ':')
-            break;
-    
-    /* s         p  e
-     * SectionXXX:YY: in 'blabla' */
-    
-    *e = '\0';
-    strncpy(line, *p ? p + 1 : p, sizeof(line));
-    line[sizeof(line) - 1] = '\0';
-    *e = ':';
-    e = p;
-    
-    /* s         e
-     * SectionXXX:YY: in 'blabla' */
-    
-    *e = '\0';
-    strncpy(&file[0], s, file.size());
-    *e = ':';
-    
-    /* Shrink to fit */
-    file.resize(strlen(file.c_str()));
+    /* bt0 format: "SectionXXX:YY: in 'blabla'" - the file is the part
+     * before the second-to-last colon, the line sits between the two. */
+    std::string file = "(unknown)";
+    std::string line = "?";
+    size_t e = bt0Str.rfind(':');
+    if (e != std::string::npos && e > 0) {
+        size_t p = bt0Str.rfind(':', e - 1);
+        if (p != std::string::npos) {
+            file = bt0Str.substr(0, p);
+            line = bt0Str.substr(p + 1, e - p - 1);
+        } else {
+            file = bt0Str.substr(0, e);
+            line = bt0Str.substr(e + 1);
+        }
+    }
     file = btData.scriptNames.value(file, file);
-    
-    const char *msgStr = StringValueCStr(msg);
-    const char *nameStr = StringValueCStr(name);
+
     std::string ms = std::string("Script '") + file + "' line " + line + ": " +
-                     nameStr + " occurred.\n\n" + (msgStr ? msgStr : "");
-    
+                     nameStr + " occurred.\n\n" + msgStr;
+
+    logRubyError("FATAL", ms.c_str());
+    showMsg(ms);
+}
+
+struct ShowExcArgs {
+    VALUE exc;
+    const BacktraceData *btData;
+};
+
+static VALUE showExcBody(VALUE arg) {
+    const ShowExcArgs *a = (const ShowExcArgs *)arg;
+    showExc(a->exc, *a->btData);
+    return Qnil;
+}
+
+/* Backstop for the whole display path: if showExc still raises, show
+ * a plain alert instead of letting the raise abort the process. */
+static void showExcSafe(VALUE exc, const BacktraceData &btData) {
+    ShowExcArgs args = {exc, &btData};
+    int state = 0;
+    rb_protect(showExcBody, (VALUE)&args, &state);
+    if (!state)
+        return;
+    rb_set_errinfo(Qnil);
+    std::string ms = std::string("Script error (") + rb_obj_classname(exc) +
+                     "). The error details could not be formatted.";
     logRubyError("FATAL", ms.c_str());
     showMsg(ms);
 }
@@ -1998,7 +2053,7 @@ static void mriBindingExecute() {
     VALUE exc = rb_gv_get("$!");
 #endif
     if (!NIL_P(exc) && !rb_obj_is_kind_of(exc, rb_eSystemExit))
-        showExc(exc, btData);
+        showExcSafe(exc, btData);
 
     /* Flag the session as a clean exit whenever control reaches
      * here without a pending exception, or with a SystemExit - both
