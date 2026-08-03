@@ -1794,13 +1794,29 @@ static VALUE exceptionDetailMessage(VALUE exc) {
     return protectedCall(exc, rb_intern("to_s"), 0, NULL);
 }
 
+static VALUE classPathBody(VALUE exc) {
+    return rb_class_path(rb_obj_class(exc));
+}
+
+/* Class path of the exception without raising; Qnil on failure.
+ * rb_class_path allocates and can raise on an anonymous class. */
+static VALUE protectedClassPath(VALUE exc) {
+    int state = 0;
+    VALUE name = rb_protect(classPathBody, exc, &state);
+    if (state) {
+        rb_set_errinfo(Qnil);
+        return Qnil;
+    }
+    return name;
+}
+
 static void showExc(VALUE exc, const BacktraceData &btData) {
     VALUE bt = protectedCall(exc, rb_intern("backtrace"), 0, NULL);
     if (!RB_TYPE_P(bt, T_ARRAY))
         bt = Qnil;
     VALUE msg = exceptionDetailMessage(exc);
     VALUE bt0 = NIL_P(bt) ? Qnil : rb_ary_entry(bt, 0);
-    VALUE name = rb_class_path(rb_obj_class(exc));
+    VALUE name = protectedClassPath(exc);
 
     /* Build the report from plain C++ strings: rb_sprintf and
      * StringValueCStr can raise, and a raise here kills the app. */
@@ -1864,7 +1880,8 @@ static void showExcSafe(VALUE exc, const BacktraceData &btData) {
     if (!state)
         return;
     rb_set_errinfo(Qnil);
-    std::string ms = std::string("Script error (") + rb_obj_classname(exc) +
+    std::string nameStr = safeToStdString(protectedClassPath(exc), "unknown");
+    std::string ms = std::string("Script error (") + nameStr +
                      "). The error details could not be formatted.";
     logRubyError("FATAL", ms.c_str());
     showMsg(ms);
