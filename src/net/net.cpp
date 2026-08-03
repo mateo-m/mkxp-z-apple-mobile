@@ -101,17 +101,46 @@ static void ensureNetworkAllowed() {
 /* Shared client setup: TLS server verification against the host-provided
  * CA bundle (fails closed when none was set), plus timeouts so a game
  * firing an update check against a dead server doesn't hang the script
- * thread for minutes. */
-static void configureClient(httplib::Client &client) {
+ * thread for minutes.
+ *
+ * tlsCompat caps the handshake at TLS 1.2. Anti-DDoS appliances in
+ * front of some fangame hosts filter handshakes by TLS fingerprint
+ * and silently drop OpenSSL's default TLS 1.3 ClientHello while
+ * accepting its TLS 1.2 one (observed on rebornevo.com update
+ * downloads, 2026-08: the server resets or ignores the 1.3 hello,
+ * which surfaces as httplib SSLConnection). Requests start with the
+ * modern profile and retry once with this one when the SSL layer
+ * itself fails; certificate verification is identical in both. */
+static void configureClient(httplib::Client &client, bool tlsCompat = false) {
 #ifdef MKXPZ_NET_TLS
     const char *caPath = mkxp_getCABundlePath();
     if (caPath && caPath[0])
         client.set_ca_cert_path(caPath);
     client.enable_server_certificate_verification(true);
+    if (tlsCompat) {
+        if (SSL_CTX *ctx = client.ssl_context())
+            SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
+    }
+#else
+    (void)tlsCompat;
 #endif
     client.set_connection_timeout(10, 0);
     client.set_read_timeout(30, 0);
     client.set_write_timeout(30, 0);
+}
+
+/* True when a failed attempt should run again with the TLS compat
+ * profile (see configureClient). Only the SSL-layer failure retries:
+ * connection refusals, timeouts, and HTTP errors mean the same thing
+ * under either profile. */
+static bool shouldRetryWithTLSCompat(httplib::Error err, bool alreadyCompat) {
+#ifdef MKXPZ_NET_TLS
+    return !alreadyCompat && err == httplib::Error::SSLConnection;
+#else
+    (void)err;
+    (void)alreadyCompat;
+    return false;
+#endif
 }
 
 HTTPResponse::HTTPResponse() :
@@ -152,29 +181,34 @@ HTTPResponse HTTPRequest::get() {
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
 
-    httplib::Client client(getHost(target).c_str());
-    configureClient(client);
-    client.set_follow_location(follow_location);
+    for (int attempt = 0;; attempt++) {
+        const bool tlsCompat = attempt > 0;
+        httplib::Client client(getHost(target).c_str());
+        configureClient(client, tlsCompat);
+        client.set_follow_location(follow_location);
 
-    httplib::Headers head;
-    for (auto const &h : _headers)
-        head.emplace(h.first, h.second);
+        httplib::Headers head;
+        for (auto const &h : _headers)
+            head.emplace(h.first, h.second);
 
-    if (auto result = client.Get(getPath(target).c_str(), head)) {
-        auto response = result.value();
-        ret._status = response.status;
-        ret._body = response.body;
+        if (auto result = client.Get(getPath(target).c_str(), head)) {
+            auto response = result.value();
+            ret._status = response.status;
+            ret._body = response.body;
 
-        for (auto const &h : response.headers)
-            ret._headers.emplace(h.first, h.second);
+            for (auto const &h : response.headers)
+                ret._headers.emplace(h.first, h.second);
+        }
+        else {
+            auto err = result.error();
+            if (shouldRetryWithTLSCompat(err, tlsCompat))
+                continue;
+            std::string errname = httplib::to_string(err);
+            throw Exception(Exception::MKXPError, "Failed to GET %s (%i: %s)", destination.c_str(), err, errname.c_str());
+        }
+
+        return ret;
     }
-    else {
-        auto err = result.error();
-        std::string errname = httplib::to_string(err);
-        throw Exception(Exception::MKXPError, "Failed to GET %s (%i: %s)", destination.c_str(), err, errname.c_str());
-    }
-
-    return ret;
 }
 
 HTTPResponse HTTPRequest::post(StringMap &postData) {
@@ -183,33 +217,38 @@ HTTPResponse HTTPRequest::post(StringMap &postData) {
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
 
-    httplib::Client client(getHost(target).c_str());
-    configureClient(client);
-    client.set_follow_location(follow_location);
+    for (int attempt = 0;; attempt++) {
+        const bool tlsCompat = attempt > 0;
+        httplib::Client client(getHost(target).c_str());
+        configureClient(client, tlsCompat);
+        client.set_follow_location(follow_location);
 
-    httplib::Headers head;
-    httplib::Params params;
+        httplib::Headers head;
+        httplib::Params params;
 
-    for (auto const &h : _headers)
-        head.emplace(h.first, h.second);
+        for (auto const &h : _headers)
+            head.emplace(h.first, h.second);
 
-    for (auto const &p : postData)
-        params.emplace(p.first, p.second);
+        for (auto const &p : postData)
+            params.emplace(p.first, p.second);
 
-    if (auto result = client.Post(getPath(target).c_str(), head, params)) {
-        auto response = result.value();
-        ret._status = response.status;
-        ret._body = response.body;
+        if (auto result = client.Post(getPath(target).c_str(), head, params)) {
+            auto response = result.value();
+            ret._status = response.status;
+            ret._body = response.body;
 
-        for (auto h : response.headers)
-            ret._headers.emplace(h.first, h.second);
+            for (auto h : response.headers)
+                ret._headers.emplace(h.first, h.second);
+        }
+        else {
+            auto err = result.error();
+            if (shouldRetryWithTLSCompat(err, tlsCompat))
+                continue;
+            std::string errname = httplib::to_string(err);
+            throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
+        }
+        return ret;
     }
-    else {
-        auto err = result.error();
-        std::string errname = httplib::to_string(err);
-        throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
-    }
-    return ret;
 }
 
 HTTPResponse HTTPRequest::post(const char *body, const char *content_type) {
@@ -218,28 +257,33 @@ HTTPResponse HTTPRequest::post(const char *body, const char *content_type) {
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
 
-    httplib::Client client(getHost(target).c_str());
-    configureClient(client);
-    client.set_follow_location(true);
+    for (int attempt = 0;; attempt++) {
+        const bool tlsCompat = attempt > 0;
+        httplib::Client client(getHost(target).c_str());
+        configureClient(client, tlsCompat);
+        client.set_follow_location(true);
 
-    httplib::Headers head;
-    for (auto const &h : _headers)
-        head.emplace(h.first, h.second);
+        httplib::Headers head;
+        for (auto const &h : _headers)
+            head.emplace(h.first, h.second);
 
-    if (auto result = client.Post(getPath(target).c_str(), head, body, content_type)) {
-        auto response = result.value();
-        ret._status = response.status;
-        ret._body = response.body;
+        if (auto result = client.Post(getPath(target).c_str(), head, body, content_type)) {
+            auto response = result.value();
+            ret._status = response.status;
+            ret._body = response.body;
 
-        for (auto const &h : response.headers)
-            ret._headers.emplace(h.first, h.second);
+            for (auto const &h : response.headers)
+                ret._headers.emplace(h.first, h.second);
+        }
+        else {
+            auto err = result.error();
+            if (shouldRetryWithTLSCompat(err, tlsCompat))
+                continue;
+            std::string errname = httplib::to_string(err);
+            throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
+        }
+        return ret;
     }
-    else {
-        auto err = result.error();
-        std::string errname = httplib::to_string(err);
-        throw Exception(Exception::MKXPError, "Failed to POST %s (%i: %s)", destination.c_str(), err, errname.c_str());
-    }
-    return ret;
 }
 
 HTTPResponse HTTPRequest::download(const char *destPath, DownloadProgressFn progress) {
@@ -248,8 +292,12 @@ HTTPResponse HTTPRequest::download(const char *destPath, DownloadProgressFn prog
     HTTPResponse ret;
     auto target = readURL(destination.c_str());
 
+    for (int attempt = 0;; attempt++) {
+    const bool tlsCompat = attempt > 0;
+    ret._headers.clear();
+
     httplib::Client client(getHost(target).c_str());
-    configureClient(client);
+    configureClient(client, tlsCompat);
     client.set_follow_location(follow_location);
 
     httplib::Headers head;
@@ -302,6 +350,8 @@ HTTPResponse HTTPRequest::download(const char *destPath, DownloadProgressFn prog
         if (writeFailed)
             throw Exception(Exception::MKXPError, "Failed to write %s while downloading %s", destPath, destination.c_str());
         auto err = result.error();
+        if (shouldRetryWithTLSCompat(err, tlsCompat))
+            continue;
         std::string errname = httplib::to_string(err);
         throw Exception(Exception::MKXPError, "Failed to download %s (%i: %s)", destination.c_str(), (int)err, errname.c_str());
     }
@@ -318,4 +368,5 @@ HTTPResponse HTTPRequest::download(const char *destPath, DownloadProgressFn prog
     }
 
     return ret;
+    }
 }
