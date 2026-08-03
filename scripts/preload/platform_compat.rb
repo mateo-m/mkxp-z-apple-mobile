@@ -1727,7 +1727,7 @@ module Kernel
   NETWORK_STDLIB_PATHS = [
     'socket', 'resolv', 'resolv-replace',
     'openssl', 'digest',
-    'uri', 'ipaddr',
+    'uri', 'ipaddr', 'open-uri',
     'net', 'net/'
   ].freeze
 
@@ -1924,6 +1924,63 @@ if network_off
       end
 
       def connect(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+
+  # Datagram and DNS surfaces that skip `connect`. A bare
+  # `Socket.new(:INET, :DGRAM)` can emit via `send`/`sendmsg` with
+  # an explicit destination, and resolver calls reach the network
+  # on their own - all of it must go dark with the toggle too.
+  # `BasicSocket#send` stays usable for connected sockets (two
+  # args, no destination): those already got ENETDOWN at connect.
+  if defined?(BasicSocket)
+    class BasicSocket
+      # Alias, never `super`: a replaced #send falling through to
+      # the superclass lands on Object#send - Ruby MESSAGE
+      # dispatch - which would treat the payload as a method name.
+      alias _mkxp_orig_socket_send send
+
+      def send(*args)
+        raise Errno::ENETDOWN if args.length >= 3
+
+        _mkxp_orig_socket_send(*args)
+      end
+
+      def sendmsg(*_args)
+        raise Errno::ENETDOWN
+      end
+
+      def sendmsg_nonblock(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+
+  if defined?(Socket)
+    class << Socket
+      def udp_server_sockets(*_args)
+        raise Errno::ENETDOWN
+      end
+
+      def getaddrinfo(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+
+  if defined?(Addrinfo)
+    class << Addrinfo
+      def getaddrinfo(*_args)
+        raise Errno::ENETDOWN
+      end
+    end
+  end
+
+  if defined?(IPSocket)
+    class << IPSocket
+      def getaddress(*_args)
         raise Errno::ENETDOWN
       end
     end

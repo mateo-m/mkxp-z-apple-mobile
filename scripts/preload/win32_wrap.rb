@@ -949,6 +949,44 @@ module Win32API_Impl
     DeleteUrlCacheEntryA = DeleteUrlCacheEntry
     DeleteUrlCacheEntryW = DeleteUrlCacheEntry
   end
+
+  # urlmon bridge for one-shot Win32API downloaders:
+  #
+  #   UDF = Win32API.new('urlmon', 'URLDownloadToFileA', 'lppll', 'l')
+  #   UDF.call(0, url, dest, 0, 0)  # 0 == S_OK
+  #
+  # Backed by the engine's streaming HTTPLite.download. The dest
+  # path is game-relative (cwd is the game folder), matching where
+  # these scripts expect their file on Windows. With networking
+  # unavailable or disabled the call returns E_FAIL-shaped nonzero,
+  # which the scripts already treat as a failed download.
+  module Urlmon
+    class URLDownloadToFile
+      S_OK = 0
+      E_FAIL = 1
+
+      def call(args)
+        url = args[1]
+        dest = args[2]
+        unless defined?(HTTPLite) &&
+               url.is_a?(String) && !url.empty? &&
+               dest.is_a?(String) && !dest.empty?
+          return E_FAIL
+        end
+
+        response = begin
+          HTTPLite.download(url, dest)
+        rescue StandardError
+          nil
+        end
+
+        status = response.is_a?(Hash) ? response[:status].to_i : 0
+        status == 200 ? S_OK : E_FAIL
+      end
+    end
+    URLDownloadToFileA = URLDownloadToFile
+    URLDownloadToFileW = URLDownloadToFile
+  end
 end
 
 def kappatalize(s)

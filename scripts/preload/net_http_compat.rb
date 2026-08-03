@@ -446,6 +446,121 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
 
         class SSLError < StandardError; end
       end
+
+      # These VMs have no real openssl ext (the era exts predate
+      # OpenSSL 3 and cannot build). The module above exists so
+      # Net::HTTP-facade callers can set verify modes - but
+      # anything CRYPTOGRAPHIC must fail loudly. Without these
+      # stubs, `OpenSSL::Cipher` would resolve through the NullStub
+      # const_missing hook and silently return garbage where game
+      # code (rubyzip AES, HMAC-signed APIs) expects real crypto.
+      class Cipher
+        def initialize(*_args)
+          raise NotImplementedError,
+                'OpenSSL::Cipher is not available on this Ruby version'
+        end
+      end
+
+      class Digest
+        def initialize(*_args)
+          raise NotImplementedError,
+                'OpenSSL::Digest is not available on this Ruby version ' \
+                '(Digest::MD5 / Digest::SHA1 are)'
+        end
+      end
+
+      class HMAC
+        def initialize(*_args)
+          raise NotImplementedError,
+                'OpenSSL::HMAC is not available on this Ruby version'
+        end
+
+        def self.hexdigest(*_args)
+          raise NotImplementedError,
+                'OpenSSL::HMAC is not available on this Ruby version'
+        end
+
+        def self.digest(*_args)
+          raise NotImplementedError,
+                'OpenSSL::HMAC is not available on this Ruby version'
+        end
+      end
+    end
+  end
+
+  # open-uri facade. The era stdlib does not ship open-uri, but
+  # 2010s scripts lean on `open('http://...')` and
+  # `URI.parse(url).read` for version checks and small fetches.
+  # Both shapes ride HTTPLite here. The result quacks like
+  # open-uri's StringIO: read/each_line plus status, base_uri, and
+  # meta. Non-URL arguments fall through to the real Kernel#open
+  # untouched.
+  module MKXPOpenURI
+    def self.fetch(url)
+      response = begin
+        HTTPLite.get(url, nil, true)
+      rescue StandardError
+        nil
+      end
+      status = response.is_a?(Hash) ? response[:status].to_i : 0
+      raise Errno::ENETDOWN, url.to_s if status.zero?
+
+      io = StringIO.new(response[:body].to_s)
+      headers = {}
+      (response[:headers] || {}).each { |k, v| headers[k.to_s.downcase] = v.to_s }
+      singleton = class << io; self; end
+      singleton.send(:define_method, :status) { [status.to_s, ''] }
+      singleton.send(:define_method, :base_uri) { url }
+      singleton.send(:define_method, :meta) { headers }
+      singleton.send(:define_method, :content_type) { headers['content-type'].to_s }
+      io
+    end
+
+    def self.url?(value)
+      value.is_a?(String) && value =~ %r{\Ahttps?://}
+    end
+  end
+
+  module Kernel
+    alias _mkxp_pre_openuri_open open
+
+    def open(name, *rest, &block)
+      return _mkxp_pre_openuri_open(name, *rest, &block) unless MKXPOpenURI.url?(name)
+
+      io = MKXPOpenURI.fetch(name)
+      return io unless block
+
+      begin
+        yield io
+      ensure
+        io.close
+      end
+    end
+    module_function :open
+  end
+
+  if defined?(URI)
+    def URI.open(name, *rest, &block)
+      Kernel.open(name.to_s, *rest, &block)
+    end
+
+    if defined?(URI::Generic) && !URI::Generic.method_defined?(:read)
+      module URI
+        class Generic
+          def read(*_rest)
+            io = MKXPOpenURI.fetch(to_s)
+            begin
+              io.read
+            ensure
+              io.close
+            end
+          end
+
+          def open(*rest, &block)
+            Kernel.open(to_s, *rest, &block)
+          end
+        end
+      end
     end
   end
 
@@ -453,7 +568,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
   # `require 'net/http'` (or the era stdlib shipping in a game's own
   # load path) doesn't load over this facade. Cover both spellings:
   # 1.8 stores whatever string require resolved.
-  ['net/http', 'net/https', 'net/protocol', 'openssl'].each do |feature|
+  ['net/http', 'net/https', 'net/protocol', 'openssl', 'open-uri'].each do |feature|
     [feature, "#{feature}.rb"].each do |name|
       $LOADED_FEATURES << name unless $LOADED_FEATURES.include?(name)
     end
