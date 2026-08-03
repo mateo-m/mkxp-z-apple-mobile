@@ -447,42 +447,312 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
         class SSLError < StandardError; end
       end
 
-      # These VMs have no real openssl ext (the era exts predate
-      # OpenSSL 3 and cannot build). The module above exists so
-      # Net::HTTP-facade callers can set verify modes - but
-      # anything CRYPTOGRAPHIC must fail loudly. Without these
-      # stubs, `OpenSSL::Cipher` would resolve through the NullStub
-      # const_missing hook and silently return garbage where game
-      # code (rubyzip AES, HMAC-signed APIs) expects real crypto.
+      class OpenSSLError < StandardError; end
+    end
+  end
+
+  # These VMs have no real openssl ext (the era exts predate
+  # OpenSSL 3 and cannot build). The engine's MKXPCrypto binding
+  # exposes libcrypto's EVP one-shots instead; this facade builds
+  # the familiar OpenSSL::Cipher / Digest / HMAC / PKCS5 / Random
+  # API on top so crypto-dependent game code (rubyzip-AES updaters,
+  # HMAC-signed APIs) runs identically on every VM. Without the
+  # native module (an older engine core), the classes raise loudly
+  # instead of resolving through the always-truthy NullStub
+  # const_missing hook and returning garbage.
+  if defined?(MKXPCrypto)
+    module OpenSSL
+      module MKXPCryptoSupport
+        def self.digest_name(arg)
+          name = if arg.respond_to?(:name)
+                   arg.name
+                 else
+                   arg.to_s
+                 end
+          name = name.sub(/\AOpenSSL::Digest::/, '')
+          raise OpenSSL::OpenSSLError, "unsupported digest #{name}" unless MKXPCrypto.digest_supported?(name)
+
+          name
+        end
+
+        def self.hex(str)
+          str.unpack('H*')[0]
+        end
+      end
+
+      class Digest
+        attr_reader :name
+
+        def initialize(name, data = nil)
+          @name = OpenSSL::MKXPCryptoSupport.digest_name(name)
+          @buffer = ''
+          update(data) if data
+        end
+
+        def update(data)
+          @buffer << data.to_s
+          self
+        end
+        alias << update
+
+        def reset
+          @buffer = ''
+          self
+        end
+
+        def digest
+          MKXPCrypto.digest(@name, @buffer)
+        end
+
+        def hexdigest
+          OpenSSL::MKXPCryptoSupport.hex(digest)
+        end
+        alias to_s hexdigest
+
+        def self.digest(name, data)
+          MKXPCrypto.digest(OpenSSL::MKXPCryptoSupport.digest_name(name), data)
+        end
+
+        def self.hexdigest(name, data)
+          OpenSSL::MKXPCryptoSupport.hex(digest(name, data))
+        end
+
+        # OpenSSL::Digest::SHA256.new / .hexdigest(data) spellings.
+        # Generated through class_eval STRINGS on purpose: on Ruby
+        # 1.8, `super` inside define_method raises at call time,
+        # and block-parameter closures share one variable across
+        # iterations - every subclass would compute the LAST
+        # algorithm in the list. String-eval defines real methods
+        # with the name baked in, which behaves identically on
+        # every VM.
+        %w[MD5 SHA1 SHA224 SHA256 SHA384 SHA512 RIPEMD160].each do |algo|
+          subclass = Class.new(self)
+          # rubocop:disable Style/DocumentDynamicEvalDefinition
+          # Interpolated appearance, for SHA256:
+          #   def initialize(data = nil) super('SHA256', data) end
+          #   def self.digest(data) MKXPCrypto.digest('SHA256', data) end
+          #   def self.hexdigest(data) ...hex(...digest('SHA256', data)) end
+          subclass.class_eval(<<-RUBY_EVAL, __FILE__, __LINE__ + 1)
+            def initialize(data = nil)
+              super('#{algo}', data)
+            end
+
+            def self.digest(data)
+              MKXPCrypto.digest('#{algo}', data)
+            end
+
+            def self.hexdigest(data)
+              OpenSSL::MKXPCryptoSupport.hex(MKXPCrypto.digest('#{algo}', data))
+            end
+          RUBY_EVAL
+          # rubocop:enable Style/DocumentDynamicEvalDefinition
+          const_set(algo, subclass)
+        end
+      end
+
+      class HMAC
+        def initialize(key, digest)
+          @key = key.to_s
+          @name = OpenSSL::MKXPCryptoSupport.digest_name(digest)
+          @buffer = ''
+        end
+
+        def update(data)
+          @buffer << data.to_s
+          self
+        end
+        alias << update
+
+        def digest
+          MKXPCrypto.hmac(@name, @key, @buffer)
+        end
+
+        def hexdigest
+          OpenSSL::MKXPCryptoSupport.hex(digest)
+        end
+
+        def self.digest(digest, key, data)
+          MKXPCrypto.hmac(OpenSSL::MKXPCryptoSupport.digest_name(digest), key.to_s, data.to_s)
+        end
+
+        def self.hexdigest(digest, key, data)
+          OpenSSL::MKXPCryptoSupport.hex(self.digest(digest, key, data))
+        end
+      end
+
+      module PKCS5
+        def self.pbkdf2_hmac(pass, salt, iterations, key_length, digest)
+          MKXPCrypto.pbkdf2_hmac(
+            pass.to_s, salt.to_s, iterations, key_length,
+            OpenSSL::MKXPCryptoSupport.digest_name(digest)
+          )
+        end
+
+        def self.pbkdf2_hmac_sha1(pass, salt, iterations, key_length)
+          pbkdf2_hmac(pass, salt, iterations, key_length, 'SHA1')
+        end
+      end
+
+      module Random
+        def self.random_bytes(count)
+          MKXPCrypto.random_bytes(count)
+        end
+      end
+
+      class Cipher
+        class CipherError < OpenSSL::OpenSSLError; end
+
+        # One-shot backend: update() buffers and final() transforms.
+        # Identical bytes to incremental EVP output for the modes
+        # games use (CBC/CTR/ECB/CFB/OFB). AEAD modes need tag
+        # plumbing this facade does not pretend to have.
+        def initialize(name)
+          @name = name.to_s.upcase
+          if @name =~ /GCM|CCM|OCB|POLY1305|CHACHA/
+            raise NotImplementedError,
+                  "AEAD cipher #{@name} is not supported here"
+          end
+          raise CipherError, "unsupported cipher #{@name}" unless MKXPCrypto.cipher_supported?(@name)
+
+          @encrypt = true
+          @key = nil
+          @iv = ''
+          @padding = true
+          @buffer = ''
+        end
+
+        def encrypt(*_args)
+          @encrypt = true
+          @buffer = ''
+          self
+        end
+
+        def decrypt(*_args)
+          @encrypt = false
+          @buffer = ''
+          self
+        end
+
+        def key=(value)
+          @key = value.to_s
+        end
+
+        def iv=(value)
+          @iv = value.to_s
+        end
+
+        def padding=(value)
+          @padding = ![0, false].include?(value)
+        end
+
+        def key_len
+          MKXPCrypto.cipher_key_length(@name)
+        end
+
+        def iv_len
+          MKXPCrypto.cipher_iv_length(@name)
+        end
+
+        def block_size
+          # Good enough for the buffer-sizing games do; EVP block
+          # size differs only for stream modes where callers never
+          # depend on it.
+          16
+        end
+
+        def random_key
+          key = MKXPCrypto.random_bytes(key_len)
+          @key = key
+          key
+        end
+
+        def random_iv
+          iv = MKXPCrypto.random_bytes(iv_len)
+          @iv = iv
+          iv
+        end
+
+        def update(data)
+          @buffer << data.to_s
+          ''
+        end
+        alias << update
+
+        def final
+          raise CipherError, 'no key set' if @key.nil?
+
+          out = MKXPCrypto.cipher_run(
+            @name, @encrypt, @key, @iv, @buffer, @padding
+          )
+          @buffer = ''
+          out
+        rescue RuntimeError => e
+          raise CipherError, e.message
+        end
+
+        def reset
+          @buffer = ''
+          self
+        end
+
+        attr_reader :name
+
+        # OpenSSL::Cipher::AES256.new(:CBC) / AES.new(128, :CTR)
+        # spellings used by vendored rubyzip and era scripts.
+        class AES < Cipher
+          def initialize(bits, mode)
+            super("AES-#{bits}-#{mode.to_s.upcase}")
+          end
+        end
+
+        # String-eval for the same 1.8 super/closure reasons as the
+        # Digest subclasses above.
+        [128, 192, 256].each do |bits|
+          subclass = Class.new(Cipher)
+          # rubocop:disable Style/DocumentDynamicEvalDefinition
+          # Interpolated appearance, for 256:
+          #   def initialize(mode) super("AES-256-#{mode.to_s.upcase}") end
+          subclass.class_eval(<<-RUBY_EVAL, __FILE__, __LINE__ + 1)
+            def initialize(mode)
+              super("AES-#{bits}-\#{mode.to_s.upcase}")
+            end
+          RUBY_EVAL
+          # rubocop:enable Style/DocumentDynamicEvalDefinition
+          const_set("AES#{bits}", subclass)
+        end
+      end
+    end
+  else
+    module OpenSSL
       class Cipher
         def initialize(*_args)
           raise NotImplementedError,
-                'OpenSSL::Cipher is not available on this Ruby version'
+                'OpenSSL::Cipher needs an engine core with MKXPCrypto'
         end
       end
 
       class Digest
         def initialize(*_args)
           raise NotImplementedError,
-                'OpenSSL::Digest is not available on this Ruby version ' \
-                '(Digest::MD5 / Digest::SHA1 are)'
+                'OpenSSL::Digest needs an engine core with MKXPCrypto ' \
+                '(Digest::MD5 / Digest::SHA1 are available)'
         end
       end
 
       class HMAC
         def initialize(*_args)
           raise NotImplementedError,
-                'OpenSSL::HMAC is not available on this Ruby version'
+                'OpenSSL::HMAC needs an engine core with MKXPCrypto'
         end
 
         def self.hexdigest(*_args)
           raise NotImplementedError,
-                'OpenSSL::HMAC is not available on this Ruby version'
+                'OpenSSL::HMAC needs an engine core with MKXPCrypto'
         end
 
         def self.digest(*_args)
           raise NotImplementedError,
-                'OpenSSL::HMAC is not available on this Ruby version'
+                'OpenSSL::HMAC needs an engine core with MKXPCrypto'
         end
       end
     end

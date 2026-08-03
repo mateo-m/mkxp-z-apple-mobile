@@ -137,6 +137,7 @@ void graphicsBindingInit();
 void fileIntBindingInit();
 
 void httpBindingInit();
+void cryptoBindingInit();
 
 void hmode7BindingInit();
 
@@ -364,6 +365,7 @@ static void mriBindingInit() {
     fileIntBindingInit();
 
     httpBindingInit();
+    cryptoBindingInit();
 
     /* H-Mode7 native binding. Depends on bitmapBindingInit +
      * tableBindingInit having run; registers the HM7::Native
