@@ -256,13 +256,23 @@ end
 #     native C method.
 def _mkxp_install_disposed_safe_wrapper(klass, meth, default)
   return unless klass.method_defined?(meth)
+  return unless klass.method_defined?(:disposed?)
 
   orig = :"_mkxp_orig_#{meth}"
   unless klass.method_defined?(orig) || klass.private_method_defined?(orig)
     klass.send(:alias_method, orig, meth)
   end
+  # Keep a private alias of the native disposed?. The wrapper must
+  # not call the public disposed?: game scripts redefine it, and
+  # some route it back through a wrapped getter. VXAce_FP fix [01]
+  # probes `self.visible` inside disposed?, so the public call
+  # recurses without bound (found in BLACK SOULS II).
+  unless klass.method_defined?(:_mkxp_orig_disposed?) ||
+         klass.private_method_defined?(:_mkxp_orig_disposed?)
+    klass.send(:alias_method, :_mkxp_orig_disposed?, :disposed?)
+  end
   klass.send(:define_method, meth) do
-    return default if disposed?
+    return default if _mkxp_orig_disposed?
 
     begin
       send(orig)
@@ -278,9 +288,17 @@ disposed_safe_zero = [:x, :y, :z, :ox, :oy, :width, :height,
 disposed_safe_false = [:visible]
 # rubocop:enable Style/SymbolArray
 
-[Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
-  disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
-  disposed_safe_false.each { |m| _mkxp_install_disposed_safe_wrapper(klass, m, false) }
+# Install the wrappers only for RGSS1 games. Pokemon Essentials is
+# always XP-based, and the wrappers exist for Essentials scripts
+# alone. Later engines must keep the stock raise-on-disposed
+# semantics: VX Ace games probe those raises on purpose (VXAce_FP
+# redefines disposed? to rescue the RGSSError from `visible`), and
+# a getter that returns a default instead breaks that probe.
+if System.rpg_version == 1
+  [Sprite, Window, Viewport, Plane, Tilemap].each do |klass|
+    disposed_safe_zero.each  { |m| _mkxp_install_disposed_safe_wrapper(klass, m, 0)     }
+    disposed_safe_false.each { |m| _mkxp_install_disposed_safe_wrapper(klass, m, false) }
+  end
 end
 
 # --- Null mouse shim ---
