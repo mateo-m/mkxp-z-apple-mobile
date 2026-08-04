@@ -73,6 +73,39 @@ module Graphics
         __mkxp_graphics_native(:@__mkxp_native_play_movie, :play_movie, filename)
       end
     end
+
+    # Many fangames replace Graphics.snap_to_bitmap with a version
+    # that cannot work off Windows, and every replacement fails the
+    # same way: it returns nil.
+    #
+    # Peter O.'s "Sprite Resizer" asks rubyscreen.dll to write a BMP
+    # to ENV["TEMP"], then loads that file. The DLL never runs here,
+    # so no file appears and the method returns nil. Essentials then
+    # ships a fallback (PSystem_System) that hard-codes `return nil`
+    # when the resizer is absent.
+    #
+    # Menus, `pbFadeOutIn` and every transition draw the captured
+    # screen as their background. A nil capture leaves them blank,
+    # which reads as "the menu never opened" (Pokemon Empyrean).
+    #
+    # Keep the game's version and fall back to the native capture
+    # when it yields nothing. Games that wrap snap_to_bitmap for
+    # their own reasons (Daybreak returns Graphics.mkxp_snap_to_bitmap)
+    # return a real bitmap, so the wrapper passes their result on.
+    game_snap = Graphics.method(:snap_to_bitmap) if Graphics.respond_to?(:snap_to_bitmap)
+    native_snap = Graphics.instance_variable_get(:@__mkxp_native_snap_to_bitmap)
+    if game_snap && native_snap && game_snap != native_snap
+      define_method(:snap_to_bitmap) do
+        captured = begin
+          game_snap.call
+        rescue StandardError
+          nil
+        end
+        captured = native_snap.call if captured.nil?
+        captured
+      end
+      MKXP.puts('[graphics-compat] snap_to_bitmap falls back to the native capture') if defined?(MKXP)
+    end
   end
 end
 
