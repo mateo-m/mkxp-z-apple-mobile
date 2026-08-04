@@ -46,7 +46,7 @@ the game.
 | ------------------- | ------------------------------------------------------------- |
 | `last N raise group(s)` | The buffer holds N groups. Older groups say how many dropped. |
 | `<Class>: <message>`    | One raise. `[xN]` counts repeats of the same raise site.       |
-| `from <frame>` (indented) | Up to 10 backtrace frames.                                   |
+| `from <frame>`          | One backtrace frame, indented. A group shows up to 10.        |
 
 The buffer keeps 25 groups. It shortens messages after 300 characters.
 
