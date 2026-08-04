@@ -129,19 +129,89 @@ unless $PokemonSystem.nil?
   end
 
   module Input
+    # Newer Pokemon Essentials fangames add button codes of their own.
+    # Pokemon Empyrean defines ESC = 35, MENU = 36 and
+    # KEY_ITEM_1..5 = 37..41. The engine knows the RGSS codes only, so
+    # `jtrigger?` answers false for every extended code and the button
+    # is dead. In Empyrean that left no way to open the pause menu.
+    #
+    # The same games ship `Input.buttonToKey`, which gives the Win32
+    # virtual-key codes a button listens on. `jtriggerex?` accepts a
+    # virtual-key code, so route extended buttons through that table.
+    #
+    # Standard RGSS codes stay on the native path. It reads the
+    # player's key bindings and also covers the on-screen controls and
+    # gamepads, which raw key state alone would miss.
+    MKXP_RGSS_BUTTON_CODES = [2, 4, 6, 8,
+                              11, 12, 13, 14, 15, 16, 17, 18,
+                              21, 22, 23,
+                              25, 26, 27, 28, 29].freeze
+
+    def self.mkxp_extended_vkeys(button)
+      return nil if MKXP_RGSS_BUTTON_CODES.include?(button)
+      return nil unless respond_to?(:buttonToKey)
+
+      vkeys = begin
+        buttonToKey(button)
+      rescue StandardError
+        nil
+      end
+      return nil unless vkeys.is_a?(Array) && !vkeys.empty?
+
+      vkeys
+    end
+
+    # Pokemon Essentials calls `Input.update` from hundreds of places,
+    # some of them in the middle of a frame. Pokemon Empyrean's
+    # `Game_Player#update` calls it, then reads `Input.trigger?` about
+    # ninety lines further down the same method.
+    #
+    # The engine advances the trigger edge on every `Input.update`, so
+    # that second call throws the press away before anything reads it.
+    # On Windows the games get away with this: their Input module polls
+    # GetAsyncKeyState and advances a key only when that key is READ,
+    # so extra updates cost nothing.
+    #
+    # On iOS the result looked like broken input. The pause menu never
+    # opened, and talking to an NPC or reading a sign worked only when
+    # a keypress happened to land between the mid-frame update and the
+    # read.
+    #
+    # So track the trigger edge here under the same read-driven rule:
+    # a button advances on its first read after each `Input.update`,
+    # and repeat reads in between give the same answer. `press?` needs
+    # no such care, because a pressed state has no edge to lose.
+    def self.mkxp_button_down?(button)
+      vkeys = mkxp_extended_vkeys(button)
+      return vkeys.any? { |vkey| jpressex?(vkey) } if vkeys
+
+      jpress?(button)
+    end
+
     def self.update
+      @mkxp_read = nil
       jupdate
     end
 
     def self.press?(button)
-      jpress?(button)
+      mkxp_button_down?(button)
     end
 
     def self.trigger?(button)
-      jtrigger?(button)
+      @mkxp_read ||= {}
+      return @mkxp_read[button] if @mkxp_read.key?(button)
+
+      @mkxp_counts ||= {}
+      held = @mkxp_counts[button] || 0
+      down = mkxp_button_down?(button)
+      @mkxp_counts[button] = down ? held + 1 : 0
+      @mkxp_read[button] = down && held.zero?
     end
 
     def self.repeat?(button)
+      vkeys = mkxp_extended_vkeys(button)
+      return vkeys.any? { |vkey| jrepeatex?(vkey) } if vkeys
+
       jrepeat?(button)
     end
 
