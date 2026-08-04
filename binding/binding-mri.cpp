@@ -96,6 +96,7 @@ extern VALUE *rb_gc_stack_start;
 }
 
 #include <assert.h>
+#include <pthread.h>
 #include <string>
 #include <zlib.h>
 
@@ -2007,6 +2008,50 @@ static void mriBindingExecute() {
     }
 #else
     ruby_init();
+
+#if RAPI_FULL <= 187
+    /* Pin Ruby 1.8's machine-stack base to this frame.
+     *
+     * 1.8 stores one base (`rb_gc_stack_start`) and derives a LENGTH
+     * from it every time it snapshots the stack for a green thread
+     * (eval.c, rb_thread_save_context):
+     *
+     *   len = ruby_stack_length(&pos);         // base - current SP
+     *   MEMCPY(th->stk_ptr, pos, VALUE, len);  // copies [SP, base)
+     *
+     * A base above the rgss thread's stack makes that copy run past
+     * the top into the next thread's guard page. The result is a
+     * SIGBUS inside rb_bug, then abort(): no Ruby exception, so the
+     * engine never sees it and the process dies with no error UI.
+     * Every 1.8 game that calls Thread.new is exposed - Xenoverse
+     * does it to relaunch the game after installing fonts.
+     *
+     * ruby_init() seeds the base from its own frame, but
+     * ruby_init_stack (gc.c) only ever RAISES it: it keeps the
+     * highest address it has ever seen. A base that ends up too high
+     * therefore cannot be corrected through the public API, so
+     * assign it directly. This frame is the outermost one that runs
+     * Ruby, so every later frame sits below the anchor and the
+     * snapshot length stays inside the thread's stack. The 2.0+ path
+     * above gets the same guarantee from RUBY_INIT_STACK. */
+    {
+        /* The frame address, not a local: it sits above every local
+         * in this frame, so the conservative GC still scans them. */
+        VALUE *seeded = rb_gc_stack_start;
+        rb_gc_stack_start = (VALUE *)__builtin_frame_address(0);
+
+        /* Report both bases against the real stack bounds so a debug
+         * log shows whether the seeded value was out of range. */
+        char *stackTop = (char *)pthread_get_stackaddr_np(pthread_self());
+        size_t stackSize = pthread_get_stacksize_np(pthread_self());
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "ruby1.8 stack base %p -> %p (rgss stack %p..%p)",
+                 (void *)seeded, (void *)rb_gc_stack_start,
+                 (void *)(stackTop - stackSize), (void *)stackTop);
+        mkxp_debugLog("INFO", "binding-mri.cpp [C++]", detail);
+    }
+#endif
 #endif
 
     /* Ruby 1.8 / 1.9: explicitly initialize statically-linked
