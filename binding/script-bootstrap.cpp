@@ -24,6 +24,10 @@
 
 extern "C" {
 #include <ruby.h>
+#if RAPI_FULL <= 187
+/* NODE and RUBY_EVENT_RAISE live in node.h on 1.8. */
+#include <node.h>
+#endif
 }
 
 namespace mkxp {
@@ -93,6 +97,70 @@ static void runBundledScript(const char *subdir, const char *name, const char *l
     }
 }
 
+/* --- Raise tracing ---
+ * A C event hook feeds MKXPRaiseTrace (scripts/preload/raise_trace.rb).
+ * RUBY_EVENT_RAISE is the mechanism behind TracePoint(:raise) and
+ * exists on every VM we merge, so 1.8 and 1.9 get the same coverage
+ * as 3.1 - including VM-internal raises (a NoMethodError from a typo)
+ * that never pass through Kernel#raise. Those are exactly the errors
+ * a game's blanket `rescue` hides.
+ *
+ * A Ruby-level Kernel#raise wrapper would be both narrower (explicit
+ * raises only) and invasive (games alias raise themselves), so the
+ * hook stays in C and the script only stores and formats. */
+static bool g_raiseHookInstalled = false;
+static __thread int g_inRaiseHook = 0;
+
+static VALUE recordRaiseBody(VALUE excArg) {
+    VALUE mod = rb_const_get(rb_cObject, rb_intern("MKXPRaiseTrace"));
+    return rb_funcall(mod, rb_intern("record_exception"), 1, excArg);
+}
+
+#if RAPI_FULL <= 187
+static void raiseEventHook(rb_event_t, NODE *, VALUE, ID, VALUE)
+#else
+static void raiseEventHook(rb_event_flag_t, VALUE, VALUE, ID, VALUE)
+#endif
+{
+    /* Recording calls Ruby, which can raise and re-enter the hook. */
+    if (g_inRaiseHook)
+        return;
+    if (!rb_const_defined(rb_cObject, rb_intern("MKXPRaiseTrace")))
+        return;
+
+#if RAPI_FULL > 187
+    VALUE exc = rb_errinfo();
+#else
+    VALUE exc = rb_gv_get("$!");
+#endif
+    if (NIL_P(exc))
+        return;
+
+    g_inRaiseHook = 1;
+    int state = 0;
+    rb_protect(recordRaiseBody, exc, &state);
+    /* The game's raise is still in flight. Restore its exception
+     * unconditionally so a failed recording cannot swallow or
+     * replace what the game is raising. */
+    rb_set_errinfo(exc);
+    g_inRaiseHook = 0;
+}
+
+static void installRaiseHook() {
+    /* loadEnginePreloads runs once per game session, but the VM
+     * outlives a session on iOS; a second registration would record
+     * every raise twice. */
+    if (g_raiseHookInstalled)
+        return;
+
+#if RAPI_FULL <= 187
+    rb_add_event_hook(raiseEventHook, RUBY_EVENT_RAISE);
+#else
+    rb_add_event_hook(raiseEventHook, RUBY_EVENT_RAISE, Qnil);
+#endif
+    g_raiseHookInstalled = true;
+}
+
 // Expose the host launcher's identity to game scripts (see
 // mkxp_setLauncherIdentity in app_bridge.h): `$userAgent` carries the
 // name verbatim; `$<name> = true` follows the JoiPlay `$joiplay`
@@ -116,6 +184,15 @@ static void setLauncherIdentityGlobals() {
 
 void loadEnginePreloads() {
     setLauncherIdentityGlobals();
+
+    /* Raise tracing records rescued-and-dropped exceptions for the
+     * end-of-session RAISETRACE dump (binding-mri.cpp). Load it
+     * first so later preloads and all game scripts are covered, and
+     * only under debug logs so normal play pays no tracing cost. */
+    if (mkxp_debugLogEnabled()) {
+        runBundledScript("Preload", "raise_trace", "PRELOAD");
+        installRaiseHook();
+    }
 
     const char *enginePreloads[] = {
         "platform_compat",

@@ -1730,6 +1730,32 @@ static VALUE protectedCall(VALUE recv, ID mid, int argc, const VALUE *argv) {
     return ret;
 }
 
+/* Dump the raise ring buffer (scripts/preload/raise_trace.rb) to
+ * the debug log. Runs once when script execution ends. The buffer
+ * holds exceptions that game code rescued and dropped; on a masked
+ * boot failure these lines are the only evidence. Callers must
+ * capture and restore $! themselves - the drain call goes through
+ * rb_protect and clears errinfo on failure. */
+static void drainRaiseTrace() {
+    if (!mkxp_debugLogEnabled())
+        return;
+    if (!rb_const_defined(rb_cObject, rb_intern("MKXPRaiseTrace")))
+        return;
+
+    VALUE mod = rb_const_get(rb_cObject, rb_intern("MKXPRaiseTrace"));
+    VALUE lines = protectedCall(mod, rb_intern("drain"), 0, NULL);
+    if (!RB_TYPE_P(lines, T_ARRAY))
+        return;
+
+    long count = RARRAY_LEN(lines);
+    for (long i = 0; i < count; ++i) {
+        VALUE line = rb_ary_entry(lines, i);
+        if (RB_TYPE_P(line, T_STRING))
+            mkxp_debugLog("RAISETRACE", "binding-mri.cpp [C++]",
+                          RSTRING_PTR(line));
+    }
+}
+
 /* Convert a value to a display string without raising; a failed or
  * non-string #to_s yields the fallback instead. */
 static std::string safeToStdString(VALUE v, const char *fallback) {
@@ -2069,6 +2095,13 @@ static void mriBindingExecute() {
 #else
     VALUE exc = rb_gv_get("$!");
 #endif
+
+    /* Drain after capturing exc: the drain path may touch $!, and
+     * the error display plus the clean-exit gate below must see the
+     * exception the scripts actually ended with. */
+    drainRaiseTrace();
+    rb_set_errinfo(exc);
+
     if (!NIL_P(exc) && !rb_obj_is_kind_of(exc, rb_eSystemExit))
         showExcSafe(exc, btData);
 
