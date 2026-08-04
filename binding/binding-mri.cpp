@@ -92,6 +92,9 @@ void Init_fcntl(void);
 
 /* Ruby 1.8 GC stack base; defined in gc.c. */
 extern VALUE *rb_gc_stack_start;
+/* Caches gc.c's stack-growth direction on first use. Not declared in
+ * any Ruby header, but it is a plain external symbol. */
+int rb_stack_growup_p(volatile VALUE *addr);
 #endif
 }
 
@@ -2007,6 +2010,47 @@ static void mriBindingExecute() {
         return;
     }
 #else
+#if RAPI_FULL <= 187
+    /* Settle Ruby 1.8's stack-growth direction from a clean call site
+     * BEFORE ruby_init, because the first caller wins and caches it.
+     *
+     * This build configures STACK_GROW_DIRECTION as 0 (config.h), so
+     * gc.c decides at runtime by comparing the address of a local in
+     * stack_grow_direction() against an address from its caller. When
+     * that comparison is made from an inlined context the two
+     * addresses share a frame, their order is arbitrary, and arm64
+     * can be read as growing upwards.
+     *
+     * The length ruby_stack_length() returns stays correct either way
+     * (its STACK_LENGTH is a runtime conditional), but the position
+     * it reports does not:
+     *
+     *   *p = STACK_UPPER(STACK_END, rb_gc_stack_start, STACK_END);
+     *
+     * Read as upward, that hands back the stack BASE instead of the
+     * current SP. rb_thread_save_context then memcpys from the base
+     * for the length of the live stack - upwards, off the top of the
+     * thread stack and into the next thread's guard page. The result
+     * is SIGBUS inside rb_bug and an abort(): no Ruby exception, so
+     * nothing in the engine or the raise tracer can report it. Every
+     * 1.8 game that calls Thread.new is exposed; Xenoverse does it to
+     * relaunch itself after installing fonts (issue #91).
+     *
+     * Calling through the external rb_stack_growup_p keeps the two
+     * addresses in genuinely separate frames: `probe` belongs to this
+     * function, and gc.c's own local sits below it. The direction is
+     * cached from that comparison, so the real one is correct. */
+    {
+        volatile VALUE probe = Qnil;
+        int growsUp = rb_stack_growup_p(&probe);
+        char detail[128];
+        snprintf(detail, sizeof(detail),
+                 "ruby1.8 stack direction: %s",
+                 growsUp ? "UP (unexpected on arm64)" : "down");
+        mkxp_debugLog("INFO", "binding-mri.cpp [C++]", detail);
+    }
+#endif
+
     ruby_init();
 
 #if RAPI_FULL <= 187
@@ -2026,14 +2070,17 @@ static void mriBindingExecute() {
      * Every 1.8 game that calls Thread.new is exposed - Xenoverse
      * does it to relaunch the game after installing fonts.
      *
-     * ruby_init() seeds the base from its own frame, but
+     * ruby_init() seeds the base from its own frame, and
      * ruby_init_stack (gc.c) only ever RAISES it: it keeps the
-     * highest address it has ever seen. A base that ends up too high
-     * therefore cannot be corrected through the public API, so
-     * assign it directly. This frame is the outermost one that runs
-     * Ruby, so every later frame sits below the anchor and the
-     * snapshot length stays inside the thread's stack. The 2.0+ path
-     * above gets the same guarantee from RUBY_INIT_STACK. */
+     * highest address it has ever seen, so a base that drifts too
+     * high cannot be corrected through the public API. Assign it
+     * directly instead. This frame is the outermost one that runs
+     * Ruby, so every later frame sits below the anchor. The 2.0+
+     * path above gets the same guarantee from RUBY_INIT_STACK.
+     *
+     * Hardening only: the observed crash came from the direction
+     * above, not from a bad base. The log line records both against
+     * the real stack bounds. */
     {
         /* The frame address, not a local: it sits above every local
          * in this frame, so the conservative GC still scans them. */
