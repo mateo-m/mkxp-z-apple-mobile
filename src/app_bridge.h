@@ -323,6 +323,14 @@ int         mkxp_isTextInputActive(void);
 // Engine state queries
 
 double      mkxp_getAverageFPS(void);
+
+// The frame rate the game asks for (`Graphics.frame_rate`). Games
+// set their own cap: RPG Maker XP games usually run at 40, VX and
+// VX Ace games at 60. The host compares the average FPS against
+// this number to tell "full speed" from "slow". Returns 0 when no
+// game runs.
+int         mkxp_getTargetFPS(void);
+
 int         mkxp_getRGSSVersion(void);
 const char *mkxp_getGameTitle(void);
 
@@ -619,6 +627,7 @@ static inline void        mkxp_pushTextInput(const char *utf8) { (void)utf8; }
 static inline int         mkxp_isTextInputActive(void) { return 0; }
 
 static inline double      mkxp_getAverageFPS(void) { return 0.0; }
+static inline int         mkxp_getTargetFPS(void) { return 0; }
 static inline int         mkxp_getRGSSVersion(void) { return 0; }
 static inline const char *mkxp_getGameTitle(void) { return ""; }
 static inline int         mkxp_getSupportedRGSSVersionMask(void) { return 0; }

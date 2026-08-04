@@ -344,6 +344,17 @@ double mkxp_getAverageFPS(void) {
     return SharedState::instance->graphics().averageFrameRate();
 }
 
+int mkxp_getTargetFPS(void) {
+    if (s_engineTerminated.load(std::memory_order_acquire)) return 0;
+    if (!SharedState::instance) return 0;
+    // A pinned rate overrides the game's own request, the same way
+    // Graphics::setFrameRate does, so report the rate the limiter
+    // really enforces.
+    const int pinned = SharedState::instance->rtData().config.fixedFramerate;
+    if (pinned > 0) return pinned;
+    return SharedState::instance->graphics().getFrameRate();
+}
+
 int mkxp_getRGSSVersion(void) {
     if (s_engineTerminated.load(std::memory_order_acquire)) return 0;
     if (!SharedState::instance) return 0;
