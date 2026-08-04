@@ -1141,7 +1141,17 @@ struct GraphicsPrivate {
 
 Graphics::Graphics(RGSSThreadData *data) {
     p = new GraphicsPrivate(data);
-    if (data->config.syncToRefreshrate) {
+    if (data->config.fixedFramerate > 0) {
+        // A pinned rate wins over every other source, because
+        // setFrameRate ignores the game's own `Graphics.frame_rate`
+        // while the pin is in place. Test this branch first: when
+        // syncToRefreshrate came first, the pin never reached the
+        // limiter and the game ran at the display refresh rate
+        // instead - up to 3x too fast on a 120Hz phone.
+        p->fpsLimiter.setDesiredFPS(data->config.fixedFramerate);
+    } else if (data->config.fixedFramerate < 0) {
+        p->fpsLimiter.disabled = true;
+    } else if (data->config.syncToRefreshrate) {
         // syncToRefreshrate caps DRAW timing at the GL layer
         // (Metal/EGL waits for the display vsync before swap).
         // Upstream mkxp-z used to ALSO disable the software FPS
@@ -1165,10 +1175,6 @@ Graphics::Graphics(RGSSThreadData *data) {
         // call updates it to the right value via setFrameRate.
         p->frameRate = data->refreshRate;
         p->fpsLimiter.setDesiredFPS(data->refreshRate);
-    } else if (data->config.fixedFramerate > 0) {
-        p->fpsLimiter.setDesiredFPS(data->config.fixedFramerate);
-    } else if (data->config.fixedFramerate < 0) {
-        p->fpsLimiter.disabled = true;
     }
 }
 
