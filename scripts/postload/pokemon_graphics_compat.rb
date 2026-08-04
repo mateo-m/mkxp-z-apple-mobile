@@ -96,13 +96,15 @@ module MkxpGraphicsPathString
   end
 end
 
+# rubocop:disable Lint/SendWithMixinArgument -- include/prepend are private until Ruby 2.1
 if String.respond_to?(:prepend, true)
-  String.prepend MkxpGraphicsPathString unless String.ancestors.include?(MkxpGraphicsPathString)
+  String.send(:prepend, MkxpGraphicsPathString) unless String.ancestors.include?(MkxpGraphicsPathString)
 else
   # Module#prepend is Ruby 2.0+. width/height are new methods on
   # String, so include is equivalent on 1.8/1.9 VX/VX Ace games.
-  String.include MkxpGraphicsPathString unless String.ancestors.include?(MkxpGraphicsPathString)
+  String.send(:include, MkxpGraphicsPathString) unless String.ancestors.include?(MkxpGraphicsPathString)
 end
+# rubocop:enable Lint/SendWithMixinArgument
 
 module MkxpBitmapPathCoercion
   def bitmap=(value)
@@ -125,7 +127,7 @@ module MkxpBitmapPathCoercion
     if klass.respond_to?(:prepend, true)
       return if klass.ancestors.include?(MkxpBitmapPathCoercion)
 
-      klass.prepend(MkxpBitmapPathCoercion)
+      klass.send(:prepend, MkxpBitmapPathCoercion)
     else
       marker = :__mkxp_coerced_bitmap_set
       return if klass.method_defined?(marker)
