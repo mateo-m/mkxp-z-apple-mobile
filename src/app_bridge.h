@@ -372,6 +372,29 @@ void        mkxp_setSafeAreaInsets(float top, float bottom, float left, float ri
 // Returns true (once) if insets changed since last check.
 bool        mkxp_consumeSafeAreaInsetsChanged(void);
 
+// Host viewport region (dimensionless window fractions)
+//
+// The host may confine the game picture to a sub-rectangle of the
+// window. x/y/w/h are fractions of the window in [0,1], top-left
+// origin. isPortrait tags the orientation the region was computed
+// for; the engine draws automatic placement while the window
+// orientation does not match (rotation safety). With fixed aspect
+// ratio on (the default), the picture aspect-fits centered inside
+// the region; with it off, the picture stretches to fill the
+// region, mirroring the no-region path. The vertical-alignment
+// preset and the safe-area insets apply only on the no-region path.
+// Sets the relayout flag; the engine applies the region at its next
+// relayout poll.
+void        mkxp_setHostViewportRegion(float x, float y, float w, float h,
+                                       bool isPortrait);
+
+// Back to automatic placement, as if no region was ever set.
+void        mkxp_clearHostViewportRegion(void);
+
+// Engine-side read. Returns false when no region is set.
+bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
+                                       bool *isPortrait);
+
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
@@ -642,6 +665,9 @@ static inline void        mkxp_getSafeAreaInsets(float *top, float *bottom, floa
 { if (top) *top = 0; if (bottom) *bottom = 0; if (left) *left = 0; if (right) *right = 0; }
 static inline void        mkxp_setSafeAreaInsets(float top, float bottom, float left, float right) { (void)top; (void)bottom; (void)left; (void)right; }
 static inline bool        mkxp_consumeSafeAreaInsetsChanged(void) { return false; }
+static inline void        mkxp_setHostViewportRegion(float x, float y, float w, float h, bool isPortrait) { (void)x; (void)y; (void)w; (void)h; (void)isPortrait; }
+static inline void        mkxp_clearHostViewportRegion(void) {}
+static inline bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h, bool *isPortrait) { (void)x; (void)y; (void)w; (void)h; (void)isPortrait; return false; }
 static inline float       mkxp_getScreenScale(void) { return 1.0f; }
 static inline void       *mkxp_getSDLUIKitWindow(void) { return NULL; }
 

@@ -637,10 +637,73 @@ struct GraphicsPrivate {
                          scSize.x / uiSc, scSize.y / uiSc);
     }
     
+    /* Places the picture inside a host-supplied window-fraction
+     * region. Returns false when no region applies (none set,
+     * orientation tag mismatch, or degenerate after clamping) -
+     * the caller then runs the automatic path. The picture centers
+     * in the region; the vertical-alignment preset and the safe
+     * area apply only on the automatic path. */
+    bool applyHostViewportRegion(bool fixedAspectRatio) {
+        float hvX, hvY, hvW, hvH;
+        bool hvPortrait;
+        if (!mkxp_getHostViewportRegion(&hvX, &hvY, &hvW, &hvH, &hvPortrait))
+            return false;
+
+        /* Rotation safety: SDL's resize reaches this thread before
+         * the host's per-orientation set/clear call lands. A region
+         * tagged for the other orientation draws automatic placement
+         * until the matching call arrives. */
+        if (hvPortrait != (winSize.x < winSize.y))
+            return false;
+
+        /* winSize is already drawable pixels; fractions multiply it
+         * directly, no scale factor. hvY is top-left origin. */
+        int cx    = (int)(hvX * winSize.x + 0.5f);
+        int cyTop = (int)(hvY * winSize.y + 0.5f);
+        int cw    = (int)(hvW * winSize.x + 0.5f);
+        int ch    = (int)(hvH * winSize.y + 0.5f);
+
+        cx    = std::max(0, std::min(cx, winSize.x));
+        cyTop = std::max(0, std::min(cyTop, winSize.y));
+        cw    = std::min(cw, winSize.x - cx);
+        ch    = std::min(ch, winSize.y - cyTop);
+
+        if (cw < 1 || ch < 1) {
+            char buf[128];
+            snprintf(buf, sizeof(buf),
+                     "REJECTED degenerate host region %dx%d in %dx%d",
+                     cw, ch, winSize.x, winSize.y);
+            mkxp_debugLog("RESIZE", "graphics.cpp [C++]", buf);
+            return false;
+        }
+
+        if (fixedAspectRatio) {
+            float resRatio = (float)scRes.x / scRes.y;
+            scSize.x = cw;
+            scSize.y = (int)(scSize.x / resRatio);
+            if (scSize.y > ch) {
+                scSize.y = ch;
+                scSize.x = (int)(scSize.y * resRatio);
+            }
+        } else {
+            scSize.x = cw;
+            scSize.y = ch;
+        }
+
+        /* Center in the region. scOffset.y is GL bottom-left. */
+        scOffset.x = cx + (cw - scSize.x) / 2;
+        int cyGl = winSize.y - cyTop - ch;
+        scOffset.y = cyGl + (ch - scSize.y) / 2;
+        return true;
+    }
+
     /* Enforces fixed aspect ratio, if desired */
     void recalculateScreenSize(bool fixedAspectRatio) {
         scSize = winSize;
-        
+
+        if (applyHostViewportRegion(fixedAspectRatio))
+            return;
+
         {
             float saTop = 0, saBottom = 0, saLeft = 0, saRight = 0;
             mkxp_getSafeAreaInsets(&saTop, &saBottom, &saLeft, &saRight);

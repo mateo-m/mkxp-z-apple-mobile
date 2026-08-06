@@ -452,6 +452,53 @@ bool mkxp_consumeSafeAreaInsetsChanged(void) {
     return s_safeAreaInsetsChanged.exchange(false, std::memory_order_acquire);
 }
 
+// Host viewport region: ONE packed word so a reader can never see a
+// torn rect mid-drag (the four-atomics gameRect pattern can tear
+// across a frame). Layout: bit 63 = set, bit 62 = portrait tag,
+// bits 45-59 / 30-44 / 15-29 / 0-14 = x / y / w / h as 15-bit
+// fractions (0..32767, <= 0.1 px error on a 3000 px window).
+// Ordering: the word stores relaxed, then the relayout flag stores
+// release - the same values-then-flag order as the insets above, so
+// the acquire in mkxp_consumeSafeAreaInsetsChanged() publishes it.
+static std::atomic<uint64_t> s_hostViewportRegion{0};
+
+static inline uint64_t packRegionField(float v) {
+    /* !(v >= 0) also catches NaN - a raw NaN would hit an undefined
+     * float-to-int cast below. */
+    if (!(v >= 0.0f)) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    return (uint64_t)(v * 32767.0f + 0.5f) & 0x7FFF;
+}
+
+void mkxp_setHostViewportRegion(float x, float y, float w, float h,
+                                bool isPortrait) {
+    uint64_t word = (1ULL << 63)
+                  | (isPortrait ? (1ULL << 62) : 0)
+                  | (packRegionField(x) << 45)
+                  | (packRegionField(y) << 30)
+                  | (packRegionField(w) << 15)
+                  | packRegionField(h);
+    s_hostViewportRegion.store(word, std::memory_order_relaxed);
+    s_safeAreaInsetsChanged.store(true, std::memory_order_release);
+}
+
+void mkxp_clearHostViewportRegion(void) {
+    s_hostViewportRegion.store(0, std::memory_order_relaxed);
+    s_safeAreaInsetsChanged.store(true, std::memory_order_release);
+}
+
+bool mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
+                                bool *isPortrait) {
+    uint64_t word = s_hostViewportRegion.load(std::memory_order_relaxed);
+    if (!(word >> 63)) return false;
+    if (x) *x = ((word >> 45) & 0x7FFF) / 32767.0f;
+    if (y) *y = ((word >> 30) & 0x7FFF) / 32767.0f;
+    if (w) *w = ((word >> 15) & 0x7FFF) / 32767.0f;
+    if (h) *h = (word & 0x7FFF) / 32767.0f;
+    if (isPortrait) *isPortrait = (word >> 62) & 1;
+    return true;
+}
+
 void *mkxp_getSDLUIKitWindow(void) {
     if (!SharedState::instance) return nullptr;
     SDL_Window *win = SharedState::instance->sdlWindow();
@@ -1035,6 +1082,10 @@ int mkxp_getFastForwardMultiplier(void) {
 void mkxp_resetSessionState(void) {
     s_fastForwardMultiplier.store(1, std::memory_order_release);
     s_cheatsEnabled.store(false, std::memory_order_release);
+    // A crash-terminated session must not leak its viewport region
+    // into the next game's boot; the host re-sets it per session.
+    s_hostViewportRegion.store(0, std::memory_order_relaxed);
+    s_safeAreaInsetsChanged.store(true, std::memory_order_release);
 }
 
 void mkxp_setDebugLogPath(const char *path) {
