@@ -1567,11 +1567,28 @@ module IOS
   ErrorStubs = {}
   # rubocop:enable Style/MutableConstant
   ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/.freeze
+  PB_DATA_TABLE_RE = /\APB[A-Z]/.freeze
 end
 
 class Module
+  # `super` does not work in a redefined Module#const_missing (there
+  # is no superclass implementation), so keep the original around for
+  # the passthrough paths. It raises the stock NameError.
+  alias _mkxp_orig_const_missing const_missing unless method_defined?(:_mkxp_orig_const_missing)
+
   def const_missing(name)
-    return super unless Object.const_defined?(:IOS)
+    return _mkxp_orig_const_missing(name) unless Object.const_defined?(:IOS)
+
+    # Pokemon Essentials keeps its data tables in PB* classes
+    # (PBItems, PBSpecies, PBMoves, ...). Games probe these tables
+    # for optional entries with `const_get(...) rescue nil` and treat
+    # the NameError as the "entry is absent" signal. A stub does not
+    # raise, so the probe would hand a Class to game code that
+    # expects an Integer id. Empyrean does exactly this for optional
+    # *_CARD items and then crashes on `card < 2000`. No Win32
+    # library lives in a PB* namespace, so let these lookups raise
+    # as they do on Windows.
+    return _mkxp_orig_const_missing(name) if self.name.to_s =~ ::IOS::PB_DATA_TABLE_RE
 
     if name.to_s =~ ::IOS::ERROR_SUFFIX_RE
       key = [self, name]
