@@ -114,7 +114,8 @@ bool Movie::preparePlayback()
     io->userdata = &srcOps;
     decoder = THEORAPLAY_startDecode(io, DEF_MAX_VIDEO_FRAMES, THEORAPLAY_VIDFMT_RGBA);
     if (!decoder) {
-        SDL_RWclose(&srcOps);
+        /* THEORAPLAY_startDecode closed the io on failure, and that
+         * closed srcOps with it. Do not close srcOps again here. */
         return false;
     }
 
