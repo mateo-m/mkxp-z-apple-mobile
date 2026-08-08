@@ -459,14 +459,22 @@ struct BitmapOpenHandler : FileSystem::OpenHandler
             gif_data = new unsigned char[gif_data_size];
             ops.seek(&ops, 0, RW_SEEK_SET);
             ops.read(&ops, gif_data, gif_data_size, 1);
-            
+            /* The whole file is in gif_data now. Close the ops here,
+             * because no later branch reads from it again. The non-GIF
+             * branch closes through IMG_LoadTyped_RW (freesrc=1). */
+            SDL_RWclose(&ops);
+
             int status;
             do {
                 status = gif_initialise(gif, gif_data_size, gif_data);
                 if (status != GIF_OK && status != GIF_WORKING) {
                     gif_finalise(gif);
                     delete gif;
-                    delete gif_data;
+                    delete[] gif_data;
+                    /* Null both so a later tryRead call on the next
+                     * candidate file does not see stale pointers. */
+                    gif = 0;
+                    gif_data = 0;
                     error = "Failed to initialize GIF (Error " + std::to_string(status) + ")";
                     return false;
                 }
@@ -478,7 +486,9 @@ struct BitmapOpenHandler : FileSystem::OpenHandler
                 error = "Failed to decode first GIF frame. (Error " + std::to_string(status) + ")";
                 gif_finalise(gif);
                 delete gif;
-                delete gif_data;
+                delete[] gif_data;
+                gif = 0;
+                gif_data = 0;
                 return false;
             }
         } else {
