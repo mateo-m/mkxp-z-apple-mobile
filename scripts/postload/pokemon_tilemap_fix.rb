@@ -78,10 +78,24 @@ module VWrap
   end
 end
 
+# A game can also ship this wrap technique inside its own CustomTilemap
+# (Fire Ash bundles a TileWrap module that reads Bitmap.max_size). Such a
+# tilemap is already mobile-safe, and it diverges from stock Essentials
+# in more than the wrap math. An override from this file would drop the
+# game-side changes, so skip the patch for these games.
+# Match two module functions, not one. The pair is a fingerprint of
+# that known wrap script. A single name could collide with an
+# unrelated game module.
+game_wraps_own_tilesets = $MKXP == true &&
+                          defined?(TileWrap) == 'constant' &&
+                          TileWrap.respond_to?(:wrapTileset) &&
+                          TileWrap.respond_to?(:blitWrappedPixels)
+MKXP.puts('VWrap: skipped, this game wraps its own tilesets') if game_wraps_own_tilesets
+
 # Only patch if this is an mkxp engine AND the game defines CustomTilemap
 # (i.e. Pokemon Essentials). Standard RPG Maker games use the native C++
 # Tilemap which already handles mega surfaces via atlas building.
-if $MKXP == true && defined?(CustomTilemap) == 'constant'
+if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_tilesets
   class CustomTilemap
     def tileset=(value)
       if value.mega?
@@ -103,6 +117,18 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant'
         @regularTileInfo[id] = bitmap
       end
       sprite.bitmap = bitmap if sprite.bitmap != bitmap
+    end
+
+    # Stock Essentials sets the Animated_Autotiles_Frames constant. Some
+    # games replace it with an instance method (Fire Ash defines
+    # animated_Autotiles_Frames). Read whichever form exists. Without
+    # this fallback, the bare constant resolves to IOS::NullStub through
+    # const_missing, and the integer division raises a coerce TypeError.
+    def autotileFrameInterval
+      return animated_Autotiles_Frames if respond_to?(:animated_Autotiles_Frames)
+      return Animated_Autotiles_Frames if defined?(Animated_Autotiles_Frames)
+
+      15
     end
 
     def repaintAutotiles
@@ -346,7 +372,7 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant'
                 frame = if frames <= 1
                           0
                         else
-                          (Graphics.frame_count / Animated_Autotiles_Frames) % frames
+                          (Graphics.frame_count / autotileFrameInterval) % frames
                         end
                 bltAutotile(bitmap, xpos, ypos, id, frame)
               end
