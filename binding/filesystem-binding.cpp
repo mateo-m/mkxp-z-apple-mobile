@@ -170,25 +170,43 @@ RB_METHOD(fileIntPos) {
 }
 #endif
 
+typedef struct {
+    VALUE port;
+    bool raw;
+} LoadDataBodyArgs;
+
+static VALUE kernelLoadDataBody(VALUE arg) {
+    LoadDataBodyArgs *args = reinterpret_cast<LoadDataBodyArgs *>(arg);
+
+    VALUE data = fileIntRead(0, 0, args->port);
+    if (args->raw)
+        return data;
+
+    VALUE marsh = rb_const_get(rb_cObject, rb_intern("Marshal"));
+    return rb_funcall2(marsh, rb_intern("load"), 1, &data);
+}
+
+static VALUE kernelLoadDataEnsure(VALUE port) {
+    return rb_funcall2(port, rb_intern("close"), 0, NULL);
+}
+
 VALUE
 kernelLoadDataInt(const char *filename, bool rubyExc, bool raw) {
     //rb_gc_start();
-    
+
     VALUE port = fileIntForPath(filename, rubyExc);
-    VALUE result;
-    if (!raw) {
-        VALUE marsh = rb_const_get(rb_cObject, rb_intern("Marshal"));
-        
-        // FIXME need to catch exceptions here with begin rescue
-        VALUE data = fileIntRead(0, 0, port);
-        result = rb_funcall2(marsh, rb_intern("load"), 1, &data);
-    } else {
-        result = fileIntRead(0, 0, port);
-    }
-    
-    rb_funcall2(port, rb_intern("close"), 0, NULL);
-    
-    return result;
+    LoadDataBodyArgs args = { port, raw };
+
+    /* If Marshal.load raises, close the port anyway. Without the
+     * ensure, the raise keeps the file handle open until the GC
+     * collects the port. */
+#if RAPI_FULL < 270
+    return rb_ensure((VALUE(*)(ANYARGS))kernelLoadDataBody, (VALUE)&args,
+                     (VALUE(*)(ANYARGS))kernelLoadDataEnsure, port);
+#else
+    return rb_ensure(kernelLoadDataBody, (VALUE)&args,
+                     kernelLoadDataEnsure, port);
+#endif
 }
 
 RB_METHOD_GUARD(kernelLoadData) {
