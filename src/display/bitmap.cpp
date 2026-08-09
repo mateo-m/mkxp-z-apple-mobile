@@ -3129,6 +3129,10 @@ int Bitmap::maxSize(){
     return glState.caps.maxTexSize;
 }
 
+int Bitmap::realMaxSize(){
+    return glState.caps.realMaxTexSize;
+}
+
 void Bitmap::assumeRubyGC()
 {
     p->assumingRubyGC = true;

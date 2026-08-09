@@ -799,6 +799,18 @@ RB_METHOD(bitmapGetMaxSize){
     return INT2NUM(Bitmap::maxSize());
 }
 
+/* Bitmap.max_size reports the configured limit, which a game's
+ * mkxp.json may raise past the hardware. Scripts that build textures
+ * (tileset paging, atlas builders) need the limit the GPU will really
+ * accept, or every texture they make comes back black. */
+RB_METHOD(bitmapGetRealMaxSize){
+    RB_UNUSED_PARAM;
+    
+    rb_check_argc(argc, 0);
+    
+    return INT2NUM(Bitmap::realMaxSize());
+}
+
 RB_METHOD_GUARD(bitmapInitializeCopy) {
     rb_check_argc(argc, 1);
     VALUE origObj = argv[0];
@@ -859,6 +871,7 @@ void bitmapBindingInit() {
     
     _rb_define_method(klass, "mega?", bitmapGetMega);
     rb_define_singleton_method(klass, "max_size", RUBY_METHOD_FUNC(bitmapGetMaxSize), -1);
+    rb_define_singleton_method(klass, "real_max_size", RUBY_METHOD_FUNC(bitmapGetRealMaxSize), -1);
     
     _rb_define_method(klass, "animated?", bitmapGetAnimated);
     _rb_define_method(klass, "playing", bitmapGetPlaying);

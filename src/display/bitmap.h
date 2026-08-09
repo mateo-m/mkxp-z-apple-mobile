@@ -185,6 +185,11 @@ public:
 	sigslot::signal<> modified;
 
 	static int maxSize();
+	/* The limit the GPU truly accepts. maxSize() can be raised above
+	 * this by the maxTextureSize config option, which exists so that
+	 * oversized work buffers can be allocated; a texture built at that
+	 * raised size draws as black. */
+	static int realMaxSize();
 
     void assumeRubyGC();
 
