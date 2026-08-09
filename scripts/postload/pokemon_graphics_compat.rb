@@ -203,7 +203,13 @@ end
 MkxpPokemonGraphicsCompat.patch_ball_animation_mixin
 
 class Module
-  unless method_defined?(:__mkxp_graphics_compat_include)
+  # `include` is private on this Ruby, so its alias is private too,
+  # and `method_defined?` does not see private methods. An RGSS
+  # Reset re-runs this script; without the private check the alias
+  # re-targets the already-wrapped `include`, and the wrapper then
+  # calls itself without end (SystemStackError on the reset path).
+  unless method_defined?(:__mkxp_graphics_compat_include) ||
+         private_method_defined?(:__mkxp_graphics_compat_include)
     alias __mkxp_graphics_compat_include include
 
     def include(*mods)
