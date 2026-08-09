@@ -21,6 +21,9 @@ Object.const_set(:System, Module.new do
   module_function
 
   define_method(:puts) { |*_args| nil }
+  # Pokemon Essentials is XP-based. The preload gates its
+  # disposed-safe wrappers on this (see 51b16905).
+  define_method(:rpg_version) { 1 }
 end)
 
 # Native Graphics stand-in, defined before the preload snapshot runs

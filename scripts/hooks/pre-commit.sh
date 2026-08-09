@@ -39,6 +39,12 @@ if [ -n "$RUBY_STAGED" ]; then
     section "rubocop (Ruby compat scripts)"
     bundle exec rubocop scripts/preload scripts/postload ||
         die "rubocop failed"
+
+    section "regression tests (Ruby compat scripts)"
+    require_tool ruby
+    for test in tools/test_*.rb; do
+        ruby "$test" >/dev/null || die "$test failed"
+    done
 fi
 
 MD_FILES=$(printf '%s\n' "$STAGED" | grep -E '\.md$' | grep -Ev '^(src/theoraplay/|hmode7/)' || true)

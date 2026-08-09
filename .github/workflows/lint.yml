@@ -24,6 +24,16 @@ jobs:
       - name: rubocop
         run: bundle exec rubocop --format github
 
+      # The compat scripts patch classes that only exist inside a
+      # running game, so these tests stub the engine bindings and the
+      # Pokemon Essentials classes. No simulator or GPU needed.
+      - name: regression tests
+        run: |
+          for test in tools/test_*.rb; do
+            echo "-> $test"
+            ruby "$test"
+          done
+
   markdown:
     name: Markdown (markdownlint)
     runs-on: ubuntu-latest

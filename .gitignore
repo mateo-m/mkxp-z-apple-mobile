@@ -84,3 +84,6 @@ node_modules/
 
 # Rubocop cache (written by the pre-commit hook).
 .rubocop_cache/
+
+# Scratch tree that tools/test_save_fs.rb builds when it runs.
+tools/test_save_fs_workspace/
