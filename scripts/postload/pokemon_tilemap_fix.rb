@@ -1,81 +1,748 @@
 # pokemon_tilemap_fix.rb
-# Tileset vertical wrapper for Pokemon Essentials' CustomTilemap.
+# Removes the tileset size limit in Pokemon Essentials map renderers.
 #
-# Original author: Zoro (inori-z fork, EssentialsCompatibility.rb)
+# Parts of the CustomTilemap patch come from Zoro (inori-z fork,
+# EssentialsCompatibility.rb).
 # Source: https://github.com/joiplay/android-mkxp
 # License: GPL-2.0 (same as mkxp-z)
 #
-# Pokemon Essentials games use a Ruby-level CustomTilemap class that
-# loads the full tileset as a single Bitmap. On mobile GPUs, tilesets
-# taller than GL_MAX_TEXTURE_SIZE become "mega surfaces" (CPU-only),
-# causing corrupt/black tiles and severe performance loss.
+# A GPU can only hold a texture up to GL_MAX_TEXTURE_SIZE on a side
+# (8192 on many iOS devices and on the simulator, 16384 on newer
+# ones). A tileset that is taller than that becomes a "mega surface":
+# a CPU-only bitmap that no sprite can show and that every blit reads
+# through system memory. Pokemon Essentials games ship tilesets of
+# 25000px and more, so this is a common failure.
 #
-# This script repacks oversized tilesets by wrapping excess height into
-# additional columns, keeping the bitmap within the GPU texture limit.
-# The effective limit is raised dramatically:
+# Both Essentials renderers try to solve this with the same trick:
+# they wrap the excess height into more columns. The trick has two
+# hard limits. It only accepts tilesets that are exactly 8 tiles
+# wide, and the wrapped result must still fit in one texture. Above
+# that, the renderers either raise or (worse) keep a disposed bitmap
+# and crash later with "disposed bitmap".
 #
-#   GPU limit  -> Effective tileset height
-#   1024       -> 4096
-#   2048       -> 16384
-#   4096       -> 65536   (enough for virtually any tileset)
-#   8192       -> 262144
+# This file replaces the wrap with paging. The tileset is cut into a
+# grid of pages, and each page is a texture of a size the GPU accepts.
+# A tile lookup gives the page plus the position in that page, so a
+# tileset of any width and any height works on any device. Animated
+# autotiles are paged the same way, by frame.
 #
-# Because tile lookups need coordinate translation, there is a small
-# per-tile performance cost on maps that use wrapped tilesets.
+# Pixels beyond the eighth tile column are dropped, because RMXP tile
+# ids cannot address them. That keeps the memory cost proportional to
+# the part of the tileset the game can actually show.
 
 # Global flag: set to true to disable autotile animation refreshes.
 # Saves CPU on low-end devices at the cost of static water/lava tiles.
 $DONTREFRESHAUTOTILES = false unless defined?($DONTREFRESHAUTOTILES)
 
-module VWrap
-  MAX_TEX_SIZE         = Bitmap.max_size
-  TILESET_WIDTH        = 0x100
-  TILESET_HEIGHT       = MAX_TEX_SIZE - (MAX_TEX_SIZE % 32)
-  MAX_TEX_SIZE_BOOSTED = (MAX_TEX_SIZE**2) / TILESET_WIDTH
+#===============================================================================
+# Sheets: one oversized bitmap, stored as a grid of GPU-sized pages.
+#===============================================================================
+module MKXPTilePages
+  # Size a page may reach. `Bitmap.max_size` is not always the hardware
+  # limit: a game's mkxp.json can raise it, because the engine allows
+  # oversized work buffers there. A texture built at the raised size
+  # then draws as black. `Bitmap.real_max_size` reports what the GPU
+  # truly accepts; older engine builds do not have it.
+  def self.texture_limit
+    return Bitmap.real_max_size if Bitmap.respond_to?(:real_max_size)
 
-  def self.clamp(val, min, max)
-    val = max if val > max
-    val = min if val < min
-    val
+    Bitmap.max_size
   end
 
-  def self.makeVWrappedTileset(originalbmp)
-    width = originalbmp.width
-    height = originalbmp.height
-    if width == TILESET_WIDTH && originalbmp.mega?
-      columns = (height / TILESET_HEIGHT.to_f).ceil
+  # Largest page edge that still holds a whole number of tiles. A page
+  # boundary must fall on a tile boundary, or a tile would be split
+  # over two pages and no single blit could draw it.
+  def self.page_limit(unit)
+    limit = texture_limit
+    limit -= limit % unit if unit > 0
+    limit = unit if limit < unit
+    limit
+  end
 
-      if columns * TILESET_WIDTH > MAX_TEX_SIZE
-        raise "Tilemap is too long!\n\n" \
-              "SIZE: #{originalbmp.height}px\n" \
-              "HARDWARE LIMIT: #{MAX_TEX_SIZE}px\n" \
-              "BOOSTED LIMIT: #{MAX_TEX_SIZE_BOOSTED}px"
-      end
+  # Report a condition once per subject. Called from tile lookups, so
+  # it must stay cheap when it has nothing to say.
+  def self.warn_once(key, message)
+    @warned ||= {}
+    return if @warned[key]
 
-      bmp = Bitmap.new(TILESET_WIDTH * columns, TILESET_HEIGHT)
-      remainder = height % TILESET_HEIGHT
+    @warned[key] = true
+    MKXP.puts(message)
+  end
 
-      columns.times do |col|
-        srcrect = Rect.new(0, col * TILESET_HEIGHT, width, col + 1 == columns ? remainder : TILESET_HEIGHT)
-        bmp.blt(col * TILESET_WIDTH, 0, originalbmp, srcrect)
-      end
-      return bmp
+  # An image addressed as one big surface, stored as several textures.
+  # `size` and `page_size` are [width, height] pairs.
+  class Sheet
+    attr_reader :bitmaps, :width, :height, :page_width, :page_height, :columns
+
+    def initialize(bitmaps, size, page_size, copied)
+      @bitmaps = bitmaps
+      @width = size[0]
+      @height = size[1]
+      @page_width = page_size[0]
+      @page_height = page_size[1]
+      @columns = ((@width - 1) / @page_width) + 1
+      @copied = copied
     end
 
-    originalbmp
+    # True if the pages are new bitmaps. The source is then free, and
+    # the caller must dispose it. False means this sheet IS the source,
+    # so the caller must keep it.
+    def copied?
+      @copied
+    end
+
+    def first
+      @bitmaps[0]
+    end
+
+    def disposed?
+      @bitmaps.empty? || !@bitmaps[0] || @bitmaps[0].disposed?
+    end
+
+    # Give the page that holds a pixel, and the position in that page.
+    def locate(x, y)
+      return nil if x < 0 || y < 0 || x >= @width || y >= @height
+
+      bitmap = @bitmaps[((y / @page_height) * @columns) + (x / @page_width)]
+      return nil if !bitmap || bitmap.disposed?
+
+      [bitmap, x % @page_width, y % @page_height]
+    end
+
+    # Draw a source rectangle into `dest`. The rectangle can cross page
+    # borders, so the copy runs one page piece at a time.
+    def blit_to(dest, dest_x, dest_y, rect)
+      right = rect.x + rect.width
+      x = rect.x
+      while x < right
+        step_x = blit_column(dest, dest_x, dest_y, rect, x)
+        return if step_x <= 0
+
+        x += step_x
+      end
+    end
+
+    def dispose
+      @bitmaps.each { |bitmap| bitmap.dispose if bitmap && !bitmap.disposed? }
+      @bitmaps = []
+    end
+
+    private
+
+    # Copy the part of the rectangle that starts at column `x`. Gives
+    # the width copied, or 0 if nothing could be found.
+    def blit_column(dest, dest_x, dest_y, rect, x)
+      bottom = rect.y + rect.height
+      step_x = 0
+      y = rect.y
+      while y < bottom
+        spot = locate(x, y)
+        return 0 unless spot
+
+        step_x = [@page_width - spot[1], rect.x + rect.width - x].min
+        step_y = [@page_height - spot[2], bottom - y].min
+        dest.blt(dest_x + x - rect.x, dest_y + y - rect.y, spot[0],
+                 Rect.new(spot[1], spot[2], step_x, step_y))
+        y += step_y
+      end
+      step_x
+    end
   end
 
-  def self.blitVWrappedPixels(dest_x, dest_y, dest, src, srcrect)
-    return dest.blt(dest_x, dest_y, src, srcrect) if srcrect.y + srcrect.width < TILESET_HEIGHT
+  # Cut `source` into pages. `keep_width` drops the columns that tile
+  # ids cannot reach; pass nil to keep the full width. `unit_w` and
+  # `unit_h` are the tile size the cuts must align to.
+  #
+  # A bitmap that already fits becomes a one-page sheet over the source
+  # itself, so the common case costs no memory and no copy.
+  def self.split(source, keep_width, unit_w, unit_h)
+    width = source.width
+    width = keep_width if keep_width && keep_width < width
+    size = [width, source.height]
+    page_size = [page_limit(unit_w), page_limit(unit_h)]
+    if !source.mega? && width <= page_size[0] && size[1] <= page_size[1]
+      return Sheet.new([source], size, page_size, false)
+    end
 
-    srcrect.x = clamp(srcrect.x, 0, TILESET_WIDTH)
-    srcrect.width = clamp(srcrect.width, 0, TILESET_WIDTH - srcrect.x)
-    col = (srcrect.y / TILESET_HEIGHT.to_f).floor
-    src_x = (col * TILESET_WIDTH) + srcrect.x
-    src_y = srcrect.y % TILESET_HEIGHT
-
-    dest.blt(dest_x, dest_y, src, Rect.new(src_x, src_y, srcrect.width, srcrect.height))
+    Sheet.new(cut_pages(source, size, page_size), size, page_size, true)
   end
+
+  def self.cut_pages(source, size, page_size)
+    columns = ((size[0] - 1) / page_size[0]) + 1
+    rows = ((size[1] - 1) / page_size[1]) + 1
+    bitmaps = []
+    rows.times do |row|
+      columns.times { |column| bitmaps.push(cut_page(source, size, page_size, [column, row])) }
+    end
+    bitmaps
+  end
+
+  # Copy one page out of the source. `cell` is the [column, row] of the
+  # page in the grid.
+  def self.cut_page(source, size, page_size, cell)
+    x = cell[0] * page_size[0]
+    y = cell[1] * page_size[1]
+    width = [page_size[0], size[0] - x].min
+    height = [page_size[1], size[1] - y].min
+    page = Bitmap.new(width, height)
+    page.blt(0, 0, source, Rect.new(x, y, width, height))
+    page
+  end
+
+  # An expanded autotile, stored as several textures. Autotiles grow
+  # sideways (one column of 48 tile shapes per animation frame), so
+  # they are paged by frame.
+  class AutotileSheet
+    attr_reader :bitmaps, :frames
+
+    def initialize(bitmaps, frames, frames_per_page, copied, wraps)
+      @bitmaps = bitmaps
+      @frames = frames
+      @frames_per_page = frames_per_page
+      @copied = copied
+      @wraps = wraps
+    end
+
+    def copied?
+      @copied
+    end
+
+    # True if each frame takes two columns because a full 48-tile
+    # column does not fit in one texture.
+    def wraps?
+      @wraps
+    end
+
+    def first
+      @bitmaps[0]
+    end
+
+    def disposed?
+      @bitmaps.empty? || !@bitmaps[0] || @bitmaps[0].disposed?
+    end
+
+    # Give the page that holds a frame, and the frame number in it.
+    def frame_page(frame)
+      return nil if frame < 0 || frame >= @frames
+
+      bitmap = @bitmaps[frame / @frames_per_page]
+      return nil if !bitmap || bitmap.disposed?
+
+      [bitmap, frame % @frames_per_page]
+    end
+
+    def dispose
+      @bitmaps.each { |bitmap| bitmap.dispose if bitmap && !bitmap.disposed? }
+      @bitmaps = []
+    end
+  end
+end
+
+#===============================================================================
+# Where a tile sits: the geometry the modern renderer patch works from.
+#===============================================================================
+module MKXPTileLayout
+  # Width a tile id can reach: 8 tile columns for a stock renderer.
+  def self.tileset_width
+    TilemapRenderer::SOURCE_TILE_WIDTH * TilemapRenderer::TILESET_TILES_PER_ROW
+  end
+
+  def self.split_tileset(source)
+    MKXPTilePages.split(source, tileset_width,
+                        TilemapRenderer::SOURCE_TILE_WIDTH,
+                        TilemapRenderer::SOURCE_TILE_HEIGHT)
+  end
+
+  # Expand an autotile into pages of animation frames.
+  #
+  # The expansion itself stays with the game: AutotileExpander turns
+  # the 3-tile-wide source layout into the 48 tile shapes the renderer
+  # reads, and forks change that layout. So each page is built by
+  # cutting a run of frames out of the source and giving that run to
+  # the game's own expander.
+  def self.expand_autotile(source)
+    expander = autotile_expander
+    tile_width = TilemapRenderer::SOURCE_TILE_WIDTH
+    # A 32px tall autotile is a single tile with its frames side by
+    # side. Anything taller uses the 3-tile-wide source layout.
+    single = (source.height == TilemapRenderer::SOURCE_TILE_HEIGHT)
+    frame_width = single ? tile_width : tile_width * 3
+    frames = source.width / frame_width
+    frames = 1 if frames < 1
+    per_page = frames_per_page(frame_width, single)
+    if !expander || frames <= per_page
+      page = expander ? expander.expand(source) : source
+      return MKXPTilePages::AutotileSheet.new([page], frames, [per_page, frames].max,
+                                              !page.equal?(source), wraps?(page))
+    end
+
+    pages = expand_in_runs(source, expander, frame_width, [frames, per_page])
+    MKXPTilePages::AutotileSheet.new(pages, frames, per_page, true, wraps?(pages[0]))
+  end
+
+  # Expand the autotile a run of frames at a time. `counts` is the
+  # [total frames, frames per page] pair.
+  def self.expand_in_runs(source, expander, frame_width, counts)
+    pages = []
+    index = 0
+    while index < counts[0]
+      count = [counts[1], counts[0] - index].min
+      chunk = Bitmap.new(count * frame_width, source.height)
+      chunk.blt(0, 0, source, Rect.new(index * frame_width, 0,
+                                       count * frame_width, source.height))
+      page = expander.expand(chunk)
+      chunk.dispose unless page.equal?(chunk)
+      pages.push(page)
+      index += count
+    end
+    pages
+  end
+
+  # AutotileExpander lives in a later script file than the renderer, so
+  # it can be missing while the patch installs. It is only needed when
+  # an autotile loads, which happens much later.
+  def self.autotile_expander
+    return nil unless TilemapRenderer.const_defined?(:AutotileExpander)
+
+    TilemapRenderer::AutotileExpander
+  end
+
+  # Frames per page. Both the source cut and the expanded page must
+  # stay inside one texture, so the smaller of the two rules wins.
+  def self.frames_per_page(frame_width, single)
+    tile_width = TilemapRenderer::SOURCE_TILE_WIDTH
+    expanded_width = tile_width
+    expanded_width *= 2 if !single && wrapped_layout?
+    limit = MKXPTilePages.texture_limit
+    [[limit / expanded_width, limit / frame_width].min, 1].max
+  end
+
+  # AutotileExpander splits each frame over two columns when a full
+  # 48-tile column is taller than one texture.
+  def self.wrapped_layout?
+    expander = autotile_expander
+    limit = if expander && expander.const_defined?(:MAX_TEXTURE_SIZE)
+              expander::MAX_TEXTURE_SIZE
+            else
+              (Bitmap.max_size / 1024) * 1024
+            end
+    limit < TilemapRenderer::TILES_PER_AUTOTILE * TilemapRenderer::SOURCE_TILE_HEIGHT
+  end
+
+  def self.wraps?(page)
+    return false unless page
+
+    page.height > TilemapRenderer::SOURCE_TILE_HEIGHT &&
+      page.height < TilemapRenderer::TILES_PER_AUTOTILE * TilemapRenderer::SOURCE_TILE_HEIGHT
+  end
+
+  # Where a tile id sits in the tileset image.
+  def self.tile_position(tile_id)
+    index = tile_id - TilemapRenderer::TILESET_START_ID
+    per_row = TilemapRenderer::TILESET_TILES_PER_ROW
+    [(index % per_row) * TilemapRenderer::SOURCE_TILE_WIDTH,
+     (index / per_row) * TilemapRenderer::SOURCE_TILE_HEIGHT]
+  end
+
+  # Art past the addressable columns is unreachable through tile ids,
+  # so paging drops it. Say so once: a game author looking for missing
+  # decoration has no other way to find out.
+  def self.report_crop(filename, source, sheet)
+    return if !sheet.copied? || source.width <= sheet.width
+
+    MKXPTilePages.warn_once(
+      "crop:#{filename}",
+      "[tile-pages] #{filename}: using #{sheet.width}px of #{source.width}px " \
+      "(tile ids reach #{TilemapRenderer::TILESET_TILES_PER_ROW} columns)"
+    )
+  end
+
+  # Where a tile sits in a bitmap that was never paged.
+  def self.unpaged_spot(bitmap, tile_id)
+    return nil unless bitmap
+
+    [bitmap] + tile_position(tile_id)
+  end
+
+  # A blank tile is otherwise indistinguishable from map art, so say
+  # once that the map asked for a tile the tileset does not have.
+  def self.report_out_of_range(filename, tile_id)
+    MKXPTilePages.warn_once(
+      "range:#{filename}",
+      "[tile-pages] #{filename}: tile id #{tile_id} is past the tileset, hidden"
+    )
+  end
+
+  # The page that holds a tile id, and the position in that page.
+  def self.tile_spot(sheet, tile_id)
+    return nil unless sheet
+
+    spot = tile_position(tile_id)
+    sheet.locate(spot[0], spot[1])
+  end
+
+  # Point the tile at one of the 48 shapes in the frame `spot` holds.
+  def self.set_autotile_rect(tile, tile_id, spot, wraps)
+    page = spot[0]
+    frame = spot[1]
+    tile_width = TilemapRenderer::SOURCE_TILE_WIDTH
+    tile_height = TilemapRenderer::SOURCE_TILE_HEIGHT
+    per_autotile = TilemapRenderer::TILES_PER_AUTOTILE
+    x = 0
+    y = 0
+    if page.height == tile_height
+      # Single tile autotile: the frames sit side by side.
+      x = frame * tile_width
+    else
+      y = (tile_id % per_autotile) * tile_height
+      if wraps && (tile_id % per_autotile) >= per_autotile / 2
+        x = tile_width
+        y -= tile_height * per_autotile / 2
+      end
+      x += frame * tile_width * (wraps ? 2 : 1)
+    end
+    tile.src_rect.set(x, y, tile_width, tile_height)
+  end
+end
+
+#===============================================================================
+# Modern renderer (Essentials v19 and later): TilemapRenderer.
+#
+# TilesetBitmaps and AutotileBitmaps hand a bitmap plus a source
+# rectangle to one sprite per tile. Paging fits that model directly:
+# the tile sprite points at the page that holds its tile.
+#===============================================================================
+module MKXPTilesetPatch
+  @renderer_done = false
+  @helper_done = false
+  @tracer = nil
+
+  def self.done?
+    @renderer_done && @helper_done
+  end
+
+  def self.renderer_ready?
+    return false if defined?(TilemapRenderer) != 'constant'
+    return false unless TilemapRenderer.const_defined?(:TilesetBitmaps)
+    return false unless TilemapRenderer.const_defined?(:AutotileBitmaps)
+
+    # `dispose` comes last in the class body, so this also tells us
+    # that both nested classes are complete.
+    TilemapRenderer.method_defined?(:dispose)
+  end
+
+  # The helper patch reads TilemapRenderer's constants, and older
+  # Essentials ships a different TileDrawingHelper, so wait for the
+  # renderer as well.
+  def self.helper_ready?
+    return false unless renderer_ready?
+    return false if defined?(TileDrawingHelper) != 'constant'
+
+    TileDrawingHelper.method_defined?(:bltSmallRegularTile)
+  end
+
+  def self.install
+    install_renderer if !@renderer_done && renderer_ready?
+    install_helper if !@helper_done && helper_ready?
+  end
+
+  # Essentials v17/v18 ships CustomTilemap instead. Once it appears,
+  # the newer renderer will never come, so there is nothing to wait for.
+  def self.legacy_renderer?
+    defined?(CustomTilemap) == 'constant'
+  end
+
+  # The renderer classes may not exist yet. Games with a loose script
+  # loader (their Scripts.rxdata only reads .rb files from disk) define
+  # every class after this postload runs. Watch for the end of a class
+  # body and patch as soon as the renderer is complete.
+  def self.install_deferred
+    return if defined?(TracePoint) != 'constant'
+    return if legacy_renderer?
+
+    @seen = 0
+    @seen_at_frame = -1
+    @tracer = TracePoint.new(:end) do |_event|
+      begin
+        @seen += 1
+        install
+        stop_watching if done? || legacy_renderer?
+      rescue StandardError => e
+        stop_watching
+        MKXP.puts("[tile-pages] deferred patch failed: #{e.class}: #{e.message}")
+      end
+    end
+    @tracer.enable
+    watch_frames
+  end
+
+  # Most games never define the newer renderer, and the watcher cannot
+  # tell "not yet" from "never" on its own. Loading is a tight eval
+  # loop that draws nothing, so the first frame that arrives with no
+  # new class body means the game has finished loading its scripts.
+  # This wrapper only exists for games that made us wait.
+  def self.watch_frames
+    singleton = (class << Graphics; self; end)
+    return if singleton.method_defined?(:mkxp_tile_pages_update)
+
+    singleton.send(:alias_method, :mkxp_tile_pages_update, :update)
+    singleton.send(:define_method, :update) do
+      MKXPTilesetPatch.frame_tick
+      mkxp_tile_pages_update
+    end
+  end
+
+  # Runs once per drawn frame while the watcher waits, then goes inert.
+  def self.frame_tick
+    return if !@tracer || !@tracer.enabled?
+
+    stop_watching if @seen == @seen_at_frame
+    @seen_at_frame = @seen
+  end
+
+  # Most games never define the newer renderer, so the watcher has to
+  # stop on its own. Leaving a TracePoint enabled for a whole session
+  # keeps the VM on its tracing path and would grow into a real cost
+  # if a game builds classes inside its frame loop.
+  def self.stop_watching
+    @tracer.disable if @tracer && @tracer.enabled?
+  end
+
+  def self.install_renderer
+    @renderer_done = true
+    patch_tileset_bitmaps(TilemapRenderer::TilesetBitmaps)
+    patch_autotile_bitmaps(TilemapRenderer::AutotileBitmaps)
+    patch_renderer_dispose(TilemapRenderer)
+    MKXP.puts('[tile-pages] TilemapRenderer patched: tileset size is unlimited')
+  end
+
+  # `define_method` bodies are method bodies, not iterator blocks, so
+  # `return` here exits the patched method. Rubocop cannot tell the two
+  # apart.
+  # rubocop:disable Lint/NonLocalExitFromIterator
+  # These replace the class's own methods and keep the original under an
+  # alias. Module#prepend would read better, but RGSS plugins extend by
+  # `alias`: a plugin that aliases a prepended method and then calls
+  # that alias re-enters our `super` and recurses forever. Pokemon Nova
+  # dies on its first map that way. Alias chaining is the idiom this
+  # ecosystem composes with, so the patch uses it too.
+  def self.patch_tileset_bitmaps(klass)
+    patch_sheet_store(klass)
+    patch_tileset_add(klass)
+    patch_tileset_remove(klass)
+    patch_tileset_src_rect(klass)
+  end
+
+  def self.patch_sheet_store(klass)
+    klass.send(:define_method, :mkxp_sheets) do
+      @mkxp_sheets ||= {}
+    end
+
+    klass.send(:define_method, :mkxp_dispose_sheets) do
+      mkxp_sheets.each_value(&:dispose)
+      mkxp_sheets.clear
+    end
+  end
+
+  def self.patch_tileset_add(klass)
+    klass.send(:define_method, :add) do |filename|
+      return if nil_or_empty?(filename)
+
+      if @bitmaps[filename]
+        @load_counts[filename] += 1
+        return
+      end
+      source = pbGetTileset(filename)
+      sheet = MKXPTileLayout.split_tileset(source)
+      MKXPTileLayout.report_crop(filename, source, sheet)
+      source.dispose if sheet.copied?
+      mkxp_sheets[filename] = sheet
+      self[filename] = sheet.first
+      @load_counts[filename] = 1
+    end
+  end
+
+  def self.patch_tileset_remove(klass)
+    klass.send(:define_method, :remove) do |filename|
+      return if nil_or_empty?(filename) || !@bitmaps[filename]
+
+      if @load_counts[filename] > 1
+        @load_counts[filename] -= 1
+        return
+      end
+      sheet = mkxp_sheets.delete(filename)
+      sheet.dispose if sheet
+      @bitmaps[filename].dispose unless @bitmaps[filename].disposed?
+      @bitmaps.delete(filename)
+      @bitmap_wraps.delete(filename)
+      @load_counts.delete(filename)
+    end
+  end
+
+  def self.patch_tileset_src_rect(klass)
+    klass.send(:define_method, :set_src_rect) do |tile, tile_id|
+      return if nil_or_empty?(tile.filename)
+
+      sheet = mkxp_sheets[tile.filename]
+      spot = MKXPTileLayout.tile_spot(sheet, tile_id)
+      # A bitmap put in directly, without `add`, has no sheet. It came
+      # from the game, so it fits in one texture already.
+      spot ||= MKXPTileLayout.unpaged_spot(@bitmaps[tile.filename], tile_id) unless sheet
+      # The map asks for a tile the tileset does not have. Show
+      # nothing rather than a piece of another tile.
+      unless spot
+        MKXPTileLayout.report_out_of_range(tile.filename, tile_id) if sheet
+        tile.visible = false
+        return
+      end
+      # Setting the bitmap resets src_rect to the whole page, so all
+      # four values go in after it.
+      tile.bitmap = spot[0] if tile.bitmap != spot[0]
+      tile.src_rect.set(spot[1], spot[2], TilemapRenderer::SOURCE_TILE_WIDTH,
+                        TilemapRenderer::SOURCE_TILE_HEIGHT)
+    end
+  end
+
+  def self.patch_autotile_bitmaps(klass)
+    patch_autotile_add(klass)
+    patch_autotile_frame_count(klass)
+    patch_autotile_src_rect(klass)
+  end
+
+  def self.patch_autotile_add(klass)
+    klass.send(:define_method, :add) do |filename|
+      return if nil_or_empty?(filename)
+
+      if @bitmaps[filename]
+        @load_counts[filename] += 1
+        return
+      end
+      source = pbGetAutotile(filename)
+      duration = TilemapRenderer::AUTOTILE_FRAME_DURATION
+      duration = Regexp.last_match(1).to_i if filename[/\[\s*(\d+?)\s*\]\s*$/]
+      @frame_durations[filename] = duration.to_f / 20
+      sheet = MKXPTileLayout.expand_autotile(source)
+      source.dispose if sheet.copied?
+      mkxp_sheets[filename] = sheet
+      # `[]=` recounts the frames, so the sheet goes in first.
+      self[filename] = sheet.first
+      @bitmap_wraps[filename] = sheet.wraps?
+      @load_counts[filename] = 1
+    end
+  end
+
+  def self.patch_autotile_frame_count(klass)
+    # Optional arguments are not allowed in a block on Ruby 1.8, so the
+    # (filename, force_recalc) pair arrives as a list.
+    klass.send(:define_method, :frame_count) do |*args|
+      filename = args[0]
+      sheet = mkxp_sheets[filename]
+      return sheet.frames if sheet
+      return @frame_counts[filename] if @frame_counts[filename] && !args[1]
+      return 0 unless @bitmaps[filename]
+
+      bitmap = @bitmaps[filename]
+      count = [bitmap.width / TilemapRenderer::SOURCE_TILE_WIDTH, 1].max
+      count /= 2 if bitmap.height > TilemapRenderer::SOURCE_TILE_HEIGHT && @bitmap_wraps[filename]
+      @frame_counts[filename] = count
+    end
+  end
+
+  def self.patch_autotile_src_rect(klass)
+    klass.send(:define_method, :set_src_rect) do |tile, tile_id|
+      return if nil_or_empty?(tile.filename)
+
+      sheet = mkxp_sheets[tile.filename]
+      # A bitmap put in directly, without `add`, is already expanded
+      # and fits in one texture.
+      spot = if sheet
+               sheet.frame_page(current_frame(tile.filename))
+             else
+               [@bitmaps[tile.filename], current_frame(tile.filename)]
+             end
+      return if !spot || !spot[0]
+
+      tile.bitmap = spot[0] if tile.bitmap != spot[0]
+      wraps = sheet ? sheet.wraps? : @bitmap_wraps[tile.filename]
+      MKXPTileLayout.set_autotile_rect(tile, tile_id, spot, wraps)
+    end
+  end
+
+  # The renderer only disposes the bitmaps it knows about, which is one
+  # page per tileset. Free the rest with them.
+  def self.patch_renderer_dispose(klass)
+    return if klass.method_defined?(:mkxp_original_dispose)
+
+    klass.send(:alias_method, :mkxp_original_dispose, :dispose)
+    klass.send(:define_method, :dispose) do
+      return if disposed?
+
+      @tilesets.mkxp_dispose_sheets if @tilesets.respond_to?(:mkxp_dispose_sheets)
+      @autotiles.mkxp_dispose_sheets if @autotiles.respond_to?(:mkxp_dispose_sheets)
+      mkxp_original_dispose
+    end
+  end
+
+  # TileDrawingHelper draws the town map and the minimap. It reads the
+  # tileset through blits instead of sprites, but it hits the same size
+  # limit, and it also disposes a tileset it did not copy.
+  def self.install_helper
+    @helper_done = true
+    patch_helper_initialize(TileDrawingHelper)
+    patch_helper_blit(TileDrawingHelper)
+    patch_helper_dispose(TileDrawingHelper)
+    MKXP.puts('[tile-pages] TileDrawingHelper patched')
+  end
+
+  def self.patch_helper_initialize(klass)
+    klass.send(:define_method, :initialize) do |tileset, autotiles|
+      @mkxp_sheet = MKXPTileLayout.split_tileset(tileset)
+      tileset.dispose if @mkxp_sheet.copied?
+      @tileset = @mkxp_sheet.first
+      @autotiles = autotiles
+    end
+  end
+
+  def self.patch_helper_blit(klass)
+    # rubocop:disable Metrics/ParameterLists -- PE's own signature
+    klass.send(:define_method, :bltSmallRegularTile) do |bitmap, x, y, cx_tile, cy_tile, id|
+      return if id < TilemapRenderer::TILESET_START_ID
+      return if !@mkxp_sheet || @mkxp_sheet.disposed?
+
+      spot = MKXPTileLayout.tile_spot(@mkxp_sheet, id)
+      return unless spot
+
+      bitmap.stretch_blt(Rect.new(x, y, cx_tile, cy_tile), spot[0],
+                         Rect.new(spot[1], spot[2],
+                                  TilemapRenderer::SOURCE_TILE_WIDTH,
+                                  TilemapRenderer::SOURCE_TILE_HEIGHT))
+    end
+    # rubocop:enable Metrics/ParameterLists
+  end
+
+  def self.patch_helper_dispose(klass)
+    klass.send(:define_method, :dispose) do
+      @mkxp_sheet.dispose if @mkxp_sheet
+      @mkxp_sheet = nil
+      @tileset = nil
+      @autotiles.each_with_index do |autotile, i|
+        autotile.dispose if autotile && !autotile.disposed?
+        @autotiles[i] = nil
+      end
+    end
+  end
+  # rubocop:enable Lint/NonLocalExitFromIterator
+end
+
+#===============================================================================
+# Legacy renderer (Essentials v17 and v18): CustomTilemap.
+#
+# This renderer draws the ground layer by blitting tiles into one big
+# bitmap, so it only needs the paged sheet as a blit source.
+#===============================================================================
+module VWrap
+  TILESET_WIDTH = 0x100
+  TILE_UNIT     = 32
 end
 
 # A game can also ship this wrap technique inside its own CustomTilemap
@@ -96,24 +763,42 @@ MKXP.puts('VWrap: skipped, this game wraps its own tilesets') if game_wraps_own_
 # (i.e. Pokemon Essentials). Standard RPG Maker games use the native C++
 # Tilemap which already handles mega surfaces via atlas building.
 if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_tilesets
+  # rubocop:disable Metrics/ClassLength -- this reopens PE's own class,
+  # and the length comes from PE's refreshLayer0, which is copied here
+  # so that the tileset reads can go through the paged sheet.
   class CustomTilemap
     def tileset=(value)
-      if value.mega?
-        @tileset = VWrap.makeVWrappedTileset(value)
-        value.dispose
-      else
-        @tileset = value
-      end
+      sheet = MKXPTilePages.split(value, VWrap::TILESET_WIDTH, VWrap::TILE_UNIT, VWrap::TILE_UNIT)
+      value.dispose if sheet.copied?
+      @mkxp_sheet = sheet
+      @mkxp_sheet_source = sheet.first
+      @tileset = sheet.first
       @tilesetchanged = true
+    end
+
+    # The game can also assign @tileset on its own. Page whatever is
+    # there now, and rebuild if it changed behind our back.
+    def mkxp_tileset_sheet
+      return nil if !@tileset || @tileset.disposed?
+
+      if !@mkxp_sheet || @mkxp_sheet.disposed? || !@mkxp_sheet_source.equal?(@tileset)
+        @mkxp_sheet = MKXPTilePages.split(@tileset, VWrap::TILESET_WIDTH,
+                                          VWrap::TILE_UNIT, VWrap::TILE_UNIT)
+        @mkxp_sheet_source = @tileset
+      end
+      @mkxp_sheet
     end
 
     def getRegularTile(sprite, id)
       bitmap = @regularTileInfo[id]
       unless bitmap
+        sheet = mkxp_tileset_sheet
+        return unless sheet
+
         bitmap = Bitmap.new(@tileWidth, @tileHeight)
         rect = Rect.new(((id - 384) & 7) * @tileSrcWidth, ((id - 384) >> 3) * @tileSrcHeight,
                         @tileSrcWidth, @tileSrcHeight)
-        VWrap.blitVWrappedPixels(0, 0, bitmap, @tileset, rect)
+        sheet.blit_to(bitmap, 0, 0, rect)
         @regularTileInfo[id] = bitmap
       end
       sprite.bitmap = bitmap if sprite.bitmap != bitmap
@@ -170,6 +855,7 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
       width = @layer0.bitmap.width
       height = @layer0.bitmap.height
       bitmap = @layer0.bitmap
+      sheet = mkxp_tileset_sheet
       ysize = @map_data.ysize
       xsize = @map_data.xsize
       zsize = @map_data.zsize
@@ -243,9 +929,11 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
               next if prioid != 0 || !prioid
 
               if id >= 384
+                next unless sheet
+
                 temprect.set(((id - 384) & 7) * @tileSrcWidth, ((id - 384) >> 3) * @tileSrcHeight,
                              @tileSrcWidth, @tileSrcHeight)
-                VWrap.blitVWrappedPixels(xpos, ypos, bitmap, @tileset, temprect)
+                sheet.blit_to(bitmap, xpos, ypos, temprect)
               else
                 tilebitmap = @autotileInfo[id]
                 unless tilebitmap
@@ -295,11 +983,13 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
                   count = addTile(@autosprites, count, xpos, ypos, id)
                   next
                 elsif id >= 384
+                  next unless sheet
+
                   temprect.set(((id - 384) & 7) * @tileSrcWidth, ((id - 384) >> 3) * @tileSrcHeight,
                                @tileSrcWidth, @tileSrcHeight)
                   xpos = (x * twidth) - @oxLayer0
                   ypos = (y * theight) - @oyLayer0
-                  VWrap.blitVWrappedPixels(xpos, ypos, bitmap, @tileset, temprect)
+                  sheet.blit_to(bitmap, xpos, ypos, temprect)
                 else
                   tilebitmap = @autotileInfo[id]
                   unless tilebitmap
@@ -364,9 +1054,11 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
               next if id.zero? || @priorities[id] != 0 || !@priorities[id]
 
               if id >= 384
+                next unless sheet
+
                 tmprect.set(((id - 384) & 7) * @tileSrcWidth, ((id - 384) >> 3) * @tileSrcHeight,
                             @tileSrcWidth, @tileSrcHeight)
-                VWrap.blitVWrappedPixels(xpos, ypos, bitmap, @tileset, tmprect)
+                sheet.blit_to(bitmap, xpos, ypos, tmprect)
               else
                 frames = @framecount[(id / 48) - 1]
                 frame = if frames <= 1
@@ -385,6 +1077,12 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting, Naming/PredicateMethod
   end
+  # rubocop:enable Metrics/ClassLength
 
-  MKXP.puts("VWrap: Pokemon Essentials CustomTilemap patched (max tileset height: #{VWrap::MAX_TEX_SIZE_BOOSTED}px)")
+  MKXP.puts('VWrap: Pokemon Essentials CustomTilemap patched: tileset size is unlimited')
+end
+
+if $MKXP == true
+  MKXPTilesetPatch.install
+  MKXPTilesetPatch.install_deferred unless MKXPTilesetPatch.done?
 end
