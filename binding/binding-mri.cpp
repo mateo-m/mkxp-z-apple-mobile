@@ -323,6 +323,85 @@ static void mkxp_define_alias_once(VALUE klass, const char *aliasName,
     rb_define_alias(klass, aliasName, origName);
 }
 
+#ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+/* --- Honest respond_to? for the legacy stubs ----------------------
+ *
+ * The legacy stubs above stay defined on the core classes for every
+ * script, but they raise NoMethodError unless the calling script runs
+ * under the older syntax mode. Stock respond_to? only reports the
+ * definition, so it answers true for a method that cannot run. Pokemon
+ * Essentials forks feature-test with exactly that idiom:
+ *
+ *   item[0] = item[0].id if item[0].respond_to?(:id)
+ *
+ * Kernel#id makes the guard pass on a Symbol, the call then raises,
+ * and the game dies (Pokemon Anil, save load screen). Answer false for
+ * a stub the current script cannot call, so the guard skips it.
+ */
+struct MkxpLegacyStub {
+    VALUE recv;    /* class or module that holds the stub */
+    ID name;
+    bool singleton; /* true = the stub is a singleton method on recv */
+    int major;     /* version gate the stub tests before it runs */
+    int minor;
+};
+
+static MkxpLegacyStub mkxp_legacy_stubs[16];
+static size_t mkxp_legacy_stub_count = 0;
+static ID mkxp_legacy_respond_to_orig = 0;
+
+static void mkxp_register_legacy_stub(VALUE recv, const char *name,
+                                      bool singleton, int major, int minor) {
+    if (mkxp_legacy_stub_count >= ARRAY_SIZE(mkxp_legacy_stubs)) return;
+    MkxpLegacyStub &stub = mkxp_legacy_stubs[mkxp_legacy_stub_count++];
+    stub.recv = recv;
+    stub.name = rb_intern(name);
+    stub.singleton = singleton;
+    stub.major = major;
+    stub.minor = minor;
+}
+
+/* The stub is a C method, so it has no source location. A game that
+ * defines its own version of the name in Ruby gets one; that method is
+ * real and must keep the true answer. */
+static bool mkxp_legacy_stub_still_c(VALUE self, ID name) {
+    VALUE method = rb_funcall(self, rb_intern("method"), 1, ID2SYM(name));
+    return NIL_P(rb_funcall(method, rb_intern("source_location"), 0));
+}
+
+/* True when `name` on `self` resolves to a stub that would raise. */
+static bool mkxp_legacy_stub_is_dead(VALUE self, ID name) {
+    for (size_t i = 0; i < mkxp_legacy_stub_count; ++i) {
+        const MkxpLegacyStub &stub = mkxp_legacy_stubs[i];
+        if (stub.name != name) continue;
+        if (stub.singleton) {
+            if (self != stub.recv) continue;
+        } else if (!RTEST(rb_obj_is_kind_of(self, stub.recv))) {
+            continue;
+        }
+        if (mkxp_ec_is_syntax_transform_active(stub.major, stub.minor, -1))
+            return false;
+        return mkxp_legacy_stub_still_c(self, name);
+    }
+    return false;
+}
+
+static VALUE mkxp_legacy_respond_to(int argc, VALUE *argv, VALUE self) {
+    VALUE name = Qnil, includeAll = Qfalse;
+    rb_scan_args(argc, argv, "11", &name, &includeAll);
+    ID id = rb_check_id(&name);
+    if (id && mkxp_legacy_stub_is_dead(self, id)) return Qfalse;
+    return rb_funcallv(self, mkxp_legacy_respond_to_orig, argc, argv);
+}
+
+static void mkxp_install_legacy_respond_to() {
+    if (mkxp_legacy_stub_count == 0) return;
+    mkxp_define_alias_once(rb_mKernel, "_mkxp_respond_to_p", "respond_to?");
+    mkxp_legacy_respond_to_orig = rb_intern("_mkxp_respond_to_p");
+    rb_define_method(rb_mKernel, "respond_to?", mkxp_legacy_respond_to, -1);
+}
+#endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
+
 static void mriBindingInit() {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 #if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
@@ -335,16 +414,32 @@ static void mriBindingInit() {
     rb_define_method(rb_mKernel, "type", legacy_kernel_type, 0);
     rb_define_method(rb_cSymbol, "to_i", legacy_symbol_to_i, 0);
     rb_define_method(rb_cSymbol, "to_int", legacy_symbol_to_int, 0);
+    mkxp_register_legacy_stub(rb_cArray, "choice", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cArray, "indexes", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cArray, "indices", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cHash, "indexes", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cHash, "indices", false, 1, 8);
+    mkxp_register_legacy_stub(rb_mKernel, "id", false, 1, 8);
+    mkxp_register_legacy_stub(rb_mKernel, "type", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cSymbol, "to_i", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cSymbol, "to_int", false, 1, 8);
 #endif // RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
 #if RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
     rb_define_method(rb_cHash, "index", legacy_hash_index, -1);
+    mkxp_register_legacy_stub(rb_cHash, "index", false, 2, 7);
 #endif // RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
 #if RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
     rb_define_singleton_method(rb_cDir, "exists?", legacy_dir_exists, 1);
     rb_define_singleton_method(rb_cFile, "exists?", legacy_file_exists, 1);
     rb_define_module_function(rb_mFileTest, "exists?", legacy_file_test_exists, 1);
     rb_define_method(rb_mKernel, "=~", legacy_kernel_match, 1);
+    mkxp_register_legacy_stub(rb_cDir, "exists?", true, 3, 1);
+    mkxp_register_legacy_stub(rb_cFile, "exists?", true, 3, 1);
+    mkxp_register_legacy_stub(rb_mFileTest, "exists?", true, 3, 1);
+    /* Kernel#=~ stays out of the table. Stock Ruby keeps Object#=~
+     * through 3.1, so a false answer would be the wrong one. */
 #endif // RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
+    mkxp_install_legacy_respond_to();
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 
     tableBindingInit();
