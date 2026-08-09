@@ -336,20 +336,24 @@ unless defined?(MKXPWindowsFonts)
 end
 
 unless defined?(MKXPSaveFS)
+  # rubocop:disable Metrics/ModuleLength -- the module is the single
+  # file-API front; the alias-era recovery block below pushes it
+  # over the limit and leaves once no install carries stranded
+  # saves.
   module MKXPSaveFS
     module_function
 
     # Everything inside the game folder is literal. Games create,
     # list, write, and delete their own files with no interception;
     # UserData is involved only when a game addresses it itself
-    # (System.data_directory, faked env vars). The two constants
-    # below serve one purpose: the alias-era migration
+    # (System.data_directory, faked env vars). The constants below
+    # serve one purpose: the alias-era migration
     # (migrate_portable_saves!) that moves saves stranded by earlier
     # builds into the portable folder those games read. They gate no
-    # runtime behavior and can go once no install carries stranded
-    # saves.
+    # other runtime behavior and can go once no install carries
+    # stranded saves.
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
-    PORTABLE_MARKER = "#{PORTABLE_SAVE_DIR}/.portable".freeze
+    PORTABLE_PREFIX = "#{PORTABLE_SAVE_DIR}/".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
     # Rooted path: "/...", "\...", or a Windows drive prefix.
     ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
@@ -372,12 +376,22 @@ unless defined?(MKXPSaveFS)
     end
 
     def save_filename?(name)
+      return false if empo_artifact?(name)
+
       lower = name.downcase
       return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
       return true if lower.end_with?('.rxdata', '.rvdata', '.rvdata2')
       return true if lower.end_with?('.bak')
 
       false
+    end
+
+    # Host bookkeeping files carry an ".empo-" name segment
+    # (drain collision backups "*.empo-displaced*.bak", rescue
+    # markers ".empo-origin.json"). They belong to the host, not to
+    # the game; no recovery may move them.
+    def empo_artifact?(name)
+      name.include?('.empo-')
     end
 
     def engine_internal_entry?(name)
@@ -418,17 +432,23 @@ unless defined?(MKXPSaveFS)
 
     # Every path resolves literally - a game's writes inside its own
     # folder land exactly where Windows would put them. This helper
-    # stays as the single file-API front for one compatibility side
-    # effect: earlier builds redirected bare working-directory save
-    # filenames ("Game.rxdata") into UserData, so affected installs
-    # have saves stranded at the UserData root. The first access of
-    # such a name moves the stranded copy back into the working
-    # directory; on a collision the newer mtime keeps the canonical
-    # name and the loser stays as *.pre-literal.bak. Modern games
-    # address UserData saves by absolute path, never match the
-    # bare-name gate, and keep their files where they are. Delete
-    # this recovery once no install carries stranded saves.
+    # stays as the single file-API front for two recovery side
+    # effects left from the alias era:
+    #  - Earlier builds redirected bare working-directory save
+    #    filenames ("Game.rxdata") into UserData. The first access
+    #    of such a name moves the stranded copy back into the
+    #    working directory; on a collision the newer mtime keeps
+    #    the canonical name and the loser stays as
+    #    *.pre-literal.bak.
+    #  - The same builds flattened portable "Save Data/..." paths
+    #    into the UserData root. A qualifying access under the
+    #    portable dir runs the one-time sweep (see the
+    #    portable-save migration section below).
+    # Modern games address UserData saves by absolute path, match
+    # neither gate, and keep their files where they are. Delete both
+    # recoveries once no install carries stranded saves.
     def path_for(path)
+      maybe_recover_portable_path(path)
       recover_legacy_save(path)
       MKXPWindowsFonts.target(self, path) || path
     end
@@ -462,6 +482,9 @@ unless defined?(MKXPSaveFS)
       patterns = pattern.is_a?(Array) ? pattern : [pattern]
       patterns.each do |pat|
         next unless pat.is_a?(String)
+
+        # A pattern inside the portable dir is an enumeration of it.
+        maybe_recover_portable_dir(pat)
 
         normalized = normalize_path(pat)
         next if normalized.empty? || normalized.include?('/')
@@ -702,31 +725,100 @@ unless defined?(MKXPSaveFS)
     end
 
     # --- Portable-save migration (virtual alias -> literal) ---
-    # Earlier builds virtualized the portable save dir: games in
-    # JoiPlay-compat mode wrote "Save Data/..." and the shim
-    # flattened it into the UserData root (and even with a real
-    # imported Save Data folder, files that did not exist yet were
-    # created at the root). "Save Data" is literal now, so on the
-    # first literal-mode boot move those root-level save files into
-    # the folder the game is about to read. Runs only when the game
-    # will actually resolve saves through the portable dir ($joiplay,
-    # or a shipped Save Data/.portable marker) - exactly the
-    # population the alias used to serve. On a name collision the
-    # newer mtime wins the canonical name (ties go to the root copy,
-    # which the alias preferred for both reads and writes); the loser
-    # is kept beside it as *.pre-literal.bak. The sweep repeats on
-    # every portable boot so alias-era stragglers keep converging,
-    # and the mtime rule keeps a repeat sweep from displacing a save
-    # the player has since written into the literal folder.
+    # Earlier builds virtualized the portable save dir: portable
+    # games wrote "Save Data/..." and the shim flattened it into the
+    # UserData root. "Save Data" is literal now, so affected
+    # installs have their portable content stranded at that root.
+    # The sweep below moves it back into the folder the game reads.
+    #
+    # The sweep is access-driven; no boot-time gate can know whether
+    # a game resolves saves through the portable dir. Rejuvenation-
+    # lineage builds go portable on the launcher identity alone
+    # (RTP.isPortable -> mobile? -> $empo/$kirin), with no marker
+    # file and no JoiPlay toggle. And a $joiplay-keyed boot sweep
+    # would move root saves for games that never read the portable
+    # dir. So the wrappers watch for the game itself to touch
+    # portable save content; the first qualifying access runs one
+    # sweep per boot:
+    #  - an enumeration of the portable dir (the Reborn-lineage
+    #    load screens list it), or
+    #  - a file access under "Save Data/" that misses literally
+    #    while the flattened counterpart exists at the root.
+    # A bare probe of a missing marker never qualifies. A
+    # non-portable game that only checks "Save Data/.portable"
+    # keeps its root saves untouched.
+    #
+    # The sweep moves every stranded entry, subdirectories included
+    # (the alias flattened "Save Data/Battle Logs/..." the same
+    # way). Engine bookkeeping entries and host ".empo-" artifacts
+    # stay at the root. On a name collision the newer mtime wins
+    # the canonical name (ties go to the root copy, which the alias
+    # preferred for both reads and writes); the loser is kept
+    # beside it as *.pre-literal.bak.
     # Paths resolve against the engine cwd (the game folder, set by
     # main.cpp/config.cpp before the binding boots), the same base
-    # the game's own "Save Data/" strings resolve against.
-    def migrate_portable_saves!
+    # the game's own "Save Data/" strings resolve against; the cwd
+    # guard skips the sweep while a game has chdir'd elsewhere.
+    def maybe_recover_portable_path(path)
+      return if @portable_sweep_done
+      return unless path.is_a?(String) && path.start_with?('Save')
+
+      normalized = normalize_path(path)
+      return unless normalized.start_with?(PORTABLE_PREFIX)
+
+      rel = normalized[PORTABLE_PREFIX.length..-1]
+      return if rel.nil? || rel.empty?
+      return if orig_exist?(normalized)
+
+      base = sweep_base
+      return unless base && orig_exist?("#{base}/#{rel}")
+
+      run_portable_sweep!
+    rescue StandardError
+      nil
+    end
+
+    def maybe_recover_portable_dir(path)
+      return if @portable_sweep_done
+      return unless path.is_a?(String) && path.start_with?('Save')
+
+      normalized = normalize_path(path).gsub(%r{/+\z}, '')
+      return unless normalized == PORTABLE_SAVE_DIR || normalized.start_with?(PORTABLE_PREFIX)
+
+      run_portable_sweep!
+    rescue StandardError
+      nil
+    end
+
+    def run_portable_sweep!
+      return if @portable_sweep_done
+      return unless cwd_at_game_root?
+
+      @portable_sweep_done = true
+      migrate_portable_saves!
+    end
+
+    # The boot section at the end of this file re-arms the sweep on
+    # every load, so test harness reloads start clean.
+    def arm_portable_sweep!
+      @portable_sweep_done = false
+    end
+
+    # UserData root for sweeps, or nil when the host config is
+    # degenerate (no data dir, or the data dir IS the game folder -
+    # a sweep there would shuffle shipped root saves into Save
+    # Data).
+    def sweep_base
       base = root
-      return if base.nil? || base == '.'
-      # Degenerate host config: data dir pointing at the game folder
-      # itself would shuffle shipped root saves into Save Data.
-      return if File.expand_path(base) == File.expand_path('.')
+      return nil if base.nil? || base == '.'
+      return nil if File.expand_path(base) == File.expand_path('.')
+
+      base
+    end
+
+    def migrate_portable_saves!
+      base = sweep_base
+      return unless base
 
       names = begin
         Dir._mkxp_orig_entries(base)
@@ -735,15 +827,50 @@ unless defined?(MKXPSaveFS)
       end
       return if names.nil?
 
-      movable = names.select do |name|
-        save_filename?(name) && File._mkxp_orig_file("#{base}/#{name}")
-      end
+      movable = names.reject { |name| skip_portable_entry?(name) }
       return if movable.empty?
 
       Dir._mkxp_orig_mkdir(PORTABLE_SAVE_DIR) unless orig_exist?(PORTABLE_SAVE_DIR)
       movable.each do |name|
-        migrate_save_file("#{base}/#{name}", "#{PORTABLE_SAVE_DIR}/#{name}")
+        migrate_save_entry("#{base}/#{name}", "#{PORTABLE_PREFIX}#{name}")
       end
+    rescue StandardError
+      nil
+    end
+
+    def skip_portable_entry?(name)
+      return true if ['.', '..'].include?(name)
+      return true if name == '.DS_Store'
+      return true if engine_internal_entry?(name)
+
+      empo_artifact?(name)
+    end
+
+    def migrate_save_entry(src, dst)
+      if File._mkxp_orig_file(src)
+        migrate_save_file(src, dst)
+      elsif File._mkxp_orig_directory(src)
+        migrate_save_tree(src, dst)
+      end
+    rescue StandardError
+      nil
+    end
+
+    # Directory form of the migration. A whole stranded tree renames
+    # over when the destination is free. Otherwise merge entry by
+    # entry, recursing into shared subdirectories; per-file
+    # collisions follow the migrate_save_file mtime rule. The source
+    # directory goes away only when everything inside it moved.
+    def migrate_save_tree(src, dst)
+      return File._mkxp_orig_rename(src, dst) unless orig_exist?(dst)
+      return unless File._mkxp_orig_directory(dst)
+
+      Dir._mkxp_orig_entries(src).each do |name|
+        next if ['.', '..'].include?(name)
+
+        migrate_save_entry("#{src}/#{name}", "#{dst}/#{name}")
+      end
+      Dir._mkxp_orig_rmdir(src) if Dir._mkxp_orig_entries(src).size <= 2
     rescue StandardError
       nil
     end
@@ -773,6 +900,7 @@ unless defined?(MKXPSaveFS)
       true
     end
   end
+  # rubocop:enable Metrics/ModuleLength
 end
 
 # Pokemon Essentials' `pbResolveBitmap` relies on `pbTryString`, which probes a
@@ -1384,6 +1512,9 @@ end
 
 class << Dir
   alias _mkxp_orig_glob glob unless method_defined?(:_mkxp_orig_glob)
+  alias _mkxp_orig_brackets [] unless method_defined?(:_mkxp_orig_brackets)
+  alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
+  alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_entries entries unless method_defined?(:_mkxp_orig_entries)
   alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
   if (method_defined?(:exist?) || private_method_defined?(:exist?)) && !method_defined?(:_mkxp_orig_exist)
@@ -1403,10 +1534,35 @@ class << Dir
   # this) flowing through the *args wrapper; see the File note above.
   ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
 
+  # Dir[] shares glob's recovery; ancient slot pickers use both.
+  def [](*patterns)
+    MKXPSaveFS.recover_saves_for_glob(patterns)
+    _mkxp_orig_brackets(*patterns)
+  end
+  ruby2_keywords :[] if respond_to?(:ruby2_keywords, true)
+
+  # Dir.new / Dir.open enumerate too - the Reborn-lineage load
+  # screens list saves through Dir.new(getSaveFolder). Give both
+  # the portable recovery trigger; paths stay literal.
+  def new(path, *args)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    _mkxp_orig_new(path, *args)
+  end
+  ruby2_keywords :new if respond_to?(:ruby2_keywords, true)
+
+  def open(path, *args, &block)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    _mkxp_orig_open(path, *args, &block)
+  end
+  ruby2_keywords :open if respond_to?(:ruby2_keywords, true)
+
   def entries(path = '.', *args)
-    # Listings are literal. Listings of the UserData root
-    # (System.data_directory, faked env var spellings) hide
-    # engine-internal entries; everything else passes through.
+    # Listings are literal. A listing of the portable save dir first
+    # recovers alias-era stranded content (maybe_recover_portable_dir).
+    # Listings of the UserData root (System.data_directory, faked
+    # env var spellings) hide engine-internal entries; everything
+    # else passes through.
+    MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
     result = _mkxp_orig_entries(target, *args)
     return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
@@ -1416,6 +1572,7 @@ class << Dir
   ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
 
   def foreach(path = '.', *args, &block)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
     unless block
       if MKXPSaveFS.save_root_target?(target)
@@ -1439,6 +1596,7 @@ class << Dir
     alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
 
     def children(path, *args)
+      MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
       result = _mkxp_orig_children(target, *args)
       return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
@@ -1452,6 +1610,7 @@ class << Dir
     alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
 
     def each_child(path, *args, &block)
+      MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
       unless block
         if MKXPSaveFS.save_root_target?(target)
@@ -2128,13 +2287,14 @@ if network_off
   end
 end
 
-# --- Portable-save migration trigger ---
-# Runs once per boot, after every File/Dir wrapper above is armed
-# (migrate_portable_saves! calls the _mkxp_orig_* aliases directly).
-# Gate mirrors the Reborn/Rejuvenation isPortable check: the host's
-# JoiPlay-compat toggle, or a shipped Save Data/.portable marker.
-# Games that stay non-portable keep their saves at the UserData root
-# untouched.
+# --- Portable-save migration arming ---
+# The sweep is access-driven (see the portable-save migration
+# section in MKXPSaveFS): the wrappers above watch for the game to
+# touch portable "Save Data" content, and the first qualifying
+# access runs one sweep per boot through the _mkxp_orig_* aliases.
+# No boot-time gate: launcher-identity portable modes
+# (Rejuvenation's RTP.isPortable -> mobile? -> $empo) are invisible
+# before game scripts run, and a $joiplay-keyed boot sweep would
+# move root saves for games that never read the portable dir.
 MKXPSaveFS.capture_game_root!
-portable_boot = $joiplay || MKXPSaveFS.orig_exist?(MKXPSaveFS::PORTABLE_MARKER)
-MKXPSaveFS.migrate_portable_saves! if portable_boot
+MKXPSaveFS.arm_portable_sweep!

@@ -33,9 +33,9 @@ def ensure_ruby31_compat_aliases!
 end
 
 # Loads (or reloads) platform_compat.rb. Does NOT reset the
-# workspace - callers seed files first so the boot-time portable-save
-# migration sees them, and must chdir into GAME when the migration's
-# cwd-relative behavior is under test.
+# workspace - callers seed files first, and must chdir into GAME
+# when the portable-save sweep's cwd-relative behavior is under
+# test. Each load re-arms the once-per-boot sweep.
 def load_platform_compat!(joiplay = false)
   ensure_ruby31_compat_aliases!
   Object.send(:remove_const, :System) if defined?(System)
@@ -186,46 +186,125 @@ Dir.chdir(GAME) do
   assert_true(passthrough.include?('a.txt'), 'each_child passthrough')
 end
 
-# --- Migration: $joiplay boot moves alias-era root saves into the
-# literal portable dir ---
+# --- Portable-save sweep: a file access under "Save Data/" that
+# misses literally while the flattened counterpart sits at the root
+# recovers everything. Rejuvenation goes portable on the launcher
+# identity alone (RTP.isPortable -> mobile? -> $empo) - no marker,
+# no $joiplay - so no boot-time gate could see it. ---
 reset_workspace!
 File.write(File.join(USERDATA, 'Game.rxdata'), 'active root save')
 File.write(File.join(USERDATA, 'Save 1 - Aevis - 5h 3m - 2 badges.rxdata'), 'slot')
 File.write(File.join(USERDATA, 'Game.rxdata.bak'), 'root backup')
+File.write(File.join(USERDATA, 'Settings.dat'), 'options')
+File.write(File.join(USERDATA, 'updater.log'), 'patch history')
+File.write(File.join(USERDATA, '.portable'), '')
 File.write(File.join(USERDATA, 'keybindings.mkxp3'), '')
-File.write(File.join(USERDATA, 'notes.txt'), 'not a save')
-Dir.chdir(GAME) { load_platform_compat!(true) }
+File.write(File.join(USERDATA, 'Game.rxdata.empo-displaced.bak'), 'host artifact')
+File.write(File.join(USERDATA, '.empo-origin.json'), '{}')
+FileUtils.mkdir_p(File.join(USERDATA, 'Battle Logs'))
+File.write(File.join(USERDATA, 'Battle Logs', 'log1.txt'), 'battle log')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(File.exist?('Save Data/Game.rxdata'), 'qualifying access recovers the stranded save')
+end
 
 migrated = File.join(GAME, 'Save Data')
-assert_true(raw_dir?(migrated), 'migration created portable dir')
+assert_true(raw_dir?(migrated), 'sweep created the portable dir')
 assert_eq(File.read(File.join(migrated, 'Game.rxdata')), 'active root save', 'save migrated')
 assert_true(
   raw_entries(migrated).include?('Save 1 - Aevis - 5h 3m - 2 badges.rxdata'),
   'slot save migrated'
 )
 assert_true(raw_entries(migrated).include?('Game.rxdata.bak'), 'backup migrated')
-leftover = raw_entries(USERDATA)
-assert_false(leftover.include?('Game.rxdata'), 'root save gone after migration')
-assert_true(leftover.include?('keybindings.mkxp3'), 'engine file stays at root')
-assert_true(leftover.include?('notes.txt'), 'non-save file stays at root')
-
-# Reload with the folder in place: nothing further moves.
-File.write(File.join(USERDATA, 'Save03.rvdata2'), 'post-migration root save')
-Dir.chdir(GAME) { load_platform_compat!(true) }
-assert_true(
-  raw_entries(migrated).include?('Save03.rvdata2'),
-  'later root saves keep migrating on boot'
+assert_true(raw_entries(migrated).include?('Settings.dat'), 'settings migrated')
+assert_true(raw_entries(migrated).include?('updater.log'), 'log migrated')
+assert_true(raw_entries(migrated).include?('.portable'), 'stranded marker migrated')
+assert_eq(
+  File.read(File.join(migrated, 'Battle Logs', 'log1.txt')),
+  'battle log',
+  'subdirectory content migrated'
 )
+leftover = raw_entries(USERDATA)
+assert_false(leftover.include?('Game.rxdata'), 'root save gone after the sweep')
+assert_false(leftover.include?('Battle Logs'), 'root subdirectory gone after the sweep')
+assert_true(leftover.include?('keybindings.mkxp3'), 'engine file stays at the root')
+assert_true(leftover.include?('Game.rxdata.empo-displaced.bak'), 'host backup stays at the root')
+assert_true(leftover.include?('.empo-origin.json'), 'host marker stays at the root')
 
-# --- Migration collision, alias-era shape: the root copy is the
-# newer alias-active save, it wins; the stale literal copy is kept
-# as *.pre-literal.bak ---
+# One sweep per boot; the next boot converges later stragglers.
+File.write(File.join(USERDATA, 'Save03.rvdata2'), 'later straggler')
+Dir.chdir(GAME) do
+  assert_false(File.exist?('Save Data/Save03.rvdata2'), 'no second sweep in one boot')
+end
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(File.exist?('Save Data/Save03.rvdata2'), 'next boot sweeps stragglers')
+end
+
+# --- Portable-save sweep: enumerating the portable dir triggers it
+# too - Rejuvenation's load screen lists Dir.new(getSaveFolder) ---
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(USERDATA, 'Game.rxdata'), 'listed save')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  lister = Dir.new('Save Data')
+  begin
+    names = []
+    lister.each { |entry| names << entry }
+    assert_true(names.include?('Game.rxdata'), 'Dir.new listing sees the recovered save')
+  ensure
+    lister.close
+  end
+end
+
+# The glob spelling of the same enumeration.
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(USERDATA, 'Game.rxdata'), 'globbed save')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(
+    Dir.glob('Save Data/*.rxdata').include?('Save Data/Game.rxdata'),
+    'portable glob sees the recovered save'
+  )
+end
+
+# --- Sweep safety: a probe without stranded evidence never sweeps.
+# A non-portable game that only checks for the marker keeps reading
+# its saves at the UserData root. ---
+reset_workspace!
+File.write(File.join(USERDATA, 'Game.rxdata'), 'non-portable save')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_false(File.exist?('Save Data/.portable'), 'marker probe misses')
+  assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'root save untouched by the probe')
+  assert_false(raw_entries(GAME).include?('Save Data'), 'no portable dir appears')
+end
+
+# JoiPlay compat alone is not evidence either: a game with the
+# toggle on that never reads "Save Data" keeps its root saves.
+reset_workspace!
+File.write(File.join(USERDATA, 'Game.rxdata'), 'joiplay root save')
+Dir.chdir(GAME) { load_platform_compat!(true) }
+Dir.chdir(GAME) do
+  assert_true(File.exist?(File.join(USERDATA, 'Game.rxdata')), 'root save stays readable')
+end
+assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'joiplay boot leaves root saves alone')
+assert_false(raw_entries(GAME).include?('Save Data'), 'joiplay boot creates no portable dir')
+
+# --- Sweep collision, alias-era shape: the root copy is the newer
+# alias-active save, it wins; the stale literal copy is kept as
+# *.pre-literal.bak. Trigger: Dir.entries listing. ---
 reset_workspace!
 FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
 File.write(File.join(GAME, 'Save Data', 'Game.rxdata'), 'old literal save')
 set_mtime(File.join(GAME, 'Save Data', 'Game.rxdata'), Time.now - 86_400)
 File.write(File.join(USERDATA, 'Game.rxdata'), 'root active save')
-Dir.chdir(GAME) { load_platform_compat!(true) }
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(Dir.entries('Save Data').include?('Game.rxdata'), 'listing triggers the sweep')
+end
 assert_eq(
   File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
   'root active save',
@@ -237,15 +316,18 @@ assert_eq(
   'collision: stale literal copy kept as backup'
 )
 
-# --- Migration collision, post-literal shape: a stale save-shaped
-# straggler at the root must NOT displace the newer save the player
-# has since written into the literal folder ---
+# --- Sweep collision, post-literal shape: a stale straggler at the
+# root must NOT displace the newer save the player has since written
+# into the literal folder. Trigger: Dir.children listing. ---
 reset_workspace!
 FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
 File.write(File.join(GAME, 'Save Data', 'Game.rxdata'), 'current literal save')
 File.write(File.join(USERDATA, 'Game.rxdata'), 'stale root save')
 set_mtime(File.join(USERDATA, 'Game.rxdata'), Time.now - 86_400)
-Dir.chdir(GAME) { load_platform_compat!(true) }
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(Dir.children('Save Data').include?('Game.rxdata'), 'children triggers the sweep')
+end
 assert_eq(
   File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
   'current literal save',
@@ -261,24 +343,72 @@ assert_false(
   'collision: root straggler removed either way'
 )
 
-# --- Migration gate: .portable marker triggers it without $joiplay ---
+# --- Sweep merge into an existing subdirectory: stranded and
+# literal files coexist; per-file collisions follow the mtime rule.
+# Trigger: Dir.foreach of the subdirectory. ---
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data', 'Battle Logs'))
+File.write(File.join(GAME, 'Save Data', 'Battle Logs', 'new.txt'), 'stale literal log')
+set_mtime(File.join(GAME, 'Save Data', 'Battle Logs', 'new.txt'), Time.now - 86_400)
+FileUtils.mkdir_p(File.join(USERDATA, 'Battle Logs'))
+File.write(File.join(USERDATA, 'Battle Logs', 'old.txt'), 'stranded log')
+File.write(File.join(USERDATA, 'Battle Logs', 'new.txt'), 'stranded newer log')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  seen = []
+  Dir.foreach('Save Data/Battle Logs') { |entry| seen << entry }
+  assert_true(seen.include?('old.txt'), 'foreach triggers the sweep')
+end
+logs = File.join(GAME, 'Save Data', 'Battle Logs')
+assert_eq(File.read(File.join(logs, 'old.txt')), 'stranded log', 'merge keeps stranded file')
+assert_eq(File.read(File.join(logs, 'new.txt')), 'stranded newer log', 'merge: newer root copy wins')
+assert_eq(
+  File.read(File.join(logs, 'new.txt.pre-literal.bak')),
+  'stale literal log',
+  'merge: stale literal copy kept as backup'
+)
+assert_false(raw_entries(USERDATA).include?('Battle Logs'), 'merged root subdirectory removed')
+
+# A stranded name that collides with a literal directory of another
+# type stays at the root instead of clobbering it.
+reset_workspace!
+FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
+File.write(File.join(GAME, 'Save Data', 'Exports'), 'literal file named like a dir')
+FileUtils.mkdir_p(File.join(USERDATA, 'Exports'))
+File.write(File.join(USERDATA, 'Exports', 'mon.pk'), 'stranded export')
+File.write(File.join(USERDATA, 'Game.rxdata'), 'save beside the clash')
+Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  assert_true(File.exist?('Save Data/Game.rxdata'), 'sweep still runs around the clash')
+end
+assert_eq(
+  File.read(File.join(GAME, 'Save Data', 'Exports')),
+  'literal file named like a dir',
+  'type clash: literal file untouched'
+)
+assert_eq(
+  File.read(File.join(USERDATA, 'Exports', 'mon.pk')),
+  'stranded export',
+  'type clash: stranded tree left in place'
+)
+
+# --- Shipped marker: the game reads the portable dir, so listings
+# recover stranded saves without $joiplay ---
 reset_workspace!
 FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
 File.write(File.join(GAME, 'Save Data', '.portable'), '')
 File.write(File.join(USERDATA, 'Game.rxdata'), 'marker save')
 Dir.chdir(GAME) { load_platform_compat!(false) }
+Dir.chdir(GAME) do
+  ngplus = []
+  Dir.each_child('Save Data') { |entry| ngplus << entry }
+  assert_true(ngplus.include?('Game.rxdata'), 'each_child listing sees the recovered save')
+end
 assert_eq(
   File.read(File.join(GAME, 'Save Data', 'Game.rxdata')),
   'marker save',
-  'marker-gated migration ran'
+  'marker install recovered through the listing'
 )
-
-# --- Migration gate: non-portable boots leave root saves alone ---
-reset_workspace!
-File.write(File.join(USERDATA, 'Game.rxdata'), 'non-portable save')
-Dir.chdir(GAME) { load_platform_compat!(false) }
-assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'non-portable root save untouched')
-assert_false(raw_entries(GAME).include?('Save Data'), 'non-portable boot creates no portable dir')
 
 # --- Legacy-save recovery ---
 # Earlier builds redirected bare working-directory save names into
