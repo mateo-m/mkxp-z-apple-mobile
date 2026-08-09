@@ -150,6 +150,7 @@ RB_METHOD(mriPrint);
 RB_METHOD(mriP);
 RB_METHOD(mkxpKernelPrint);
 RB_METHOD(mkxpDataDirectory);
+RB_METHOD(mkxpSharedFontsPath);
 RB_METHOD(mkxpSetTitle);
 RB_METHOD(mkxpGetTitle);
 RB_METHOD(mkxpDesensitize);
@@ -414,6 +415,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "delta", mkxpDelta);
     _rb_define_module_function(mod, "uptime", mkxpDelta);
     _rb_define_module_function(mod, "data_directory", mkxpDataDirectory);
+    _rb_define_module_function(mod, "shared_fonts_path", mkxpSharedFontsPath);
     _rb_define_module_function(mod, "set_window_title", mkxpSetTitle);
     _rb_define_module_function(mod, "window_title", mkxpGetTitle);
     _rb_define_module_function(mod, "window_title=", mkxpSetTitle);
@@ -653,6 +655,28 @@ RB_METHOD(mkxpDataDirectory) {
     if (s_nml.back() != '/')
         s_nml += '/';
     
+    return mkxp_str_new_cstr(s_nml.c_str());
+}
+
+/* System.shared_fonts_path - host-wide shared font pool, or nil
+   when the host declares none. Trailing '/' for the same string +
+   concat contract as System.data_directory. The preload layer
+   routes Windows-style "<SystemRoot>\\Fonts\\<file>" writes (the
+   stock Essentials FontInstaller) here, so installed fonts serve
+   every game the way the Windows system font folder does. */
+RB_METHOD(mkxpSharedFontsPath) {
+    RB_UNUSED_PARAM;
+
+    const std::string &path = shState->config().sharedFontsPath;
+    if (path.empty())
+        return Qnil;
+
+    std::string s_nml = shState->fileSystem().normalize(path.c_str(), 1, 1);
+    if (s_nml.empty())
+        return Qnil;
+    if (s_nml.back() != '/')
+        s_nml += '/';
+
     return mkxp_str_new_cstr(s_nml.c_str());
 }
 

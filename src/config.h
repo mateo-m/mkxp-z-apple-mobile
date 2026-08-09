@@ -197,6 +197,12 @@ struct Config {
     
     /* Internal */
     std::string customDataPath;
+
+    /* Host-wide shared font pool (app_bridge). Mounted under the
+     * virtual "Fonts" mountpoint behind the game's own files, so
+     * one dropped-in font file serves every game - the same model
+     * as the Windows system font folder. Empty = disabled. */
+    std::string sharedFontsPath;
     
     Config();
     

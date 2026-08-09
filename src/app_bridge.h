@@ -173,6 +173,7 @@ typedef enum {
 typedef struct {
     const char *managedConfigDir;
     const char *userDataDirectory;
+    const char *sharedFontsDirectory;
     MKXPRubyVersion rubyVersion;
     MKXPSyntaxTransformMode syntaxTransformMode;
     MKXPVerticalAlignment verticalAlignment;
@@ -272,6 +273,18 @@ const char *mkxp_getConfigOverlayJSON(void);
 // here by the engine + preload compatibility layer.
 void        mkxp_setUserDataDirectory(const char *path);
 const char *mkxp_getUserDataDirectory(void);
+
+// Shared fonts directory (UI -> Engine).
+//
+// A host-wide font pool, shared by every game the way the Windows
+// system font folder is. The engine mounts it under the virtual
+// "Fonts" mountpoint (game-own files keep priority) so its fonts
+// load for every game, and the preload compatibility layer routes
+// Windows-style "<SystemRoot>\Fonts\<file>" writes (Essentials'
+// FontInstaller) into it. Unset = no shared pool; per-game fonts
+// only.
+void        mkxp_setSharedFontsDirectory(const char *path);
+const char *mkxp_getSharedFontsDirectory(void);
 
 // Launcher identity (UI -> Engine).
 //
@@ -640,6 +653,8 @@ static inline void        mkxp_setConfigOverlayJSON(const char *jsonUTF8) { (voi
 static inline const char *mkxp_getConfigOverlayJSON(void) { return NULL; }
 static inline void        mkxp_setUserDataDirectory(const char *path) { (void)path; }
 static inline const char *mkxp_getUserDataDirectory(void) { return NULL; }
+static inline void        mkxp_setSharedFontsDirectory(const char *path) { (void)path; }
+static inline const char *mkxp_getSharedFontsDirectory(void) { return NULL; }
 static inline void        mkxp_setLauncherIdentity(const char *name) { (void)name; }
 static inline const char *mkxp_getLauncherIdentity(void) { return NULL; }
 static inline void        mkxp_setCABundlePath(const char *path) { (void)path; }

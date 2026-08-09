@@ -270,6 +270,71 @@ unless defined?(MKXPCasefoldFS)
   end
 end
 
+# Windows guarantees a system font directory, and games write into
+# it without a mkdir: the stock Essentials FontInstaller copies its
+# font files to "<SystemRoot>\Fonts\" and reads them back on the
+# next launch as its "already installed" check. The faked
+# SystemRoot points at the per-game data root, so map that one
+# Windows-only shape onto a real "Fonts" folder there - for reads
+# and writes alike, or the installed-check never passes. Every
+# other path keeps MKXPSaveFS's literal resolution.
+unless defined?(MKXPWindowsFonts)
+  module MKXPWindowsFonts
+    module_function
+
+    # The host-wide shared font pool when the host declares one
+    # (System.shared_fonts_path); the per-game fallback otherwise.
+    # The shared pool matches Windows exactly: the system font
+    # folder is one store for every game, so a font one game
+    # installs satisfies the next game's installed-check too.
+    def pool_root(savefs)
+      shared = shared_root
+      return shared if shared
+
+      base = savefs.root
+      base && "#{base}/Fonts"
+    end
+
+    def shared_root
+      return @shared_root if defined?(@shared_root)
+
+      @shared_root =
+        if defined?(System) && System.respond_to?(:shared_fonts_path)
+          path = System.shared_fonts_path.to_s
+          path.empty? ? nil : path.gsub(%r{[\\/]+\z}, '')
+        end
+    end
+
+    def target(savefs, path)
+      return nil unless path.is_a?(String)
+
+      base = savefs.root
+      return nil unless base
+      return nil unless path[0, base.length] == base
+
+      rest = path[base.length..-1].to_s
+      match = rest.match(%r{\A[\\/]+Fonts[\\/]+([^\\/]+)\z}i)
+      return nil unless match
+
+      pool = pool_root(savefs)
+      pool && "#{pool}/#{match[1]}"
+    end
+
+    # The write half of the parity: the directory always exists on
+    # Windows, so it must exist here before the first copy lands.
+    def ensure_dir(savefs, target)
+      dir = pool_root(savefs)
+      return unless dir && target.is_a?(String)
+      return unless target[0, dir.length + 1] == "#{dir}/"
+      return if File._mkxp_orig_directory(dir)
+
+      Dir.mkdir(dir)
+    rescue StandardError
+      nil
+    end
+  end
+end
+
 unless defined?(MKXPSaveFS)
   module MKXPSaveFS
     module_function
@@ -365,7 +430,7 @@ unless defined?(MKXPSaveFS)
     # this recovery once no install carries stranded saves.
     def path_for(path)
       recover_legacy_save(path)
-      path
+      MKXPWindowsFonts.target(self, path) || path
     end
 
     def recover_legacy_save(path)
@@ -593,7 +658,9 @@ unless defined?(MKXPSaveFS)
     # Shared File.open / File.new front: legacy-save recovery first,
     # then the write-mode case resolution.
     def open_target(path, mode)
-      write_casefold(path_for(path), mode)
+      target = path_for(path)
+      MKXPWindowsFonts.ensure_dir(self, target) if write_mode?(mode)
+      write_casefold(target, mode)
     end
 
     # Errno::ENOENT retry target for the open wrappers. The same

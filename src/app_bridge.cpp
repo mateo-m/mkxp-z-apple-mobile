@@ -182,6 +182,8 @@ static std::string s_configOverlayJSON;
 // Per-game UserData directory the host sets before each session.
 static std::mutex s_saveDirMutex;
 static std::string s_saveDir;
+static std::mutex s_sharedFontsDirMutex;
+static std::string s_sharedFontsDir;
 
 // Launcher identity the host sets once before engine boot. Script
 // bootstrap reads it to define the `$userAgent` / `$<name>` globals.
@@ -613,6 +615,16 @@ const char *mkxp_getUserDataDirectory(void) {
     return s_saveDir.c_str();
 }
 
+void mkxp_setSharedFontsDirectory(const char *path) {
+    std::lock_guard<std::mutex> lock(s_sharedFontsDirMutex);
+    s_sharedFontsDir = (path && *path) ? std::string(path) : std::string();
+}
+
+const char *mkxp_getSharedFontsDirectory(void) {
+    std::lock_guard<std::mutex> lock(s_sharedFontsDirMutex);
+    return s_sharedFontsDir.c_str();
+}
+
 void mkxp_setLauncherIdentity(const char *name) {
     std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
     s_launcherIdentity = (name && *name) ? std::string(name) : std::string();
@@ -921,6 +933,8 @@ void mkxp_applySessionConfig(const MKXPSessionConfig *config) {
         mkxp_setManagedConfigDir(config->managedConfigDir);
     if (config->userDataDirectory)
         mkxp_setUserDataDirectory(config->userDataDirectory);
+    if (config->sharedFontsDirectory)
+        mkxp_setSharedFontsDirectory(config->sharedFontsDirectory);
     mkxp_setActiveRubyVersion(config->rubyVersion);
     mkxp_setSyntaxTransformMode(config->syntaxTransformMode);
     mkxp_applyPerGameSettings(config->verticalAlignment, config->postloadEnabled);

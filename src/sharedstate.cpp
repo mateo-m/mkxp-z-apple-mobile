@@ -37,6 +37,7 @@
 #include "quad.h"
 #include "binding.h"
 #include "exception.h"
+#include "debugwriter.h"
 #include "sharedmidistate.h"
 #include "patcher.h"
 
@@ -148,6 +149,24 @@ struct SharedStatePrivate
 
 		for (size_t i = 0; i < config.rtps.size(); ++i)
 			fileSystem.addPath(config.rtps[i].c_str());
+
+		/* Host-wide shared font pool, mounted under the virtual
+		 * "Fonts" folder AFTER the game and the RTPs so the game's
+		 * own files keep priority. One font file dropped into the
+		 * shared folder then serves every game, the same way the
+		 * Windows system font folder does. A missing or unreadable
+		 * folder only disables the pool. */
+		if (!config.sharedFontsPath.empty())
+		{
+			try
+			{
+				fileSystem.addPath(config.sharedFontsPath.c_str(), "Fonts");
+			}
+			catch (const Exception &)
+			{
+				Debug() << "sharedFonts: mount failed for" << config.sharedFontsPath;
+			}
+		}
 
 		if (config.pathCache)
 			fileSystem.createPathCache();

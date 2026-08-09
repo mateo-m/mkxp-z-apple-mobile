@@ -573,6 +573,10 @@ void Config::readGameINI() {
     } else {
         customDataPath = mkxp_fs::normalizePath(prefPath(dataPathOrg.c_str(), dataPathApp.c_str()).c_str(), 0, 1);
     }
+
+    const char *sharedFontsDirOverride = mkxp_getSharedFontsDirectory();
+    if (sharedFontsDirOverride && *sharedFontsDirOverride)
+        sharedFontsPath = mkxp_fs::normalizePath(sharedFontsDirOverride, 0, 1);
     
     if (rgssVersion == 0) {
         /* Try to guess RGSS version based on Data/Scripts extension */
