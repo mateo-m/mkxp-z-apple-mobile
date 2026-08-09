@@ -599,6 +599,42 @@ module Win32API_Impl
     # games typically don't exercise UTF-16 paths anyway.
   end
 
+  # There is no Windows registry here, so a key lookup must fail the
+  # way a missing key fails on Windows: with a non-zero error code.
+  # The tolerate-unknown fallback in Win32API#call returns 0, which
+  # reads as ERROR_SUCCESS and sends callers down paths built from
+  # empty registry data. Essentials' MiniRegistry then reports an
+  # empty system font folder, and the stock FontInstaller copies
+  # fonts to "\<file>", fails silently, and asks the player to
+  # install the fonts again on every launch.
+  module Advapi32
+    ERROR_FILE_NOT_FOUND = 2
+
+    class RegOpenKeyExA
+      def call(_args)
+        ERROR_FILE_NOT_FOUND
+      end
+    end
+
+    class RegOpenKeyExW < RegOpenKeyExA
+    end
+
+    class RegQueryValueExA
+      def call(_args)
+        ERROR_FILE_NOT_FOUND
+      end
+    end
+
+    class RegQueryValueExW < RegQueryValueExA
+    end
+
+    class RegCloseKey
+      def call(_args)
+        0
+      end
+    end
+  end
+
   # Cross-call state for the MCI/AVI playback shim. Vinemon Sauce
   # Edition's title screen opens an AVI via Windows' MCI subsystem
   # (`mciSendString "open ... type AVIVideo alias X"` followed by
