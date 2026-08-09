@@ -6,6 +6,30 @@
 
 require 'fileutils'
 
+# This harness simulates a device (case-sensitive) filesystem on top of
+# a case-folding host: with_device_case_semantics shadows exist? and
+# System.resolve_case_path, and with_recorded_raw_paths proves the
+# wiring from the paths handed to the raw syscalls. On a genuinely
+# case-sensitive host the simulation collides with the real disk -
+# mkdir_p('audio/...') resolves onto the existing 'Audio' and raises
+# EEXIST - so the run proves nothing rather than finding a defect.
+# Linux CI is case-sensitive; skip there instead of failing.
+# Probes the filesystem the workspace will live on, not the system
+# temp dir: on macOS those two can differ in case behaviour.
+def host_folds_case?
+  probe = File.join(__dir__, "case_probe_#{Process.pid}")
+  FileUtils.mkdir_p(probe)
+  File.write(File.join(probe, 'Probe.TXT'), 'x')
+  File.exist?(File.join(probe, 'probe.txt'))
+ensure
+  FileUtils.rm_rf(probe)
+end
+
+unless host_folds_case?
+  puts 'test_save_fs: skipped, this host filesystem is case-sensitive'
+  exit 0
+end
+
 ROOT = File.expand_path('..', __dir__)
 WORK = File.expand_path('test_save_fs_workspace', __dir__)
 USERDATA = File.join(WORK, 'UserData')
