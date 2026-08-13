@@ -377,6 +377,7 @@ unless defined?(MKXPSaveFS)
 
     def save_filename?(name)
       return false if empo_artifact?(name)
+      return false if pre_literal_artifact?(name)
 
       lower = name.downcase
       return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
@@ -392,6 +393,36 @@ unless defined?(MKXPSaveFS)
     # the game; no recovery may move them.
     def empo_artifact?(name)
       name.include?('.empo-')
+    end
+
+    # Collision backups this migration wrote itself
+    # ("*.pre-literal.bak", "*.pre-literal-2.bak"). They must never
+    # count as migration candidates again: re-migrating a backup
+    # chains another suffix onto it on every enumeration.
+    def pre_literal_artifact?(name)
+      name.include?('.pre-literal')
+    end
+
+    # True when the two paths name the same directory entry, by
+    # device+inode identity. A string comparison cannot decide
+    # this: on iOS the host config spells the data dir /var/...
+    # while getcwd resolves the symlink to /private/var/..., and
+    # File.expand_path resolves no symlinks. The old string
+    # comparison stays as the fallback for paths the identity
+    # check cannot stat.
+    def same_directory?(a, b)
+      File.identical?(a, b)
+    rescue StandardError
+      File.expand_path(a) == File.expand_path(b)
+    end
+
+    # Identity check for migration source/destination pairs. On
+    # error, prefer "not identical": the migration then runs its
+    # normal collision path, which never destroys data.
+    def same_entry?(a, b)
+      File.identical?(a, b)
+    rescue StandardError
+      false
     end
 
     def engine_internal_entry?(name)
@@ -459,10 +490,8 @@ unless defined?(MKXPSaveFS)
       normalized = normalize_path(path)
       return unless candidate?(normalized)
 
-      base = root
+      base = recovery_base
       return unless base
-      # Degenerate host config: data dir pointing at the game folder.
-      return if File.expand_path(base) == File.expand_path('.')
 
       stranded = "#{base}/#{normalized}"
       return unless File._mkxp_orig_file(stranded)
@@ -470,6 +499,27 @@ unless defined?(MKXPSaveFS)
       migrate_save_file(stranded, normalized)
     rescue StandardError
       nil
+    end
+
+    # The UserData root both alias-era recoveries may take files
+    # FROM, or nil when no recovery may run. Two gates, shared by
+    # the single-file and the glob recovery:
+    #  - The redirect the recoveries undo only ever happened with
+    #    the game folder as the cwd, so any other cwd skips them.
+    #    Essentials' Dir.get chdirs INTO the data dir to enumerate
+    #    saves; without this gate the recovery would "migrate"
+    #    those saves onto themselves.
+    #  - Degenerate host config: the data dir IS the game folder.
+    #    Compared by identity, not by spelling - on iOS the same
+    #    directory arrives as /var/... and resolves from getcwd as
+    #    /private/var/....
+    def recovery_base
+      base = root
+      return nil unless base
+      return nil unless cwd_at_game_root?
+      return nil if same_directory?(base, '.')
+
+      base
     end
 
     # Bare glob patterns enumerate the working directory (ancient
@@ -497,9 +547,8 @@ unless defined?(MKXPSaveFS)
     end
 
     def recover_glob_matches(normalized)
-      base = root
+      base = recovery_base
       return unless base
-      return if File.expand_path(base) == File.expand_path('.')
 
       Dir._mkxp_orig_entries(base).each do |name|
         next unless save_filename?(name)
@@ -811,7 +860,7 @@ unless defined?(MKXPSaveFS)
     def sweep_base
       base = root
       return nil if base.nil? || base == '.'
-      return nil if File.expand_path(base) == File.expand_path('.')
+      return nil if same_directory?(base, '.')
 
       base
     end
@@ -876,19 +925,37 @@ unless defined?(MKXPSaveFS)
     end
 
     def migrate_save_file(src, dst)
+      # The same inode reached through two spellings must never
+      # "migrate": the rename pair below would strip the file down
+      # to its backup name and leave nothing at the canonical one.
+      return if same_entry?(src, dst)
+
       unless orig_exist?(dst)
         File._mkxp_orig_rename(src, dst)
         return
       end
 
+      backup = pre_literal_backup_name(dst)
       if migrate_source_newer?(src, dst)
-        File._mkxp_orig_rename(dst, "#{dst}.pre-literal.bak")
+        File._mkxp_orig_rename(dst, backup)
         File._mkxp_orig_rename(src, dst)
       else
-        File._mkxp_orig_rename(src, "#{dst}.pre-literal.bak")
+        File._mkxp_orig_rename(src, backup)
       end
     rescue StandardError
       nil
+    end
+
+    # First free backup name beside dst. rename(2) replaces an
+    # existing target silently, so a fixed backup name would
+    # destroy the previous backup on a second collision.
+    def pre_literal_backup_name(dst)
+      name = "#{dst}.pre-literal.bak"
+      return name unless orig_exist?(name)
+
+      index = 2
+      index += 1 while orig_exist?("#{dst}.pre-literal-#{index}.bak")
+      "#{dst}.pre-literal-#{index}.bak"
     end
 
     # Ties go to the root (src) copy: on the first alias->literal
