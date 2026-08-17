@@ -2164,14 +2164,22 @@ end
 # --- Socket class stubs ---
 # Removed. Pokemon Essentials forks (Insurgence, Reborn) ship
 # their own Sockets script that defines TCPSocket / UDPSocket /
-# BasicSocket with their own class hierarchy. Pre-defining stubs
-# here causes "superclass mismatch" when the game later defines
-# the same class with a different parent. Games that genuinely
-# need network stubs (rare on iOS where we have no real socket
-# layer anyway) should ship their own. With networking enabled the
-# real socket classes come from the statically-linked ext instead
-# (gated in extinit so offline mode still matches this old
-# behavior).
+# BasicSocket with their own class hierarchy.
+#
+# A stub here never survives those scripts, and the way it fails
+# depends on the Ruby version. On 1.9 and 3.1 the game's definition
+# raises "superclass mismatch", and the script loop skips the rest
+# of that section. On 1.8 nothing raises at all, because
+# ruby18/rgss-superclass-override.patch restores the RGSS1 rule
+# that the last definition wins. The stub is then replaced in
+# silence. A stub helps in neither case.
+#
+# Games that need network stubs must ship their own. With
+# networking enabled the real socket classes come from the
+# statically-linked ext instead (gated in extinit so offline mode
+# still matches this old behavior). Games that call Winsock
+# through Win32API reach the network through Win32API_Impl::Ws2_32
+# in win32_wrap.rb.
 
 # --- Eager static extension load ---
 # The socket and openssl extensions are statically linked into the
