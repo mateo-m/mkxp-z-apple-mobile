@@ -55,6 +55,46 @@ extern "C" void mkxp_debugLog(const char *tag, const char *source,
 namespace {
 
 // ----------------------------------------------------------------
+//  Map layer count
+// ----------------------------------------------------------------
+
+// Tile layers per map cell. RPG Maker XP map data is a Table whose
+// third dimension is always 3, so this is a property of the editor
+// format and not of any one game. Hmode7 is an RMXP-era plugin, so
+// every game that reaches this binding packs 3 layers.
+constexpr int kMapLayers = 3;
+
+// Hmode7's Ruby side packs its tilemap Table as one run of
+// `kMapLayers + 1` entries per cell: the 3 layer tiles, then the
+// bush-start index. The renderers stride by that number, so a table
+// whose width is not a multiple of it would be read at the wrong
+// offsets and draw garbage without ever failing.
+//
+// The binding cannot see the map's cell width, so divisibility is
+// the only check available. It still catches the case that matters,
+// which is a fork that repacked the table with a different stride.
+constexpr int kPackedStride = kMapLayers + 1;
+
+// True when a packed tilemap width can hold whole cells. Warns once
+// per process on the way out, because a stride mismatch is a
+// property of the game and repeats every frame.
+bool packed_tilemap_is_sane(int tilemap_xsize, const char *caller) {
+    if (tilemap_xsize > 0 && tilemap_xsize % kPackedStride == 0) return true;
+
+    static int strideWarned = 0;
+    if (!strideWarned) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+            "%s: tilemap width=%d is not a multiple of %d. This game packs "
+            "its Hmode7 tile table differently, so the map is not drawn.",
+            caller, tilemap_xsize, kPackedStride);
+        mkxp_debugLog("HM7-WARN", "hmode7-binding.cpp [C++]", buf);
+        strideWarned = 1;
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------
 //  Low-level unwrappers
 // ----------------------------------------------------------------
 
@@ -337,9 +377,10 @@ RB_METHOD(hm7NativeDrawHeightmap) {
     SDL_Surface *pattern = bitmap_surface(pattern_v);
     if (!map_tileset || !pattern) return INT2FIX(0);
 
-    // nb_layers is hardcoded to 3 in Insurgence. See design doc section 10.1.
+    if (!packed_tilemap_is_sane(tm_xs, "draw_heightmap")) return INT2FIX(0);
+
     hm7::draw_heightmap(heightmap, hm_xs, tilemap, tm_xs, tm_ys,
-                        map_tileset, pattern, /*nb_layers=*/3);
+                        map_tileset, pattern, kMapLayers);
     return INT2FIX(0);
 }
 
@@ -461,7 +502,7 @@ int hm7_draw_map_iter(VALUE key, VALUE val, VALUE ctx_val) {
                                 ctx->heightset, entry,
                                 ctx->auto_tilesets, 7,
                                 ctx->auto_heightsets, 7,
-                                /*nb_layers=*/3);
+                                kMapLayers);
     return ST_CONTINUE;
 }
 
@@ -478,7 +519,7 @@ int hm7_refresh_map_iter(VALUE key, VALUE val, VALUE ctx_val) {
     entry.layer_tile_values[3] = aref_int(val, 3);
 
     hm7::refresh_map_tileset_entry(ctx->map_tileset, ctx->tileset, entry,
-                                   ctx->auto_tilesets, 7, /*nb_layers=*/3);
+                                   ctx->auto_tilesets, 7, kMapLayers);
     return ST_CONTINUE;
 }
 }  // anonymous namespace
@@ -746,8 +787,12 @@ RB_METHOD(hm7NativeRenderHM7) {
         }
     }
 
+    if (!packed_tilemap_is_sane(rp.tilemap_xsize, "render_hm7")) {
+        return INT2FIX(0);
+    }
+
     int o_camera = hm7::render_hm7(rp, rv, surfaces, surface_count,
-                                   /*nb_layers=*/3, wall_mode);
+                                   kMapLayers, wall_mode);
 
     // Commit all bitmaps the renderer wrote to.
     commit_bitmap(aref_or_nil(params_v, 0));   // screen_bitmap
