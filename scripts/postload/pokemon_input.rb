@@ -188,10 +188,28 @@ unless $PokemonSystem.nil?
       jpress?(button)
     end
 
+    # Fan games put hotkey handling inside their own `Input.update`.
+    # Pokemon Rejuvenation toggles turbo (T), mute (M), and the
+    # screenshot key (F3) there, and reads the gamepad triggers for
+    # its dynamic turbo. Defining `update` here replaced that method
+    # and every key it served went dead.
+    #
+    # So keep the game's method and call it. A game that overrides
+    # `update` aliases the previous one first, so the chain still
+    # ends at the engine's native update. A game with no override of
+    # its own leaves the native `update` in place, which is what
+    # `jupdate` calls anyway.
+    #
+    # The guard matters: without it a second load would alias the
+    # method below to itself and recurse forever.
+    class << self
+      alias mkxp_chained_update update unless method_defined?(:mkxp_chained_update)
+    end
+
     def self.update
       @mkxp_read = nil
       @mkxp_release_read = nil
-      jupdate
+      mkxp_chained_update
     end
 
     def self.press?(button)
