@@ -584,6 +584,35 @@ module Win32API_Impl
       end
     end
 
+    # RtlMoveMemory(destination, source, length).
+    #
+    # Games use this to dereference a pointer another Win32 call gave
+    # them. Pokemon fan games with their own Winsock layer read the
+    # `hostent` from gethostbyname this way, so resolve our synthetic
+    # pointers here. A String source is copied directly, which is the
+    # struct-to-buffer direction the same scripts use.
+    #
+    # Anything else leaves the buffer as the caller prepared it,
+    # which matches what every caller got before this existed.
+    class RtlMoveMemory
+      def call(args)
+        destination = args[0]
+        source = args[1]
+        length = args[2].to_i
+        return 0 unless destination.is_a?(String) && length > 0
+
+        data = if source.is_a?(String)
+                 source[0, length]
+               else
+                 Win32API_Impl::FakeHeap.read(source, length)
+               end
+        return 0 if data.nil?
+
+        memcpy_string(destination, data[0, destination.length].to_s)
+        1
+      end
+    end
+
     # Encoding-aware wide/narrow char conversion (codepage
     # tables, WideCharToMultiByte, MultiByteToWideChar) is
     # Ruby 1.9+ only; Encoding::*, force_encoding, byteslice,
@@ -1022,6 +1051,341 @@ module Win32API_Impl
     end
     URLDownloadToFileA = URLDownloadToFile
     URLDownloadToFileW = URLDownloadToFile
+  end
+
+  # Synthetic pointer heap.
+  #
+  # A few Win32 calls hand the caller a pointer and expect it to read
+  # the memory back later through RtlMoveMemory. `gethostbyname` is
+  # the one that matters here: it returns a `hostent *`. Ruby cannot
+  # give out real addresses, so hand out synthetic ones and resolve
+  # them from this table. Blocks live for the whole session, which is
+  # fine because games call these once per connection.
+  module FakeHeap
+    BASE = 0x7F00_0000
+    STRIDE = 0x1000
+
+    @blocks = {}
+    @next_address = BASE
+
+    def self.alloc(bytes)
+      address = @next_address
+      @next_address += STRIDE
+      @blocks[address] = bytes.to_s
+      address
+    end
+
+    # Reads always succeed for a known block. Callers ask for a fixed
+    # struct size (256 bytes for a host name, say) that can overrun
+    # the real payload, so pad with NULs the way real memory reads
+    # would return whatever follows.
+    def self.read(address, length)
+      block = @blocks[address]
+      return nil if block.nil?
+
+      data = block[0, length].to_s
+      data + ("\0" * (length - data.length))
+    end
+  end
+
+  # ws2_32 (Winsock) bridge.
+  #
+  # Pokemon fan games that predate Essentials' HTTP helpers talk to
+  # their servers through a Ruby reimplementation of Winsock. Pokemon
+  # Insurgence ships two of them and uses the ten imports below.
+  #
+  # Without this module every call fell through to the
+  # TOLERATE_ERRORS branch and returned 0. In Winsock `connect()`
+  # returns 0 for SUCCESS, so the game believed it had connected,
+  # wrote into nothing, and then polled a socket that never became
+  # readable. The result was an online menu that hung until the
+  # player pressed cancel.
+  #
+  # Ruby's socket extension only initialises when the host grants the
+  # game network access (ios/Dependencies/ruby18/extinit.c). When it
+  # is absent every call here reports failure, so the game takes the
+  # offline path it already has for an unreachable server.
+  module Ws2_32
+    AF_INET = 2
+    SOCK_STREAM = 1
+    SOCKET_ERROR = -1
+    INVALID_SOCKET = -1
+
+    # Capture the socket entry points while they are still pristine.
+    # The games this module exists for reopen `Socket` and add their
+    # own Winsock wrappers, so calling a reopened method later would
+    # recurse straight back into this module.
+    NATIVE = if defined?(::Socket) && defined?(::IO)
+               begin
+                 {
+                   :klass => ::Socket,
+                   :init => ::Socket.instance_method(:initialize),
+                   :connect => ::Socket.instance_method(:connect_nonblock),
+                   :pack => ::Socket.method(:pack_sockaddr_in),
+                   :recv => ::Socket.instance_method(:recv),
+                   :write => ::IO.instance_method(:write),
+                   :close => ::IO.instance_method(:close),
+                   :closed => ::IO.instance_method(:closed?),
+                   :select => ::IO.method(:select)
+                 }
+               rescue StandardError
+                 nil
+               end
+             end
+
+    @sockets = {}
+    @next_handle = 3
+    @last_error = 0
+
+    def self.available?
+      !NATIVE.nil?
+    end
+
+    def self.last_error
+      @last_error
+    end
+
+    # Winsock reports failure as -1 and keeps the code for a later
+    # WSAGetLastError. These games look the code up in Errno, so
+    # store the POSIX number rather than a Winsock one.
+    def self.fail_with(errno)
+      @last_error = errno
+      SOCKET_ERROR
+    end
+
+    def self.entry_for(handle)
+      @sockets[handle]
+    end
+
+    def self.io_for(handle)
+      entry = @sockets[handle]
+      entry && entry[:io]
+    end
+
+    def self.open_handle(domain)
+      return INVALID_SOCKET unless available?
+      return fail_with(Errno::EAFNOSUPPORT::Errno) unless domain == AF_INET
+
+      handle = @next_handle
+      @next_handle += 1
+      @sockets[handle] = { :io => nil }
+      handle
+    end
+
+    def self.close_handle(handle)
+      entry = @sockets.delete(handle)
+      io = entry && entry[:io]
+      return 0 if io.nil?
+
+      begin
+        NATIVE[:close].bind(io).call unless NATIVE[:closed].bind(io).call
+      rescue StandardError
+        nil
+      end
+      0
+    end
+
+    # Winsock sockaddr_in: family (2 bytes, host order), port (2
+    # bytes, network order), then the four address bytes.
+    def self.connect_handle(handle, sockaddr)
+      entry = entry_for(handle)
+      return fail_with(Errno::EBADF::Errno) if entry.nil?
+      return fail_with(Errno::ENETDOWN::Errno) unless available?
+      return fail_with(Errno::EINVAL::Errno) unless sockaddr.is_a?(String) && sockaddr.length >= 8
+
+      port = sockaddr[2, 2].unpack('n')[0].to_i
+      host = sockaddr[4, 4].unpack('C4').join('.')
+
+      io = nil
+      errno = nil
+      begin
+        io = connect_to(host, port)
+      rescue SystemCallError => e
+        errno = e.errno
+      rescue StandardError
+        errno = Errno::ECONNREFUSED::Errno
+      end
+      return fail_with(errno) if errno
+      return fail_with(Errno::ETIMEDOUT::Errno) if io.nil?
+
+      entry[:io] = io
+      0
+    end
+
+    # Connect without blocking the RGSS thread for a full TCP
+    # timeout. Ruby 1.8 schedules green threads, so a blocking
+    # connect() stalls every thread, including the one drawing frames.
+    def self.connect_to(host, port, seconds = 10)
+      io = NATIVE[:klass].allocate
+      NATIVE[:init].bind(io).call(AF_INET, SOCK_STREAM, 0)
+      address = NATIVE[:pack].call(port, host)
+
+      begin
+        NATIVE[:connect].bind(io).call(address)
+      rescue Errno::EINPROGRESS, Errno::EALREADY
+        if NATIVE[:select].call(nil, [io], nil, seconds).nil?
+          NATIVE[:close].bind(io).call
+          return nil
+        end
+        begin
+          NATIVE[:connect].bind(io).call(address)
+        rescue Errno::EISCONN
+          # Already connected. Winsock calls that success.
+        end
+      end
+      io
+    end
+
+    def self.send_on(handle, data, length)
+      io = io_for(handle)
+      return fail_with(Errno::ENOTCONN::Errno) if io.nil?
+
+      payload = data.to_s
+      payload = payload[0, length] if length > 0 && length < payload.length
+      begin
+        NATIVE[:write].bind(io).call(payload)
+      rescue SystemCallError => e
+        fail_with(e.errno)
+      end
+    end
+
+    def self.recv_into(handle, buffer, length)
+      io = io_for(handle)
+      return fail_with(Errno::ENOTCONN::Errno) if io.nil?
+      return 0 unless buffer.is_a?(String) && length > 0
+      return 0 if NATIVE[:select].call([io], nil, nil, 0).nil?
+
+      data = nil
+      begin
+        data = NATIVE[:recv].bind(io).call(length)
+      rescue SystemCallError => e
+        return fail_with(e.errno)
+      end
+      return 0 if data.nil? || data.empty?
+
+      memcpy_string(buffer, data)
+      data.length
+    end
+
+    # The caller packs an fd_set as a count followed by one handle,
+    # and a timeval as seconds followed by microseconds.
+    def self.select_on(readfds, timeval)
+      return fail_with(Errno::EINVAL::Errno) unless readfds.is_a?(String) && readfds.length >= 8
+
+      count, handle = readfds.unpack('ll')
+      return 0 if count.to_i < 1
+
+      io = io_for(handle)
+      return 0 if io.nil?
+
+      timeout = 0
+      if timeval.is_a?(String) && timeval.length >= 8
+        seconds, microseconds = timeval.unpack('ll')
+        timeout = seconds.to_i + (microseconds.to_i / 1_000_000.0)
+      end
+
+      NATIVE[:select].call([io], nil, nil, timeout).nil? ? 0 : 1
+    end
+
+    # Builds a Win32 `hostent` in the synthetic heap and returns a
+    # pointer to it. The 32-bit layout the callers unpack is h_name,
+    # h_aliases, h_addrtype, h_length, h_addr_list.
+    def self.hostent_for(name)
+      return 0 unless available?
+
+      host = name.to_s.split("\0")[0].to_s
+      return 0 if host.empty?
+
+      address = begin
+        resolve(host)
+      rescue StandardError
+        nil
+      end
+      return 0 if address.nil?
+
+      name_pointer = FakeHeap.alloc("#{host}\0")
+      alias_pointer = FakeHeap.alloc([0].pack('L'))
+      address_pointer = FakeHeap.alloc(address)
+      list_pointer = FakeHeap.alloc([address_pointer, 0].pack('LL'))
+
+      FakeHeap.alloc([name_pointer, alias_pointer].pack('LL') +
+                     [AF_INET, address.length].pack('ss') +
+                     [list_pointer].pack('L'))
+    end
+
+    def self.resolve(host)
+      if host =~ /\A(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\z/
+        return [Regexp.last_match(1).to_i, Regexp.last_match(2).to_i,
+                Regexp.last_match(3).to_i, Regexp.last_match(4).to_i].pack('C4')
+      end
+
+      # pack_sockaddr_in resolves the name and puts the four address
+      # bytes at offset 4 of the BSD sockaddr_in it returns.
+      NATIVE[:pack].call(0, host)[4, 4]
+    end
+
+    class Socket
+      def call(args)
+        Ws2_32.open_handle(args[0].to_i)
+      end
+    end
+
+    class Connect
+      def call(args)
+        Ws2_32.connect_handle(args[0].to_i, args[1])
+      end
+    end
+
+    class Send
+      def call(args)
+        Ws2_32.send_on(args[0].to_i, args[1], args[2].to_i)
+      end
+    end
+
+    class Recv
+      def call(args)
+        Ws2_32.recv_into(args[0].to_i, args[1], args[2].to_i)
+      end
+    end
+
+    class Select
+      def call(args)
+        Ws2_32.select_on(args[1], args[4])
+      end
+    end
+
+    class Closesocket
+      def call(args)
+        Ws2_32.close_handle(args[0].to_i)
+      end
+    end
+
+    class Gethostbyname
+      def call(args)
+        Ws2_32.hostent_for(args[0])
+      end
+    end
+
+    # Clients never bind, and the options these games set (keepalive,
+    # nodelay) do not change whether the connection works. Report
+    # success so the callers' error checks stay quiet.
+    class Bind
+      def call(_args)
+        0
+      end
+    end
+
+    class Setsockopt
+      def call(_args)
+        0
+      end
+    end
+
+    class WSAGetLastError
+      def call(_args)
+        Ws2_32.last_error
+      end
+    end
   end
 end
 
