@@ -22,7 +22,7 @@
 # RGSS Linker (berka_91) compatibility: stub Kernel#load_module so
 # games that call it (FMODEX wrapper, network loaders, etc.) don't
 # crash with NoMethodError. Real Windows games rely on the linker
-# DLL side-effect of defining module constants; on iOS we can't load
+# DLL side-effect of defining module constants. On iOS we can't load
 # DLLs, so the constants reference later in the script will raise
 # NameError - which binding-mri.cpp's SKIPPED handler swallows for
 # LoadError/NoMethodError cases.
@@ -349,7 +349,7 @@ module Win32API_Impl
           Scancodes::SDL[sdl_name] || 0
         when MAPVK_VK_TO_CHAR
           # Uppercase letter conversion. The high bit of the
-          # return value signals "dead key" on Windows; we
+          # return value signals "dead key" on Windows. We
           # never set it.
           return code if code.between?(0x41, 0x5A)
           return code if code.between?(0x30, 0x39)
@@ -378,7 +378,7 @@ module Win32API_Impl
     class ToUnicode
       PRESSED_BIT = 0x80
 
-      # Keyed by VK (Scancodes::WIN32[:SYMBOL]); values are
+      # Keyed by VK (Scancodes::WIN32[:SYMBOL]). Values are
       # [unshifted, shifted] characters. Layout is hardcoded to
       # US QWERTY, which is what every mkxp-z-supported game
       # assumes regardless of the actual host keyboard layout.
@@ -415,7 +415,7 @@ module Win32API_Impl
       }.freeze
 
       # rubocop:disable Metrics/AbcSize, Metrics/PerceivedComplexity
-      # `call` mirrors Win32 ToUnicode's signature; the per-vkey
+      # `call` mirrors Win32 ToUnicode's signature. The per-vkey
       # branching is inherent to keyboard scan-code translation.
       def call(args)
         vkey = args[0].to_i
@@ -429,7 +429,7 @@ module Win32API_Impl
 
         # Check shift / caps-lock flags inside the state
         # buffer. ToUnicode treats both 0xA0 / 0xA1 as "shift"
-        # and 0x14 as caps-lock; the high bit of each byte is
+        # and 0x14 as caps-lock. The high bit of each byte is
         # the pressed flag.
         shift_pressed = (state[0x10].to_i & PRESSED_BIT) != 0 ||
                         (state[0xA0].to_i & PRESSED_BIT) != 0 ||
@@ -453,7 +453,7 @@ module Win32API_Impl
         # Write the UTF-16 code unit for `ch` (only BMP chars
         # are emitted here, so a single code unit suffices).
         #
-        # `unpack1` is Ruby 2.4+; use `unpack` + `.first`
+        # `unpack1` is Ruby 2.4+. Use `unpack` + `.first`
         # for 1.8/1.9 compatibility. `String#unpack("U")`
         # works on every Ruby version we target.
         code = ch.unpack('U').first
@@ -506,7 +506,7 @@ module Win32API_Impl
           rect[2] = Graphics.width
           rect[3] = Graphics.height
         rescue StandardError
-          # Graphics not yet initialised; fall back to 640x480.
+          # Graphics not yet initialised. Fall back to 640x480.
         end
         memcpy_string(args[1], rect.pack('l4'))
         1
@@ -532,7 +532,7 @@ module Win32API_Impl
     # Some scripts (Vinemon's `Scene_Movie3` for instance)
     # request the unsuffixed `FindWindow` instead of the
     # A/W-tagged form. Win32 itself routes the unsuffixed name to
-    # the ANSI variant via macro on Windows; our constant lookup
+    # the ANSI variant via macro on Windows. Our constant lookup
     # is exact-match so we have to alias here, otherwise the
     # script falls through to TOLERATE_ERRORS and gets back 0,
     # breaking any later `hwnd == GetForegroundWindow.call` style
@@ -615,13 +615,13 @@ module Win32API_Impl
 
     # Encoding-aware wide/narrow char conversion (codepage
     # tables, WideCharToMultiByte, MultiByteToWideChar) is
-    # Ruby 1.9+ only; Encoding::*, force_encoding, byteslice,
+    # Ruby 1.9+ only. Encoding::*, force_encoding, byteslice,
     # getbyte/setbyte, and kw-arg encode(invalid: :replace) are
     # all 1.9-or-later. Lives in win32_wrap_encoding.rb, loaded
     # conditionally from binding-mri.cpp's preload list when
     # RUBY_API_VERSION_MAJOR/MINOR >= 1.9. On the Ruby 1.8
     # dispatch path (mkxp18-merged.o, RGSS1/RGSS2) those classes
-    # are absent; games that probe for them via
+    # are absent. Games that probe for them via
     # `Win32API_Impl::Kernel32.const_defined?(:WideCharToMultiByte)`
     # will see false and Win32API#call falls through to the
     # TOLERATE_ERRORS branch (logs + returns 0). RGSS1/RGSS2
@@ -677,7 +677,7 @@ module Win32API_Impl
   # Can't decode AVI here, but we can short-circuit
   # the script's wait so it falls through to the title screen
   # without playing the intro. The shim counts `mciSendString`
-  # calls; once the script has issued at least an open + play
+  # calls. Once the script has issued at least an open + play
   # pair, the next `GetMessage` call returns a synthesized
   # MM_MCINOTIFY message and the message-pump loop breaks.
   #
@@ -703,14 +703,14 @@ module Win32API_Impl
   module Winmm
     # MciSendString shim. The script passes commands as
     # UTF-16LE-encoded byte buffers (Vinemon's
-    # `Zeus::Encode.utf8_to_utf16`); we decode the relevant ones
+    # `Zeus::Encode.utf8_to_utf16`). We decode the relevant ones
     # and write canned responses into the output buffer so the
     # caller's mci_result parser produces values that exit its
     # video-pump loops cleanly. Anything we don't recognize is a
     # silent no-op (the caller treats `0` as success).
     class MciSendStringW
       # Map of command pattern → canned response text. Tested
-      # against Vinemon's Scene_Movie3.rb commands; extend as
+      # against Vinemon's Scene_Movie3.rb commands. Extend as
       # new MCI-using games hit unhandled cases.
       RESPONSES = [
         # `where X source` returns "x y w h" in pixels. We
@@ -733,8 +733,8 @@ module Win32API_Impl
         cmd = decode_utf16(args[0])
         # Avoid Ruby 2.3+ syntax / methods: we also build for
         # Ruby 1.9 native (RGSS3 multi-Ruby path).
-        #   `&.` (safe navigation)       ; 2.3+
-        #   `Regexp#match?` (bool)       ; 2.4+
+        #   `&.` (safe navigation)       . 2.3+
+        #   `Regexp#match?` (bool)       . 2.4+
         # Use the traditional `re =~ cmd` form (returns Integer
         # offset on match, nil on miss) which works on every
         # Ruby version we target.
@@ -743,7 +743,7 @@ module Win32API_Impl
         write_response(args[1], response) if response
 
         # MCIERR_NOERROR. Real MCI returns specific error
-        # codes for failures; the caller paths we hit only
+        # codes for failures. The caller paths we hit only
         # distinguish `0 vs nonzero` and we want success.
         0
       end
@@ -758,7 +758,7 @@ module Win32API_Impl
       # Caveat: RPG Maker's MCI bridge passes args as UTF-16LE
       # (every other byte is 0 for ASCII-range commands).
       # These stubs handle the ASCII subset by stripping the
-      # zero bytes; non-ASCII Unicode passes through corrupted.
+      # zero bytes. Non-ASCII Unicode passes through corrupted.
       # Acceptable for RGSS1/RGSS2 games that ran on Windows
       # ANSI codepages with ASCII-only MCI commands like
       # "open foo type AVIVideo alias X".
@@ -811,7 +811,7 @@ module Win32API_Impl
     # handles input. The exception is scripts that use MCI for
     # media playback and need to pump messages until
     # MM_MCINOTIFY arrives. We fake that one notification when
-    # `MciState.consume_playback_done` is set; otherwise we
+    # `MciState.consume_playback_done` is set. Otherwise we
     # return 0 (the standard "WM_QUIT received" return that
     # breaks while-GetMessage idioms cleanly).
     class GetMessage
@@ -877,7 +877,7 @@ module Win32API_Impl
         body = body.dup
         # Reads slice and count BYTES. On 1.9+ VMs the body may
         # arrive tagged UTF-8, where [] and length work in
-        # characters; retag as binary so both are byte-based.
+        # characters. Retag as binary so both are byte-based.
         body.force_encoding('ASCII-8BIT') if body.respond_to?(:force_encoding)
         handle = @@next_handle
         @@next_handle += 1
@@ -898,7 +898,7 @@ module Win32API_Impl
     class InternetOpenA
       def call(_args)
         # Fake session handle. Any nonzero value passes the
-        # scripts' load-time handle checks; requests carry their
+        # scripts' load-time handle checks. Requests carry their
         # own state keyed by the request handle, so the session
         # handle is never dereferenced.
         1
@@ -986,7 +986,7 @@ module Win32API_Impl
                     [value].pack('V')
                   end
         # Windows fails with ERROR_INSUFFICIENT_BUFFER rather than
-        # writing past the caller's buffer; writing anyway would
+        # writing past the caller's buffer. Writing anyway would
         # raise IndexError inside the game script.
         return 0 if payload.length > buf.length
 
@@ -1000,7 +1000,7 @@ module Win32API_Impl
     class InternetCloseHandle
       def call(args)
         # Also succeeds for the fake session handle and for
-        # already-closed handles; callers only check for nonzero.
+        # already-closed handles. Callers only check for nonzero.
         Requests.close(args[0])
       end
     end
@@ -1451,7 +1451,7 @@ class Win32API
       @mkxp_native_available = true
       nil
     rescue StandardError
-      # Native initialiser missing on this Win32API build; the
+      # Native initialiser missing on this Win32API build. The
       # Ruby-only fallback path above is enough for compat.
     end
   end

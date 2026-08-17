@@ -183,7 +183,7 @@ class Sprite
   end
 
   # RGSS resets src_rect to the whole bitmap on assignment. The patch
-  # has to write all four rect fields after switching pages; this fake
+  # has to write all four rect fields after switching pages. This fake
   # is what catches it if someone reorders those two steps.
   def bitmap=(value)
     @bitmap = value
@@ -453,7 +453,7 @@ RENDERER_SOURCE = <<~'RUBY'
 
     attr_reader :tilesets, :autotiles
 
-    # The shipped renderer takes a viewport; the patched initialize
+    # The shipped renderer takes a viewport. The patched initialize
     # has to forward it to the original.
     def initialize(viewport = :none)
       @viewport  = viewport
@@ -681,8 +681,8 @@ def check_wide_mega_tileset_no_longer_crashes
   assert_eq(tile.bitmap.equal?(renderer.tilesets.mkxp_sheets['jail'].bitmaps[1]), true,
             'set_src_rect: the tile switched to page 2')
 
-  # Straddle back to page 1 and make sure width/height are rewritten;
-  # assigning a bitmap resets src_rect to the whole page.
+  # Straddle back to page 1 and make sure width/height are rewritten.
+  # Assigning a bitmap resets src_rect to the whole page.
   renderer.tilesets.set_src_rect(tile, tile_id_for(1, 255))
   assert_eq(tile.src_rect.to_a, [32, 8160, 32, 32], 'set_src_rect: last row of page 1')
 
@@ -716,7 +716,7 @@ def check_reference_counting_and_dispose
 end
 
 def check_double_install_is_safe
-  # A second install must not alias dispose onto itself; that would
+  # A second install must not alias dispose onto itself. That would
   # recurse forever the next time a map closes.
   MKXPTilesetPatch.install_renderer
   renderer = TilemapRenderer.new
@@ -954,7 +954,7 @@ end
 
 def scenario_small_gpu
   # A device that only allows 1024px textures. The old fold ceiling
-  # was 4096px of tileset here; paging has no ceiling.
+  # was 4096px of tileset here. Paging has no ceiling.
   $max_texture_size = 1024
   define_renderer!
   define_helper!
@@ -1007,7 +1007,7 @@ def scenario_no_helper
   assert_eq(TilemapRenderer.private_method_defined?(:mkxp_original_initialize), false,
             'no helper: the patch does not wrap initialize at all')
 
-  # One frame only records the count; the next quiet frame concludes
+  # One frame only records the count. The next quiet frame concludes
   # that loading is over.
   Graphics.update
   assert_eq(tracer.enabled?, true, 'no helper: one frame alone concludes nothing')

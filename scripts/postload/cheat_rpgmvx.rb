@@ -102,7 +102,7 @@ end
 
 class Scene_Cheat
   # rubocop:disable Metrics/AbcSize -- builds the full menu set
-  # in one pass; splitting across helpers would scatter related
+  # in one pass. Splitting across helpers would scatter related
   # window state.
   def main
     @cheat_window = Window_Command.new(160, ['Level Up', 'Gain Gold', 'Get Items', 'Cancel'])

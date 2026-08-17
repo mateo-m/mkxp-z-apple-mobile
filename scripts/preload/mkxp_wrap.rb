@@ -42,7 +42,7 @@ module MKXP
     end
 
     # Per-game in-game-keyboard toggle. The host app sets
-    # the bridge value at session start; `pokemon_input.rb`
+    # the bridge value at session start. `pokemon_input.rb`
     # reads this to decide whether to force `USEKEYBOARDTEXTENTRY
     # = false` and surface the game's own keyboard scene.
     # Scripts calling this on engines without the binding hit
@@ -89,7 +89,7 @@ module MKXP
     # enough to satisfy those gates. We report 99999 - well
     # above any known minimum - so future releases that bump
     # the floor also pass without us having to chase every
-    # version. Harmless when the flag is off; games only
+    # version. Harmless when the flag is off. Games only
     # consult this on the JoiPlay path.
     def plugin_version
       99_999

@@ -187,7 +187,7 @@ assert_eq(
   'only the matched save left the data dir'
 )
 
-# Dir[] shares the glob recovery; ancient slot pickers use both.
+# Dir[] shares the glob recovery. Ancient slot pickers use both.
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Save03.rxdata'), 'bracket slot')
 load_platform_compat!("#{USERDATA_REAL}/")

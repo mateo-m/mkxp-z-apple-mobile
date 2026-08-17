@@ -54,7 +54,7 @@ module Graphics
 end
 
 # Native display classes the preload wraps (C bindings in
-# production); empty shells satisfy its guarded method wrapping.
+# production). Empty shells satisfy its guarded method wrapping.
 class Sprite; end
 class Window; end
 class Viewport; end

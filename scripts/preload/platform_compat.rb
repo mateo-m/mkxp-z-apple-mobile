@@ -6,7 +6,7 @@
 begin
   require 'zlib'
 rescue LoadError
-  # zlib is optional for some vintage games; preload continues without it.
+  # zlib is optional for some vintage games. Preload continues without it.
 end
 
 # --- JoiPlay-compat signal ---
@@ -29,7 +29,7 @@ $joiplay =
 
 # --- Thread.critical / Thread.critical= no-op shims (Ruby 1.9+) ---
 # Ruby 1.8 had `Thread.critical` and `Thread.critical=` to disable
-# thread switching during a critical section; both were removed in
+# thread switching during a critical section. Both were removed in
 # Ruby 1.9 when the GIL was replaced by per-thread locks. Vintage
 # RGSS / Pokemon Essentials code commonly wraps Marshal.load and
 # save-file I/O with `Thread.critical = true` ... `Thread.critical
@@ -46,7 +46,7 @@ $joiplay =
 #
 # Restore both as no-ops on every Ruby version that's missing them.
 # The 1.8 cooperative-scheduling semantics don't apply under modern
-# Ruby anyway; calling code only cared that the methods existed.
+# Ruby anyway. Calling code only cared that the methods existed.
 unless Thread.respond_to?(:critical)
   # rubocop:disable Naming/PredicateMethod -- mocking Ruby 1.8's
   # `Thread.critical` reader, which returns a Boolean but is named
@@ -73,7 +73,7 @@ end
 # Reborn, etc.) commonly use `exit!` so the user's quit click
 # bypasses the game's "press any key to confirm" splash that
 # `at_exit` handlers would normally trigger. On desktop this is
-# a fine UX choice; on iOS it causes the app to vanish without
+# a fine UX choice. On iOS it causes the app to vanish without
 # the engine even getting a chance to know the user quit.
 #
 # Redirect both to `Kernel.exit(status)` so the engine's
@@ -101,7 +101,7 @@ module Process
 end
 
 # Suppress Ruby's $DEBUG global. Some plugins gate verbose error
-# dialogs / extra print output on `$DEBUG`; without an explicit
+# dialogs / extra print output on `$DEBUG`. Without an explicit
 # `false` the engine inherits whatever Ruby's startup defaulted to,
 # which on some MRI builds is a truthy state (-d on the cmdline,
 # RUBYOPT=-d, etc.). JoiPlay sets this in its preload for the same
@@ -110,7 +110,7 @@ end
 $DEBUG = false
 
 # Plugin-probe constants. Old Yanfly-era plugins look at
-# `Graphics::PlaneSpeedUp`; without an explicit definition our
+# `Graphics::PlaneSpeedUp`. Without an explicit definition our
 # engine's `const_missing` returns `IOS::NullStub`, which is
 # always-truthy and silently flips the plugin's optimization path
 # the wrong way. Match JoiPlay's default: define the constant as
@@ -123,12 +123,12 @@ end
 
 # Top-level no-op for `set_loop_points(intro_pos, loop_end)`. Some
 # custom audio-loop plugins call this from map transitions /
-# bgm_play overrides; on JoiPlay's default builds this exists as
+# bgm_play overrides. On JoiPlay's default builds this exists as
 # a Kernel-level no-op (preload.rb:119-120). Without it our
 # `IOS::NullStub` const_missing path doesn't catch it (it's a
 # method call, not a constant ref) and the script raises
 # `NoMethodError: undefined method 'set_loop_points'`. The two-arg
-# stub mirrors JoiPlay; arity is permissive via `*args` to
+# stub mirrors JoiPlay. Arity is permissive via `*args` to
 # accommodate plugins that pass additional metadata.
 module Kernel
   def set_loop_points(*args); end
@@ -283,7 +283,7 @@ unless defined?(MKXPWindowsFonts)
     module_function
 
     # The host-wide shared font pool when the host declares one
-    # (System.shared_fonts_path); the per-game fallback otherwise.
+    # (System.shared_fonts_path). The per-game fallback otherwise.
     # The shared pool matches Windows exactly: the system font
     # folder is one store for every game, so a font one game
     # installs satisfies the next game's installed-check too.
@@ -337,7 +337,7 @@ end
 
 unless defined?(MKXPSaveFS)
   # rubocop:disable Metrics/ModuleLength -- the module is the single
-  # file-API front; the alias-era recovery block below pushes it
+  # file-API front. The alias-era recovery block below pushes it
   # over the limit and leaves once no install carries stranded
   # saves.
   module MKXPSaveFS
@@ -390,7 +390,7 @@ unless defined?(MKXPSaveFS)
     # Host bookkeeping files carry an ".empo-" name segment
     # (drain collision backups "*.empo-displaced*.bak", rescue
     # markers ".empo-origin.json"). They belong to the host, not to
-    # the game; no recovery may move them.
+    # the game. No recovery may move them.
     def empo_artifact?(name)
       name.include?('.empo-')
     end
@@ -468,7 +468,7 @@ unless defined?(MKXPSaveFS)
     #  - Earlier builds redirected bare working-directory save
     #    filenames ("Game.rxdata") into UserData. The first access
     #    of such a name moves the stranded copy back into the
-    #    working directory; on a collision the newer mtime keeps
+    #    working directory. On a collision the newer mtime keeps
     #    the canonical name and the loser stays as
     #    *.pre-literal.bak.
     #  - The same builds flattened portable "Save Data/..." paths
@@ -507,7 +507,7 @@ unless defined?(MKXPSaveFS)
     #  - The redirect the recoveries undo only ever happened with
     #    the game folder as the cwd, so any other cwd skips them.
     #    Essentials' Dir.get chdirs INTO the data dir to enumerate
-    #    saves; without this gate the recovery would "migrate"
+    #    saves. Without this gate the recovery would "migrate"
     #    those saves onto themselves.
     #  - Degenerate host config: the data dir IS the game folder.
     #    Compared by identity, not by spelling - on iOS the same
@@ -523,7 +523,7 @@ unless defined?(MKXPSaveFS)
     end
 
     # Bare glob patterns enumerate the working directory (ancient
-    # slot pickers use "Save*.rxdata"); recover every stranded root
+    # slot pickers use "Save*.rxdata"). Recover every stranded root
     # save the pattern would match before the literal glob runs, so
     # enumeration and open agree on one folder. Gated per name on the
     # save shape so a bare "*" cannot drag engine-internal UserData
@@ -561,11 +561,11 @@ unless defined?(MKXPSaveFS)
       nil
     end
 
-    # iOS's filesystem is case-sensitive; Windows-authored games open
+    # iOS's filesystem is case-sensitive. Windows-authored games open
     # files with mismatched case (e.g. "Audio/BGM/TITLE_MD.ogg" for
     # title_md.ogg) and expect it to work. The engine resolves the
     # actual on-disk spelling through its case-insensitive path cache
-    # (System.resolve_case_path); returns nil when nothing matches, so
+    # (System.resolve_case_path). Returns nil when nothing matches, so
     # callers can retry raw file APIs once after Errno::ENOENT.
     def casefold_fallback(path)
       return nil unless defined?(System) && System.respond_to?(:resolve_case_path)
@@ -616,7 +616,7 @@ unless defined?(MKXPSaveFS)
     # On-disk spelling for a mismatched-case path, or nil when the
     # spelling already matches or nothing resolves. Absolute paths
     # resolve when they point inside the game directory or inside
-    # UserData. The engine's boot-time case cache answers first; a
+    # UserData. The engine's boot-time case cache answers first. A
     # live directory walk then covers what the cache cannot know -
     # files the game created this session (a self-updater extracts
     # files and touches them again under another spelling).
@@ -639,7 +639,7 @@ unless defined?(MKXPSaveFS)
     end
 
     # [prefix, rel] split of a path against the known roots. prefix
-    # is nil for relative paths; both are nil when an absolute path
+    # is nil for relative paths. Both are nil when an absolute path
     # points outside every known root.
     def split_case_prefix(str)
       return [nil, str] unless str =~ ABSOLUTE_PATH_RE
@@ -666,7 +666,7 @@ unless defined?(MKXPSaveFS)
 
     # Case-insensitive component walk against the live filesystem,
     # anchored at base. A component with an on-disk case variant
-    # takes that spelling; a component with no match stays literal
+    # takes that spelling. A component with no match stays literal
     # (it is about to be created). Returns the input unchanged when
     # nothing differs.
     def live_case_walk(rel, base)
@@ -780,14 +780,14 @@ unless defined?(MKXPSaveFS)
     # installs have their portable content stranded at that root.
     # The sweep below moves it back into the folder the game reads.
     #
-    # The sweep is access-driven; no boot-time gate can know whether
+    # The sweep is access-driven. No boot-time gate can know whether
     # a game resolves saves through the portable dir. Rejuvenation-
     # lineage builds go portable on the launcher identity alone
     # (RTP.isPortable -> mobile? -> $empo/$kirin), with no marker
     # file and no JoiPlay toggle. And a $joiplay-keyed boot sweep
     # would move root saves for games that never read the portable
     # dir. So the wrappers watch for the game itself to touch
-    # portable save content; the first qualifying access runs one
+    # portable save content. The first qualifying access runs one
     # sweep per boot:
     #  - an enumeration of the portable dir (the Reborn-lineage
     #    load screens list it), or
@@ -802,11 +802,11 @@ unless defined?(MKXPSaveFS)
     # way). Engine bookkeeping entries and host ".empo-" artifacts
     # stay at the root. On a name collision the newer mtime wins
     # the canonical name (ties go to the root copy, which the alias
-    # preferred for both reads and writes); the loser is kept
+    # preferred for both reads and writes). The loser is kept
     # beside it as *.pre-literal.bak.
     # Paths resolve against the engine cwd (the game folder, set by
     # main.cpp/config.cpp before the binding boots), the same base
-    # the game's own "Save Data/" strings resolve against; the cwd
+    # the game's own "Save Data/" strings resolve against. The cwd
     # guard skips the sweep while a game has chdir'd elsewhere.
     def maybe_recover_portable_path(path)
       return if @portable_sweep_done
@@ -907,7 +907,7 @@ unless defined?(MKXPSaveFS)
 
     # Directory form of the migration. A whole stranded tree renames
     # over when the destination is free. Otherwise merge entry by
-    # entry, recursing into shared subdirectories; per-file
+    # entry, recursing into shared subdirectories. Per-file
     # collisions follow the migrate_save_file mtime rule. The source
     # directory goes away only when everything inside it moved.
     def migrate_save_tree(src, dst)
@@ -972,7 +972,7 @@ end
 
 # Pokemon Essentials' `pbResolveBitmap` relies on `pbTryString`, which probes a
 # candidate path and returns the ORIGINAL string on success. On Windows that is
-# fine because later opens are also case-insensitive; on iOS we need the real
+# fine because later opens are also case-insensitive. On iOS we need the real
 # mixed-case path for callers that keep using the returned filename.
 unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
   class << Object
@@ -1068,7 +1068,7 @@ end
 module Kernel
   # Process-spawning methods are no-ops on iOS: fork/exec would be
   # killed by the sandbox and system("game.exe") only makes sense on
-  # Windows. Return nil so games keep running; real exec() would
+  # Windows. Return nil so games keep running. Real exec() would
   # terminate the process but that's the entire iOS app here, so a
   # silent no-op is the safer default.
   def system(*_args)
@@ -1100,12 +1100,12 @@ tmp = '/tmp'
 begin
   tmp = Dir.tmpdir
 rescue StandardError
-  # Dir.tmpdir can raise on locked-down sandboxes; fall back to /tmp.
+  # Dir.tmpdir can raise on locked-down sandboxes. Fall back to /tmp.
 end
 
 # SDL_GetPrefPath contract: directory paths used for string-concat
-# save joins must end with '/'. iOS normalize strips trailing slashes;
-# the C++ System.data_directory binding re-adds one. Shared by the
+# save joins must end with '/'. iOS normalize strips trailing slashes.
+# The C++ System.data_directory binding re-adds one. Shared by the
 # Ruby mirror (stale-merged.o safety) and ENV setup below.
 module MkxpPath
   module_function
@@ -1193,7 +1193,7 @@ end
 # state via a pad API the iOS port doesn't expose. Cited offender
 # is Sometimes Always Monsters, which calls
 # `Input::Controller.first_state.thumb_left_x` (and friends) at
-# startup; without these stubs the script terminates before the
+# startup. Without these stubs the script terminates before the
 # title screen. We are NOT implementing real gamepad support here
 # - every method returns a zero / false / [] sentinel so probes
 # succeed and the game falls through to keyboard / touch input.
@@ -1280,7 +1280,7 @@ end
 # `internal_se_play` calls it on every SE when `$joiplay` is false,
 # so without a shim the first message-confirm sound raises
 # NoMethodError and soft-locks the scene. Our engine's SE path has
-# no spatial support; drop the coordinates and play the SE plain -
+# no spatial support. Drop the coordinates and play the SE plain -
 # identical to the game's own JoiPlay branch
 # (`Audio.se_play(name, volume, pitch)`).
 #
@@ -1379,8 +1379,8 @@ end
 
 # --- File API front: legacy-save recovery + case resolution ---
 # Paths resolve literally. path_for only performs the one-time
-# legacy-save recovery side effect; the case helpers keep destructive
-# operations on the on-disk spelling. IO.read is not hooked; no
+# legacy-save recovery side effect. The case helpers keep destructive
+# operations on the on-disk spelling. IO.read is not hooked. No
 # observed game reads saves through it.
 class << File
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
@@ -1419,7 +1419,7 @@ class << File
   def delete(*paths)
     _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.resolve_case_target(MKXPSaveFS.path_for(path)) })
   end
-  # File.unlink is a distinct singleton method; without this alias it
+  # File.unlink is a distinct singleton method. Without this alias it
   # would bypass the legacy-save recovery and the case resolution.
   alias unlink delete
 
@@ -1509,7 +1509,7 @@ class << File
     end
   end
 
-  # Ruby 3 separates keyword args from positionals; without the
+  # Ruby 3 separates keyword args from positionals. Without the
   # ruby2_keywords flag these *args wrappers would collapse
   # `File.open(path, mode: 'rb')`-style kwargs into a positional
   # Hash and the original method raises TypeError. No-op relevant
@@ -1611,10 +1611,10 @@ class << Dir
     _mkxp_orig_glob(pattern, *args, &block)
   end
   # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
-  # this) flowing through the *args wrapper; see the File note above.
+  # this) flowing through the *args wrapper. See the File note above.
   ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
 
-  # Dir[] shares glob's recovery; ancient slot pickers use both.
+  # Dir[] shares glob's recovery. Ancient slot pickers use both.
   def [](*patterns)
     MKXPSaveFS.recover_saves_for_glob(patterns)
     _mkxp_orig_brackets(*patterns)
@@ -1623,7 +1623,7 @@ class << Dir
 
   # Dir.new / Dir.open enumerate too - the Reborn-lineage load
   # screens list saves through Dir.new(getSaveFolder). Give both
-  # the portable recovery trigger; paths stay literal.
+  # the portable recovery trigger. Paths stay literal.
   def new(path, *args)
     MKXPSaveFS.maybe_recover_portable_dir(path)
     _mkxp_orig_new(path, *args)
@@ -1640,7 +1640,7 @@ class << Dir
     # Listings are literal. A listing of the portable save dir first
     # recovers alias-era stranded content (maybe_recover_portable_dir).
     # Listings of the UserData root (System.data_directory, faked
-    # env var spellings) hide engine-internal entries; everything
+    # env var spellings) hide engine-internal entries. Everything
     # else passes through.
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
@@ -1670,7 +1670,7 @@ class << Dir
   end
   ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
 
-  # Ruby 2.5+/2.6+ additions; Pokemon Rejuvenation's New Game Plus
+  # Ruby 2.5+/2.6+ additions. Pokemon Rejuvenation's New Game Plus
   # code lists the save folder via Dir.each_child.
   if method_defined?(:children) || private_method_defined?(:children)
     alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
@@ -1785,7 +1785,7 @@ end
 #
 # 1. Constants whose name ends in Error, Err, Exception, or Failure become
 #    real StandardError subclasses. This matters because games commonly
-#    write `raise Berka::NetErrorErr, "msg"`; the raised exception must
+#    write `raise Berka::NetErrorErr, "msg"`. The raised exception must
 #    inherit from Exception or Ruby rejects it, and if it is NullStub the
 #    alert ends up showing "IOS::NullStub" as the error message.
 #
@@ -1795,7 +1795,7 @@ end
 #
 # NullStub is also raisable. Games sometimes raise a typo'd nested
 # constant that only resolves on iOS (Daybreak's downloader does
-# `raise Berka::NetErrorErr::ConIn`; `ConIn` has no error suffix, so
+# `raise Berka::NetErrorErr::ConIn`. `ConIn` has no error suffix, so
 # it resolves to NullStub). What `raise <stub>` does depends on the
 # VM:
 #
@@ -1911,7 +1911,7 @@ end
 
 # --- Dir.chdir nil/empty-safety ---
 # Pokemon Essentials and some plugin scripts pass nil or "" to
-# Dir.chdir. nil crashes Ruby pre-2.0 outright; "" raises
+# Dir.chdir. nil crashes Ruby pre-2.0 outright. "" raises
 # Errno::ENOENT on every Ruby version. Both are no-ops in spirit
 # (the script wants "stay where you are") so we route them through
 # the no-arg form, which is safe and well-defined (returns to home
@@ -1939,7 +1939,7 @@ end
 # fail on `Hash#[]` even though the constant itself resolves.
 #
 # Ported from JoiPlay's preload.rb. `dlopen` returns a populated
-# hash so the lookup succeeds; `CFunc.new` stores the function
+# hash so the lookup succeeds. `CFunc.new` stores the function
 # name and delegates `call` to Win32API (which our win32_wrap
 # already routes to noop / safe-default returns on iOS).
 module DL
@@ -2155,7 +2155,7 @@ module Kernel
       raise e unless matched_stdlib || match.call(MISSING_GEM_PATHS)
 
       # With networking enabled these requires should have resolved
-      # against the bundled stdlib/shims; absorbing one means we
+      # against the bundled stdlib/shims. Absorbing one means we
       # failed to ship something the game wants. Keep the game alive
       # (as in offline mode) but say so loudly.
       if matched_stdlib &&
@@ -2234,7 +2234,7 @@ end
 #   ENV['SSL_CERT_FILE'] = 'cacert.pem'
 # pointing at a bundle shipped next to Game.exe (Rejuvenation's
 # ScriptLoader does exactly this). The host already exports a
-# working SSL_CERT_FILE for Ruby's openssl; letting a game point it
+# working SSL_CERT_FILE for Ruby's openssl. Letting a game point it
 # at a file that doesn't exist in the iOS import silently breaks
 # every TLS handshake with "unable to get local issuer
 # certificate". Honor the game's assignment when the file is really
@@ -2269,7 +2269,7 @@ end
 # ENETDOWN - the exact errno airplane mode produces - so raw-socket
 # code takes the same rescue paths it takes on a device with no
 # connectivity. Local binds/listens are left alone (they work in
-# airplane mode too); on the 1.8/1.9 VMs the socket classes aren't
+# airplane mode too). On the 1.8/1.9 VMs the socket classes aren't
 # registered while offline, so these guards simply never match.
 network_off = defined?(System) &&
               System.respond_to?(:network_enabled?) &&
