@@ -733,8 +733,8 @@ module Win32API_Impl
         cmd = decode_utf16(args[0])
         # Avoid Ruby 2.3+ syntax / methods: we also build for
         # Ruby 1.9 native (RGSS3 multi-Ruby path).
-        #   `&.` (safe navigation)       . 2.3+
-        #   `Regexp#match?` (bool)       . 2.4+
+        #   `&.` (safe navigation)       needs 2.3+
+        #   `Regexp#match?` (bool)       needs 2.4+
         # Use the traditional `re =~ cmd` form (returns Integer
         # offset on match, nil on miss) which works on every
         # Ruby version we target.

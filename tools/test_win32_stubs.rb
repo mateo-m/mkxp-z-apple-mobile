@@ -10,9 +10,9 @@
 #      produces a StandardError instead of the fatal
 #      "exception class/object expected" TypeError on Ruby 1.8.
 #   3. net_http_compat.rb: the Net::HTTP facade binds lazily via
-#      Net.const_missing, so a game-defined `module Net. Module
-#      HTTP` (Berka) loads instead of dying with "HTTP is not a
-#      module".
+#      Net.const_missing, so a game-defined `module Net` holding a
+#      `module HTTP` (Berka) loads instead of dying with "HTTP is
+#      not a module".
 # Run: ruby mkxp-z-apple-mobile/tools/test_win32_stubs.rb
 #
 # Caution for extenders: once platform_compat.rb loads, its global
