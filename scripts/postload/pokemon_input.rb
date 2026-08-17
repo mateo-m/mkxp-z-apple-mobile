@@ -190,6 +190,7 @@ unless $PokemonSystem.nil?
 
     def self.update
       @mkxp_read = nil
+      @mkxp_release_read = nil
       jupdate
     end
 
@@ -233,6 +234,34 @@ unless $PokemonSystem.nil?
 
     def self.repeatex?(key)
       jrepeatex?(key)
+    end
+
+    # The engine has a native `releaseex?`, but the game's own Input
+    # module replaces it before this postload runs, and the binding
+    # gives no j-prefixed alias to fall back on. So derive the release
+    # edge from the native pressed state.
+    #
+    # The rule is the read-driven one that `trigger?` uses above: a key
+    # advances on its first read after each `Input.update`, and repeat
+    # reads in the same frame give the same answer. A key that nothing
+    # reads keeps its last sampled state, which is what the Win32
+    # `GetAsyncKeyState` polling these games expect also does.
+    #
+    # Pokemon Essentials mouse scenes gate their actions on this. In
+    # Pokemon Insurgence the DexNav highlights a button on touch, which
+    # uses `pressex?`, but runs the action on `releaseex?`. With
+    # `releaseex?` always false the scene drew and highlighted but no
+    # button did anything, and the player could only leave it with the
+    # cancel button.
+    def self.releaseex?(key)
+      @mkxp_release_read ||= {}
+      return @mkxp_release_read[key] if @mkxp_release_read.key?(key)
+
+      @mkxp_ex_held ||= {}
+      held = @mkxp_ex_held[key] ? true : false
+      down = jpressex?(key)
+      @mkxp_ex_held[key] = down
+      @mkxp_release_read[key] = held && !down
     end
 
     def self.repeatcount(_key)
