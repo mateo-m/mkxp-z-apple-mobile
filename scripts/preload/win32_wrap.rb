@@ -1215,7 +1215,12 @@ module Win32API_Impl
     # Connect without blocking the RGSS thread for a full TCP
     # timeout. Ruby 1.8 schedules green threads, so a blocking
     # connect() stalls every thread, including the one drawing frames.
-    def self.connect_to(host, port, seconds = 10)
+    #
+    # The cap only applies when a server does not answer. A server
+    # that answers completes in one round trip and never reaches it.
+    # Five seconds still covers two lost SYN retransmits, and it
+    # halves how long a dead server freezes the game.
+    def self.connect_to(host, port, seconds = 5)
       io = NATIVE[:klass].allocate
       NATIVE[:init].bind(io).call(AF_INET, SOCK_STREAM, 0)
       address = NATIVE[:pack].call(port, host)
