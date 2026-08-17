@@ -1162,8 +1162,12 @@ module Win32API_Impl
       entry && entry[:io]
     end
 
+    # With no socket extension the host denied this game network
+    # access, so report the errno airplane mode gives. Callers read it
+    # back through WSAGetLastError and look it up in Errno, and a 0
+    # there would leave them with "Success" or no match at all.
     def self.open_handle(domain)
-      return INVALID_SOCKET unless available?
+      return fail_with(Errno::ENETDOWN::Errno) unless available?
       return fail_with(Errno::EAFNOSUPPORT::Errno) unless domain == AF_INET
 
       handle = @next_handle
