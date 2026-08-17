@@ -1327,13 +1327,26 @@ end
 # Windows Ruby opens files in text mode by default and folds CRLF to
 # LF on read. Games depend on that: Desolation's script loader splits
 # its CSV listing on "\n" and derives file paths and control flow
-# from the fields, and a kept "\r" breaks both. Fold the same way for
-# plain read-mode opens on the modern VM. Binary opens ('b' flag,
-# integer flags), update modes, write modes, and calls with explicit
-# extra arguments stay raw.
+# from the fields, and a kept "\r" breaks both. Pokemon Pathways ships
+# the RGSS Script Editor loader, which splits a CRLF load_order.txt on
+# "\n" and then rejects every entry because File.extname sees ".rb\r".
+# Fold the same way for plain read-mode opens on the modern VM. Binary
+# opens ('b' flag, integer flags), update modes, write modes, and calls
+# with explicit extra arguments stay raw.
 unless defined?(MKXPTextMode)
   module MKXPTextMode
     module_function
+
+    # File.read and its friends take no mode argument, so Windows
+    # applies text mode to every one of these calls. Fold the bare
+    # form only: a call that gives a length, a separator, or its own
+    # options keeps the arguments it was given.
+    def whole_file_args(args)
+      opts = universal_newline_opts
+      return args unless opts && args.empty?
+
+      [opts]
+    end
 
     def read_args(args)
       opts = universal_newline_opts
@@ -1456,19 +1469,19 @@ class << File
   alias _mkxp_orig_read read unless method_defined?(:_mkxp_orig_read)
 
   def read(path, *args)
-    _mkxp_orig_read(MKXPSaveFS.path_for(path), *args)
+    _mkxp_orig_read(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args))
   end
 
   alias _mkxp_orig_readlines readlines unless method_defined?(:_mkxp_orig_readlines)
 
   def readlines(path, *args)
-    _mkxp_orig_readlines(MKXPSaveFS.path_for(path), *args)
+    _mkxp_orig_readlines(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args))
   end
 
   alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
 
   def foreach(path, *args, &block)
-    _mkxp_orig_foreach(MKXPSaveFS.path_for(path), *args, &block)
+    _mkxp_orig_foreach(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args), &block)
   end
 
   if (method_defined?(:binread) || private_method_defined?(:binread)) && !method_defined?(:_mkxp_orig_binread)
