@@ -701,7 +701,8 @@ RB_METHOD(hm7NativeRenderHM7) {
             // horizontally when non-zero. Skip rather than risk it.
             if (RARRAY_LEN(s) < 11) continue;
             hm7::RenderSurface &rs = surfaces[surface_count];
-            rs.type = aref_int(s, 0);
+            // Slot [0] is the surface type. The renderer draws every
+            // sprite as a billboard, so it does not take that field.
             rs.screen_x1 = aref_int(s, 1);
             rs.screen_y1 = aref_int(s, 2);
             rs.screen_x2 = aref_int(s, 3);
