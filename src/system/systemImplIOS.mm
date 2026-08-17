@@ -8,7 +8,7 @@ std::string systemImpl::getSystemLanguage() {
         // "ja"), NOT the full locale identifier ("en_US"). Game
         // scripts that branch on language (Insurgence's
         // `getRegion`, Reborn's localization shim, etc.) only care
-        // about the language; including the country code splits
+        // about the language. Including the country code splits
         // "en_US" / "en_GB" / "en_AU" into different cohorts which
         // is rarely what those scripts want. NSLocale.languageCode
         // gives us the language code straight from the user's iOS
@@ -82,7 +82,7 @@ std::string getPlistValue(const char *key) {
 float mkxp_getScreenScale(void) {
     // Screen scale is a device constant (e.g. 3.0 on iPhone Pro) that
     // never changes at runtime.  Cache it to avoid dispatch_sync to the
-    // main queue on every resize — that call can stall the RGSS thread
+    // main queue on every resize, that call can stall the RGSS thread
     // during rapid rotation while UIKit is processing layout animations.
     static float cachedScale = 0.0f;
     if (cachedScale > 0.0f)

@@ -47,7 +47,7 @@ Patcher::Patcher(const std::vector<std::string> &patches)
      * still honoring user-dropped `patches.json` files in the
      * game folder for power-user / desktop-mkxp usage. The
      * managed-dir version takes priority since it represents
-     * the host's curated rule set; users who really want their
+     * the host's curated rule set. Users who really want their
      * own patches today can edit the file there. (User-override
      * support without trampling the curated file is on the
      * roadmap.) */

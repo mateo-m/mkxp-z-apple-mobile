@@ -61,7 +61,7 @@ extern "C" void mkxp_refreshANGLENativeLayerSize(void *sdlWindow,
         // is a plain CALayer rather than CAMetalLayer. On rotation, we
         // must update:
         //   - frame:        parent-relative rect (handles bounds +
-        //                   position together; the layer's anchorPoint
+        //                   position together. The layer's anchorPoint
         //                   and stale position would otherwise leave it
         //                   visually off-center after rotation)
         //   - contentsScale

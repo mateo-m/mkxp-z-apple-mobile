@@ -63,7 +63,7 @@ unless defined?(MKXPRaiseTrace)
       end
 
       # Format the buffer as log lines and clear it. The engine
-      # calls this once when script execution ends; nil means there
+      # calls this once when script execution ends. Nil means there
       # is nothing to report.
       def drain
         return nil if @entries.empty?

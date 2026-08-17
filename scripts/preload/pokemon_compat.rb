@@ -28,7 +28,7 @@ USEKEYBOARDTEXTENTRY = false unless defined?(USEKEYBOARDTEXTENTRY)
 #
 # `begin/rescue` defends against game forks that redefine
 # `PokemonSystem` with an explicit superclass (which would raise
-# `TypeError: superclass mismatch`); the catch leaves the game's
+# `TypeError: superclass mismatch`). The catch leaves the game's
 # own definition winning and our patch silently absent for that
 # game (acceptable - it presumably handles screensize itself).
 begin
@@ -38,7 +38,7 @@ begin
     # never true on 1.8 even when the method exists. Use
     # `method_defined?` (Symbol-friendly on every version) for
     # the "is anything already defined" guard. We unconditionally
-    # define both writer and reader-with-default; redefinition on
+    # define both writer and reader-with-default. Redefinition on
     # subsequent loads is idempotent (last-write-wins) and a
     # game's later `class PokemonSystem ... end` still overrides
     # cleanly via Ruby's open-class semantics.
@@ -49,7 +49,7 @@ begin
     end
   end
 rescue TypeError
-  # superclass mismatch with a fork's own definition; bow out.
+  # superclass mismatch with a fork's own definition. Bow out.
 end
 
 # --- Uranium hard-reset prevention ---
@@ -130,7 +130,7 @@ end
 # handle), so this is mostly a duck-typed shell that satisfies the
 # small set of methods game scripts call on the returned value.
 # Position queries fall through to the matching native getter
-# where one exists; loop-point setters are no-ops (most games
+# where one exists. Loop-point setters are no-ops (most games
 # don't depend on Ruby-level loop tables - mkxp-z honors Ogg
 # `LOOPSTART`/`LOOPLENGTH` tags via its native loader).
 class FmodExHandle
@@ -172,7 +172,7 @@ module FmodEx
   module_function
 
   # No-op init handshake. Some scripts call `FmodEx.init(channels)`
-  # to set up a software channel pool; we ignore it because the
+  # to set up a software channel pool. We ignore it because the
   # underlying engine handles channel allocation itself.
   def init(*_args); end
 
@@ -181,7 +181,7 @@ module FmodEx
     # Game scripts pass either a bare basename ("Audio/BGM/foo")
     # or a full path. mkxp-z's Audio.bgm_play accepts both. Our
     # 4-arg native form takes a position (microseconds) where
-    # supported; fall back to 3-arg if the engine doesn't accept
+    # supported. Fall back to 3-arg if the engine doesn't accept
     # it (older RGSS1 builds).
     begin
       Audio.__mkxp_native_call(:@__mkxp_native_bgm_play, filename, volume, pitch, position)
@@ -303,12 +303,12 @@ end
 
 # --- Null mouse shim ---
 # Pokemon Essentials games set $mouse = Game_Mouse.new. The MkxpNullMouse
-# class absorbs any method call, returning false/0/nil; some PE forks
+# class absorbs any method call, returning false/0/nil. Some PE forks
 # poll $mouse before they instantiate Game_Mouse, so a non-nil default
 # avoids NoMethodError on the very first frame.
 class MkxpNullMouse
   # rubocop:disable Naming/PredicateMethod -- mocks Pokemon
-  # Essentials' `Game_Mouse#method_missing` contract; the Ruby
+  # Essentials' `Game_Mouse#method_missing` contract. The Ruby
   # method-missing protocol uses this exact name (no `?`).
   def method_missing(*_args)
     false

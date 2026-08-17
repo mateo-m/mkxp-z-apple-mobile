@@ -42,7 +42,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
 
     class ScreenCheat_Items < PokemonMartScreen
       # rubocop:disable Lint/MissingSuper -- PokemonMartScreen's
-      # initializer pulls a regular trainer's bag/funds; we replace
+      # initializer pulls a regular trainer's bag/funds. We replace
       # that wiring with our cheat-specific scene+stock+adapter.
       def initialize(scene, stock)
         @scene = scene
@@ -85,7 +85,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
     end
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    # The case-when handles each menu entry's distinct flow; the
+    # The case-when handles each menu entry's distinct flow. The
     # branch bodies don't share enough structure to factor into
     # smaller methods without losing readability.
     def update_cheat

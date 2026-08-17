@@ -10,9 +10,9 @@
 #      produces a StandardError instead of the fatal
 #      "exception class/object expected" TypeError on Ruby 1.8.
 #   3. net_http_compat.rb: the Net::HTTP facade binds lazily via
-#      Net.const_missing, so a game-defined `module Net; module
-#      HTTP` (Berka) loads instead of dying with "HTTP is not a
-#      module".
+#      Net.const_missing, so a game-defined `module Net` holding a
+#      `module HTTP` (Berka) loads instead of dying with "HTTP is
+#      not a module".
 # Run: ruby mkxp-z-apple-mobile/tools/test_win32_stubs.rb
 #
 # Caution for extenders: once platform_compat.rb loads, its global
@@ -41,7 +41,7 @@ def assert_nonzero(value, label)
 end
 
 # platform_compat.rb targets the in-game VMs (1.8 / 1.9 / 3.1), which
-# all still have the `exists?` aliases; Ruby 3.2 removed them. Restore
+# all still have the `exists?` aliases. Ruby 3.2 removed them. Restore
 # them so this harness also runs on a modern host Ruby.
 def ensure_ruby31_compat_aliases!
   class << File
@@ -58,7 +58,7 @@ end
 # The engine's C binding keeps Ruby 1.8 byte-write semantics for
 # `str[int] = int` on every VM (binding-mri.cpp, mkxpStringAset), and
 # memcpy_string in win32_wrap.rb relies on that. Host Ruby lacks the
-# override; mirror it.
+# override. Mirror it.
 class String
   alias _test_orig_aset []=
   def []=(*args)
@@ -92,13 +92,13 @@ unless Kernel.method_defined?(:load_data)
   end
 end
 
-# win32_wrap.rb wraps Graphics.update at load time; give it a target.
+# win32_wrap.rb wraps Graphics.update at load time. Give it a target.
 module Graphics
   def self.update; end
 end
 
 # Stand-in for the engine's native HTTP client. Serves canned
-# responses by URL; records every call. A :raise sentinel models the
+# responses by URL. Records every call. A :raise sentinel models the
 # native client refusing (network toggled off, TLS failure, ...).
 module HTTPLite
   RESPONSES = {}
@@ -123,7 +123,7 @@ end
 
 # Load in the engine's preload order (script-bootstrap.cpp):
 # platform_compat, win32_wrap, http_compat, net_http_compat.
-# net_http_compat gates on the game VMs (RUBY_VERSION < 2); pose as
+# net_http_compat gates on the game VMs (RUBY_VERSION < 2). Pose as
 # 1.8 for the duration of its load.
 prev_verbose = $VERBOSE
 $VERBOSE = nil
@@ -177,7 +177,7 @@ assert_eq(
 # --- NullStub raise protocol ---
 # The fatal path lives on the game's Ruby 1.8 VM: 1.8's raise
 # requires a REAL `exception` method (1.8 checks the method table
-# only; method_missing and respond_to_missing? do not satisfy it)
+# only. method_missing and respond_to_missing? do not satisfy it)
 # that returns an Exception. This host runs modern Ruby, where
 # one-arg raise takes the `to_str` coercion path instead, so the
 # 1.8 behavior is tested through the protocol contract, not through
@@ -250,9 +250,9 @@ assert_eq(plain, IOS::NullStub, 'non-error constant resolves to NullStub')
 
 # --- Daybreak repro: the exact failing pattern, end to end ---
 # Mirrors "LUKA DOWNLOADER MODULE" lines 143-157. Before the fixes
-# this snippet died three times over: IOA was 0; the typo'd constant
+# this snippet died three times over: IOA was 0. The typo'd constant
 # (`NetErrorErr::ConIn` instead of `NetError::ErrConIn`) made the
-# raise itself fatal; and `module HTTP` collided with the eagerly
+# raise itself fatal. And `module HTTP` collided with the eagerly
 # defined Net::HTTP facade class ("HTTP is not a module").
 DAYBREAK_SNIPPET = <<-RUBY
   module Berka
@@ -289,7 +289,7 @@ assert_true(Net::HTTP.instance_of?(Module), 'Berka owns Net::HTTP as a module')
 # Even when a script reaches a typo'd raise (Berka line 230 style),
 # it must surface as rescuable, never as a fatal TypeError. On this
 # host the raise takes the to_str path (RuntimeError), so this
-# documents rescuability; the 1.8 fatal path is pinned by the
+# documents rescuability. The 1.8 fatal path is pinned by the
 # protocol-contract assertions above.
 assert_eq(Berka::NetErrorErr::ErrNoFile, IOS::NullStub, 'typo constant resolves to NullStub')
 err = nil
@@ -366,7 +366,7 @@ assert_eq(o.unpack('i!')[0], 0, 'read on a closed handle reports 0 bytes')
 # --- UTF-8-tagged text body: reads must stay byte-based ---
 # The native binding tags text content types UTF-8 (getResponseBody
 # in http-binding.cpp), where [] and length count characters. The
-# bridge retags the body binary at open; without that, a multibyte
+# bridge retags the body binary at open. Without that, a multibyte
 # chunk carries more bytes than its character count and overruns the
 # caller's buffer. Small 64-byte reads force chunk boundaries inside
 # multibyte sequences.
@@ -409,7 +409,7 @@ assert_eq(
   'transport failure yields no request handle'
 )
 # Native client refusal (network toggled off) raises inside the
-# stack; the bridge converts it into the same no-handle result.
+# stack. The bridge converts it into the same no-handle result.
 HTTPLite::RESPONSES['http://files.test/refused.bin'] = :raise
 assert_eq(
   Net::HTTP::IOU.call(Net::IOA, 'http://files.test/refused.bin', nil, 0, 0, 0),

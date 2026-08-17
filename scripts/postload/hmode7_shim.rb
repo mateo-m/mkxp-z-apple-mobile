@@ -38,7 +38,7 @@
 #
 # This preserves the upstream HM7 code unmodified: if Insurgence
 # ships a newer `HM7` module version with more methods, only the
-# ones we override need new entries here; the rest fall through
+# ones we override need new entries here. The rest fall through
 # to the (no-op) Win32API stubs. That's intentional - new methods
 # can be added incrementally as we port them.
 
@@ -105,8 +105,8 @@ begin
     # ------------------------------------------------------------
     #  Overrides. Each corresponds to a `def self.xxx` in
     #  Insurgence's 210-HM7_NEW_CLASSES.rb around lines 53-101.
-    #  Argument order matches the upstream Ruby signature exactly;
-    #  we pass objects directly to HM7::Native (which unwraps them
+    #  Argument order matches the upstream Ruby signature exactly.
+    #  We pass objects directly to HM7::Native (which unwraps them
     #  into SDL_Surface*/int16_t* in C++).
     # ------------------------------------------------------------
 
@@ -176,7 +176,7 @@ begin
   # bitmap geometry:
   #   - screenX1 / screenX2 = screen_x +/- bitmap.width / 2
   #   - screenY1 / screenY2 = screen_y - bitmap.height .. screen_y
-  #   - inverse    = 0   (no mirror; characters update their own sx/sy)
+  #   - inverse    = 0   (no mirror, characters update their own sx/sy)
   #   - dh         = altitude
   #   - blend      = blend_type
   #   - dispWidth  = bitmap.width
@@ -193,7 +193,7 @@ begin
       # existing target name just replaces the alias - no chaining.
       alias_method :_mkxp_hm7_orig_get_data, :get_data
       # rubocop:disable Naming/AccessorMethodName -- HM7::Surface's
-      # native binding calls this exact method name; can't rename
+      # native binding calls this exact method name. Can't rename
       # without losing the override.
       def get_data
         # rubocop:enable Naming/AccessorMethodName
@@ -202,7 +202,7 @@ begin
         # into the native binding's 11-element positional slots
         # (specifically `blend_type` at original[5] gets read as
         # `inverse` in v1.4.4 layout, causing a horizontal mirror).
-        # Return `nil` instead; the native binding skips nil
+        # Return `nil` instead. The native binding skips nil
         # entries defensively in its surface unpacking loop.
         return nil if bitmap.nil? || bitmap.disposed?
 
@@ -223,7 +223,7 @@ begin
         # means screenY1 == screenY2, both set to the sprite's
         # foot-y anchor.
         #
-        # Sprite HEIGHT is not derived from (Y1, Y2); the plugin
+        # Sprite HEIGHT is not derived from (Y1, Y2). The plugin
         # reads `sHeight` directly from the bitmap header and
         # scales via `sFYt` based on mode-7 depth.
         sx1 = screen_x - half_w
@@ -311,7 +311,7 @@ begin
 rescue StandardError => e
   # Best-effort install. If anything goes wrong (missing method,
   # unexpected HM7 internals in a different Essentials fork) leave
-  # the Win32API stubs in place so at least the game doesn't crash;
-  # the player will see the pre-fix "no world map" rendering bug.
+  # the Win32API stubs in place so at least the game doesn't crash.
+  # The player will see the pre-fix "no world map" rendering bug.
   warn "hmode7_shim: native install failed: #{e.class}: #{e.message}"
 end

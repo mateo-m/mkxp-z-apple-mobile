@@ -13,14 +13,14 @@
 # forgiving behavior at runtime, which is what end-users of the
 # iOS app expect to avoid per-game crash reports.
 #
-# The whitelist only covers idempotent / arithmetic-style methods;
-# allocation-adjacent or mutating ones (push/pop/clear etc.) are
+# The whitelist only covers idempotent / arithmetic-style methods.
+# Allocation-adjacent or mutating ones (push/pop/clear etc.) are
 # intentionally left out so logic errors in game state mutation
 # still surface rather than silently succeed.
 
 # rubocop:disable Metrics/ClassLength -- NilClass extension covers
 # the full PE/JoiPlay safe-stub surface (~30 numeric/comparison/string
-# accessors); each method is one line, splitting across multiple
+# accessors). Each method is one line, splitting across multiple
 # class-reopens would just add noise.
 class NilClass
   # Numeric methods - return 0, -1, false, or the other arg so
@@ -161,7 +161,7 @@ class NilClass
   # held item: `itemActive?` returns true while `self.item` returns
   # nil, so `nil.id` is called from the held-item weight-effect
   # trigger and crashes the battle send-out animation. Returning
-  # nil here mimics "no id present"; the calling lookup `self[nil]`
+  # nil here mimics "no id present". The calling lookup `self[nil]`
   # then returns nil and the trigger no-ops cleanly.
   def id
     nil

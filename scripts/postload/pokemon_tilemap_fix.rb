@@ -42,7 +42,7 @@ module MKXPTilePages
   # limit: a game's mkxp.json can raise it, because the engine allows
   # oversized work buffers there. A texture built at the raised size
   # then draws as black. `Bitmap.real_max_size` reports what the GPU
-  # truly accepts; older engine builds do not have it.
+  # truly accepts. Older engine builds do not have it.
   def self.texture_limit
     return Bitmap.real_max_size if Bitmap.respond_to?(:real_max_size)
 
@@ -150,7 +150,7 @@ module MKXPTilePages
   end
 
   # Cut `source` into pages. `keep_width` drops the columns that tile
-  # ids cannot reach; pass nil to keep the full width. `unit_w` and
+  # ids cannot reach. Pass nil to keep the full width. `unit_w` and
   # `unit_h` are the tile size the cuts must align to.
   #
   # A bitmap that already fits becomes a one-page sheet over the source
@@ -830,7 +830,7 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/BlockNesting, Naming/PredicateMethod
     # PE's tile-rendering loop. The complexity is intrinsic to the
-    # original algorithm; refactoring would deviate from the upstream
+    # original algorithm. Refactoring would deviate from the upstream
     # CustomTilemap behaviour PE games rely on.
     def refreshLayer0(autotiles = false)
       return true if autotiles && !shown?
@@ -1016,7 +1016,7 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
 
       @firsttime = false
       # rubocop:disable Naming/VariableName -- @oxLayer0 / @oyLayer0
-      # are PE's CustomTilemap instance variables; we can't rename them
+      # are PE's CustomTilemap instance variables. We can't rename them
       # without diverging from PE's own code that reads them.
       @oxLayer0 = @ox - (width >> 2)
       @oyLayer0 = @oy - (height >> 2)
