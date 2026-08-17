@@ -61,12 +61,4 @@
 #define HAVE_CONFIG_H 1
 #endif
 
-/* Selects the real mkxp-z Bitmap/Table/Ruby wrappers in
- * hmode7/src/hm7_bindings.cpp. Without it that file compiles the
- * unit-test stub path (returns nullptr for everything) and the
- * HMode7 renderer produces no output. */
-#ifndef HM7_HAVE_MKXP_BITMAP
-#define HM7_HAVE_MKXP_BITMAP 1
-#endif
-
 #endif /* MKXPZ_BUILDCONFIG_H */
