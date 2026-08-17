@@ -10,43 +10,37 @@ rescue LoadError
 end
 
 # --- JoiPlay-compat signal ---
-# Several Pokemon Essentials fangames (Reborn, Rejuvenation,
-# Desolation, etc.) branch on `$joiplay` to pick between JoiPlay's
-# stripped-down API surface and desktop mkxp-z's extended one.
-# Example: Reborn's `internal_se_play` uses `Audio.se_play` on
-# JoiPlay but `Audio.se_play_position` on desktop - the latter is
-# an mkxp-z extension our iOS build doesn't carry. We ship
-# JoiPlay-compat shims (NilClass safe-stubs, Win32API/DL stubs,
-# poke_* graphics aliases, cheats, network stubs) so the JoiPlay
-# code path often works here - but `$joiplay` also triggers patches
-# written against JoiPlay's old mkxp fork that misbehave on this
-# engine, so the host decides per game (System.joiplay_compat?,
-# wired to mkxp_setJoiplayCompat). Default off when the host
-# doesn't say.
+# Essentials fangames such as Reborn, Rejuvenation, and Desolation
+# branch on `$joiplay` to pick between JoiPlay's stripped-down API
+# and desktop mkxp-z's extended one. Reborn's `internal_se_play`
+# calls `Audio.se_play` on JoiPlay and `Audio.se_play_position` on
+# desktop, and this build carries neither of the mkxp-z extensions.
+# Our JoiPlay shims (NilClass safe-stubs, Win32API and DL stubs,
+# poke_* graphics aliases, cheats, network stubs) make that path
+# work often. But `$joiplay` also turns on patches written for
+# JoiPlay's old mkxp fork that misbehave here, so the host decides
+# per game through `System.joiplay_compat?`, wired to
+# mkxp_setJoiplayCompat. Off when the host says nothing.
 $joiplay =
   defined?(System) && System.respond_to?(:joiplay_compat?) &&
   System.joiplay_compat?
 
 # --- Thread.critical / Thread.critical= no-op shims (Ruby 1.9+) ---
-# Ruby 1.8 had `Thread.critical` and `Thread.critical=` to disable
-# thread switching during a critical section. Both were removed in
-# Ruby 1.9 when the GIL was replaced by per-thread locks. Vintage
-# RGSS / Pokemon Essentials code commonly wraps Marshal.load and
-# save-file I/O with `Thread.critical = true` ... `Thread.critical
-# = false`, expecting the methods to exist.
+# Ruby 1.8 had `Thread.critical` and `Thread.critical=` to stop
+# thread switching in a critical section. Ruby 1.9 removed both when
+# per-thread locks replaced the GIL. Vintage RGSS and Essentials code
+# still wraps Marshal.load and save-file I/O in them.
 #
-# On Ruby 1.9+ those calls now raise `NoMethodError: undefined
-# method 'critical' for class 'Thread'`. The error often surfaces
-# during quit / save flows where the in-game `pbExit` chain calls
-# `pbSave` which sets `Thread.critical = true`, and has historically
-# crashed the engine entirely (the `NoMethodError` propagates out of
-# the script-eval loop, the engine's iOS shutdown path then segfaults
-# because the Ruby VM is in an exception-pending state when
-# SharedState::finiInstance() runs).
+# On Ruby 1.9+ those calls raise `NoMethodError`, usually during quit
+# or save, where `pbExit` calls `pbSave` which sets
+# `Thread.critical = true`. That has crashed the engine outright: the
+# error escapes the script-eval loop, and the iOS shutdown path then
+# segfaults because the Ruby VM still has an exception pending when
+# SharedState::finiInstance() runs.
 #
-# Restore both as no-ops on every Ruby version that's missing them.
-# The 1.8 cooperative-scheduling semantics don't apply under modern
-# Ruby anyway. Calling code only cared that the methods existed.
+# Restore both as no-ops wherever they are missing. The 1.8
+# cooperative-scheduling semantics mean nothing under modern Ruby,
+# and calling code only ever cared that the methods existed.
 unless Thread.respond_to?(:critical)
   # rubocop:disable Naming/PredicateMethod -- mocking Ruby 1.8's
   # `Thread.critical` reader, which returns a Boolean but is named
@@ -62,27 +56,23 @@ unless Thread.respond_to?(:critical)
 end
 
 # --- exit! / Process.exit! redirect to SystemExit ---
-# Ruby's `Kernel.exit!(status)` and `Process.exit!(status)` skip
-# `at_exit` handlers AND ALSO bypass the engine's SystemExit
-# rescue path entirely - they call `_exit(status)` directly,
-# which terminates the iOS process before mkxp-z can flush
-# graphics state, save the engine log, fire the
-# `mkxp_setEngineTerminated` callback, or do anything else.
+# `Kernel.exit!(status)` and `Process.exit!(status)` skip `at_exit`
+# handlers AND bypass the engine's SystemExit rescue. They call
+# `_exit(status)` straight away, killing the iOS process before
+# mkxp-z can flush graphics state, save the engine log, or fire the
+# `mkxp_setEngineTerminated` callback.
 #
-# Pokemon Essentials' `pbExit` (and its many forks - Vanguard,
-# Reborn, etc.) commonly use `exit!` so the user's quit click
-# bypasses the game's "press any key to confirm" splash that
-# `at_exit` handlers would normally trigger. On desktop this is
-# a fine UX choice. On iOS it causes the app to vanish without
-# the engine even getting a chance to know the user quit.
+# Essentials' `pbExit`, and its forks such as Vanguard and Reborn,
+# use `exit!` so a quit click skips the "press any key" splash that
+# `at_exit` would trigger. That is a fine choice on desktop. On iOS
+# the app just vanishes, and the engine never learns the user quit.
 #
-# Redirect both to `Kernel.exit(status)` so the engine's
-# binding-mri.cpp script-eval loop catches the SystemExit, sets
-# `mkxp_setEngineExitedCleanly()`, fires the terminated callback,
-# and the iOS host shows the configured "game ended" UX. The
-# desktop semantics of "skip at_exit handlers" are not preserved
-# - we accept that trade because no shipping iOS PE-fork relies
-# on the at_exit-skipping behaviour for anything user-visible.
+# Redirect both to `Kernel.exit(status)`. The script-eval loop in
+# binding-mri.cpp then catches the SystemExit, sets
+# `mkxp_setEngineExitedCleanly()`, fires the terminated callback, and
+# the host shows the configured "game ended" screen. This drops the
+# desktop "skip at_exit" semantics, which is a safe trade: no
+# shipping iOS PE fork relies on that for anything the player sees.
 module Kernel
   def exit!(status = false)
     exit(status)
