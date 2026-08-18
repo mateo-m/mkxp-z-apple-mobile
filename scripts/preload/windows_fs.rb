@@ -1,0 +1,1294 @@
+# windows_fs.rb
+# Windows filesystem-semantics emulation layer.
+# Auto-loaded before platform_compat.rb and game scripts. Games
+# authored on Windows lean on OS behavior the device filesystem does
+# not give them: case-insensitive paths, text-mode reads, a system
+# font directory, and save files next to the executable. The modules
+# and File / FileTest / Dir wrappers here rebuild those semantics.
+# Engine-generic runtime shims live in platform_compat.rb, and
+# Essentials-specific patches live in pokemon_compat.rb.
+
+# Windows guarantees a system font directory, and games write into
+# it without a mkdir: the stock Essentials FontInstaller copies its
+# font files to "<SystemRoot>\Fonts\" and reads them back on the
+# next launch as its "already installed" check. The faked
+# SystemRoot points at the per-game data root, so map that one
+# Windows-only shape onto a real "Fonts" folder there - for reads
+# and writes alike, or the installed-check never passes. Every
+# other path keeps MKXPSaveFS's literal resolution.
+unless defined?(MKXPWindowsFonts)
+  module MKXPWindowsFonts
+    module_function
+
+    # The host-wide shared font pool when the host declares one
+    # (System.shared_fonts_path). The per-game fallback otherwise.
+    # The shared pool matches Windows exactly: the system font
+    # folder is one store for every game, so a font one game
+    # installs satisfies the next game's installed-check too.
+    def pool_root(savefs)
+      shared = shared_root
+      return shared if shared
+
+      base = savefs.root
+      base && "#{base}/Fonts"
+    end
+
+    def shared_root
+      return @shared_root if defined?(@shared_root)
+
+      @shared_root =
+        if defined?(System) && System.respond_to?(:shared_fonts_path)
+          path = System.shared_fonts_path.to_s
+          path.empty? ? nil : path.gsub(%r{[\\/]+\z}, '')
+        end
+    end
+
+    def target(savefs, path)
+      return nil unless path.is_a?(String)
+
+      base = savefs.root
+      return nil unless base
+      return nil unless path[0, base.length] == base
+
+      rest = path[base.length..-1].to_s
+      match = rest.match(%r{\A[\\/]+Fonts[\\/]+([^\\/]+)\z}i)
+      return nil unless match
+
+      pool = pool_root(savefs)
+      pool && "#{pool}/#{match[1]}"
+    end
+
+    # The write half of the parity: the directory always exists on
+    # Windows, so it must exist here before the first copy lands.
+    def ensure_dir(savefs, target)
+      dir = pool_root(savefs)
+      return unless dir && target.is_a?(String)
+      return unless target[0, dir.length + 1] == "#{dir}/"
+      return if File._mkxp_orig_directory(dir)
+
+      Dir.mkdir(dir)
+    rescue StandardError
+      nil
+    end
+  end
+end
+
+unless defined?(MKXPSaveFS)
+  # rubocop:disable Metrics/ModuleLength -- the module is the single
+  # file-API front. The alias-era recovery block below pushes it
+  # over the limit and leaves once no install carries stranded
+  # saves.
+  module MKXPSaveFS
+    module_function
+
+    # Everything inside the game folder is literal. Games create,
+    # list, write, and delete their own files with no interception;
+    # UserData is involved only when a game addresses it itself
+    # (System.data_directory, faked env vars). The constants below
+    # serve one purpose: the alias-era migration
+    # (migrate_portable_saves!) that moves saves stranded by earlier
+    # builds into the portable folder those games read. They gate no
+    # other runtime behavior and can go once no install carries
+    # stranded saves.
+    PORTABLE_SAVE_DIR = 'Save Data'.freeze
+    PORTABLE_PREFIX = "#{PORTABLE_SAVE_DIR}/".freeze
+    ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
+    # Rooted path: "/...", "\...", or a Windows drive prefix.
+    ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
+
+    def root
+      return @mkxp_save_root_memo if defined?(@mkxp_save_root_memo) && @mkxp_save_root_memo
+
+      return nil unless defined?(System) && System.respond_to?(:data_directory)
+
+      dir = System.data_directory.to_s
+      return nil if dir.empty?
+
+      @mkxp_save_root_memo = dir.gsub(%r{[\\/]+\z}, '')
+    rescue StandardError
+      nil
+    end
+
+    def normalize_path(path)
+      path.strip.gsub('\\', '/')
+    end
+
+    def save_filename?(name)
+      return false if empo_artifact?(name)
+      return false if pre_literal_artifact?(name)
+
+      lower = name.downcase
+      return true if lower =~ /\A(?:save\d+|game)\.(?:rxdata|rvdata|rvdata2)\z/
+      return true if lower.end_with?('.rxdata', '.rvdata', '.rvdata2')
+      return true if lower.end_with?('.bak')
+
+      false
+    end
+
+    # Host bookkeeping files carry an ".empo-" name segment
+    # (drain collision backups "*.empo-displaced*.bak", rescue
+    # markers ".empo-origin.json"). They belong to the host, not to
+    # the game. No recovery may move them.
+    def empo_artifact?(name)
+      name.include?('.empo-')
+    end
+
+    # Collision backups this migration wrote itself
+    # ("*.pre-literal.bak", "*.pre-literal-2.bak"). They must never
+    # count as migration candidates again: re-migrating a backup
+    # chains another suffix onto it on every enumeration.
+    def pre_literal_artifact?(name)
+      name.include?('.pre-literal')
+    end
+
+    # True when the two paths name the same directory entry, by
+    # device+inode identity. A string comparison cannot decide
+    # this: on iOS the host config spells the data dir /var/...
+    # while getcwd resolves the symlink to /private/var/..., and
+    # File.expand_path resolves no symlinks. The old string
+    # comparison stays as the fallback for paths the identity
+    # check cannot stat.
+    def same_directory?(a, b)
+      File.identical?(a, b)
+    rescue StandardError
+      File.expand_path(a) == File.expand_path(b)
+    end
+
+    # Identity check for migration source/destination pairs. On
+    # error, prefer "not identical": the migration then runs its
+    # normal collision path, which never destroys data.
+    def same_entry?(a, b)
+      File.identical?(a, b)
+    rescue StandardError
+      false
+    end
+
+    def engine_internal_entry?(name)
+      return false unless name.is_a?(String)
+
+      name =~ ENGINE_DIR_ENTRY_RE
+    end
+
+    def filter_dir_entries(entries)
+      return entries unless entries.respond_to?(:reject)
+
+      entries.reject { |entry| engine_internal_entry?(entry) }
+    end
+
+    # Bare working-directory save filenames - the shape decade-old
+    # Essentials builds use, and the only shape the legacy-save
+    # recovery below reacts to.
+    def candidate?(path)
+      return false unless path.is_a?(String)
+
+      stripped = normalize_path(path)
+      return false if stripped.empty?
+      return false if stripped.start_with?('/', '~')
+      return false if stripped =~ /\A[A-Za-z]:/
+      return false if stripped.include?('/')
+
+      save_filename?(stripped)
+    end
+
+    def orig_exist?(path)
+      return FileTest._mkxp_orig_exist(path) if defined?(FileTest) && FileTest.respond_to?(:_mkxp_orig_exist)
+      return File._mkxp_orig_exist(path) if File.respond_to?(:_mkxp_orig_exist)
+
+      false
+    rescue StandardError
+      false
+    end
+
+    # Every path resolves literally - a game's writes inside its own
+    # folder land exactly where Windows would put them. This helper
+    # stays as the single file-API front for two recovery side
+    # effects left from the alias era:
+    #  - Earlier builds redirected bare working-directory save
+    #    filenames ("Game.rxdata") into UserData. The first access
+    #    of such a name moves the stranded copy back into the
+    #    working directory. On a collision the newer mtime keeps
+    #    the canonical name and the loser stays as
+    #    *.pre-literal.bak.
+    #  - The same builds flattened portable "Save Data/..." paths
+    #    into the UserData root. A qualifying access under the
+    #    portable dir runs the one-time sweep (see the
+    #    portable-save migration section below).
+    # Modern games address UserData saves by absolute path, match
+    # neither gate, and keep their files where they are. Delete both
+    # recoveries once no install carries stranded saves.
+    def path_for(path)
+      maybe_recover_portable_path(path)
+      recover_legacy_save(path)
+      MKXPWindowsFonts.target(self, path) || path
+    end
+
+    def recover_legacy_save(path)
+      return unless path.is_a?(String)
+
+      normalized = normalize_path(path)
+      return unless candidate?(normalized)
+
+      base = recovery_base
+      return unless base
+
+      stranded = "#{base}/#{normalized}"
+      return unless File._mkxp_orig_file(stranded)
+
+      migrate_save_file(stranded, normalized)
+    rescue StandardError
+      nil
+    end
+
+    # The UserData root both alias-era recoveries may take files
+    # FROM, or nil when no recovery may run. Two gates, shared by
+    # the single-file and the glob recovery:
+    #  - The redirect the recoveries undo only ever happened with
+    #    the game folder as the cwd, so any other cwd skips them.
+    #    Essentials' Dir.get chdirs INTO the data dir to enumerate
+    #    saves. Without this gate the recovery would "migrate"
+    #    those saves onto themselves.
+    #  - Degenerate host config: the data dir IS the game folder.
+    #    Compared by identity, not by spelling - on iOS the same
+    #    directory arrives as /var/... and resolves from getcwd as
+    #    /private/var/....
+    def recovery_base
+      base = root
+      return nil unless base
+      return nil unless cwd_at_game_root?
+      return nil if same_directory?(base, '.')
+
+      base
+    end
+
+    # Bare glob patterns enumerate the working directory (ancient
+    # slot pickers use "Save*.rxdata"). Recover every stranded root
+    # save the pattern would match before the literal glob runs, so
+    # enumeration and open agree on one folder. Gated per name on the
+    # save shape so a bare "*" cannot drag engine-internal UserData
+    # files into the game folder.
+    def recover_saves_for_glob(pattern)
+      patterns = pattern.is_a?(Array) ? pattern : [pattern]
+      patterns.each do |pat|
+        next unless pat.is_a?(String)
+
+        # A pattern inside the portable dir is an enumeration of it.
+        maybe_recover_portable_dir(pat)
+
+        normalized = normalize_path(pat)
+        next if normalized.empty? || normalized.include?('/')
+
+        recover_glob_matches(normalized)
+      end
+      nil
+    rescue StandardError
+      nil
+    end
+
+    def recover_glob_matches(normalized)
+      base = recovery_base
+      return unless base
+
+      Dir._mkxp_orig_entries(base).each do |name|
+        next unless save_filename?(name)
+        next unless File.fnmatch(normalized, name)
+        next unless File._mkxp_orig_file("#{base}/#{name}")
+
+        migrate_save_file("#{base}/#{name}", name)
+      end
+    rescue StandardError
+      nil
+    end
+
+    # iOS's filesystem is case-sensitive. Windows-authored games
+    # open, probe, and delete files with mismatched case and expect
+    # it to work. The machinery below resolves the actual on-disk
+    # spelling. It consumes exactly three engine facts, grouped in
+    # this adapter so the test harness can swap them for device
+    # emulation on a case-folding host.
+    module EngineFS
+      module_function
+
+      # The engine keeps the pre-casefold exist? under
+      # `_mkxp_native_orig_exist?`. The `_mkxp_orig_*` aliases
+      # capture the casefold-aware replacement, which reports true
+      # for any spelling and would defeat a strict probe.
+      def strict_exist?(path)
+        if File.respond_to?(:_mkxp_native_orig_exist?)
+          File._mkxp_native_orig_exist?(path)
+        else
+          File._mkxp_orig_exist(path)
+        end
+      end
+
+      # The engine's boot-time case cache. Nil when the engine has
+      # no answer, and nil for every query when a game ships
+      # "pathCache": false in its mkxp.json.
+      def cache_resolve(rel)
+        return nil unless defined?(System) && System.respond_to?(:resolve_case_path)
+
+        System.resolve_case_path(rel)
+      rescue StandardError
+        nil
+      end
+
+      def dir_entries(dir)
+        Dir._mkxp_orig_entries(dir)
+      end
+    end
+
+    def engine_fs
+      @engine_fs || EngineFS
+    end
+
+    def engine_fs=(adapter)
+      @engine_fs = adapter
+      @walk_cache = nil
+    end
+
+    # Windows-authored games write over their own files with
+    # mismatched case ("Battle Open.wav" over "Battle Open.WAV" -
+    # Rejuvenation's updater extracts patches this way) and delete or
+    # rename them the same way. On Windows both spellings are one
+    # file. Here a raw create makes a duplicate on the device and
+    # fails with Errno::EEXIST under the simulator's case-sensitivity
+    # emulation, and a raw delete or rename misses the file. Resolve
+    # the on-disk spelling first, so destructive file APIs hit the
+    # file the game means.
+    def resolve_case_target(path)
+      str = path.to_s
+      return path if str.empty?
+      return path if raw_exist?(str)
+
+      case_variant(str) || path
+    rescue StandardError
+      path
+    end
+
+    # Case-folding front for the probe wrappers (exist?, file?,
+    # directory? on File, FileTest, and Dir). The engine's own
+    # probes casefold through its boot path cache, but a game can
+    # ship "pathCache": false (Rejuvenation's Windows build does),
+    # and the cache also cannot see files this session created.
+    # Windows folds case in the OS, so a probe with a mismatched
+    # spelling must still find the file. Rejuvenation's updater
+    # guards its delete-old-spelling step with such a probe, and a
+    # false miss there aborts the whole patch later. The block is
+    # the wrapper's own original probe. The retry runs that same
+    # probe on the resolved on-disk spelling, so file? and
+    # directory? keep their type semantics and a bare variant of a
+    # missing file still answers false.
+    def probe_casefold(path)
+      target = path_for(path)
+      return true if yield(target)
+
+      variant = begin
+        case_variant(target.to_s)
+      rescue StandardError
+        nil
+      end
+      variant ? yield(variant) : false
+    end
+
+    # Strict spelling probe through the engine adapter.
+    def raw_exist?(str)
+      engine_fs.strict_exist?(str)
+    end
+
+    # On-disk spelling for a mismatched-case path, or nil when the
+    # spelling already matches or nothing resolves. Absolute paths
+    # resolve when they point inside the game directory or inside
+    # UserData. The engine's boot-time case cache answers first. A
+    # live directory walk then covers what the cache cannot know -
+    # files the game created this session (a self-updater extracts
+    # files and touches them again under another spelling).
+    def case_variant(str)
+      prefix, rel = split_case_prefix(str)
+      return nil if rel.nil?
+
+      fixed = nil
+      # The cache is game-root-relative: valid for absolute paths
+      # under the game root, and for relative paths only while the
+      # working directory IS the game root.
+      fixed = live_cache_hit(rel, prefix) if prefix == game_root_prefix || (prefix.nil? && cwd_at_game_root?)
+      if fixed.nil?
+        walked = live_case_walk(rel, prefix ? prefix[0, prefix.length - 1] : '.')
+        fixed = walked unless walked == rel
+      end
+      return nil unless fixed
+
+      prefix ? "#{prefix}#{fixed}" : fixed
+    end
+
+    # [prefix, rel] split of a path against the known roots. prefix
+    # is nil for relative paths. Both are nil when an absolute path
+    # points outside every known root.
+    def split_case_prefix(str)
+      return [nil, str] unless str =~ ABSOLUTE_PATH_RE
+
+      [game_root_prefix, userdata_prefix].each do |base|
+        next unless base
+        next unless str.length > base.length && str[0, base.length] == base
+
+        return [base, str[base.length..-1]]
+      end
+      [nil, nil]
+    end
+
+    def userdata_prefix
+      base = root
+      base ? "#{base}/" : nil
+    end
+
+    def cwd_at_game_root?
+      "#{File.expand_path('.')}/" == game_root_prefix
+    rescue StandardError
+      true
+    end
+
+    # Boot-cache lookup that survives same-session deletions. The
+    # cache cannot see a deletion: a self-updater deletes a file to
+    # change its spelling, and a stale hit would send the
+    # replacement write back to the deleted name (Rejuvenation's
+    # patcher aborted on the follow-up chmod this way). Trust a hit
+    # only while that spelling is still on disk.
+    def live_cache_hit(rel, prefix)
+      return nil if rel.empty? || rel =~ ABSOLUTE_PATH_RE
+
+      fixed = engine_fs.cache_resolve(rel)
+      return nil if fixed.nil? || fixed == rel
+
+      on_disk = prefix ? "#{prefix}#{fixed}" : fixed
+      raw_exist?(on_disk) ? fixed : nil
+    rescue StandardError
+      nil
+    end
+
+    # Case-insensitive component walk against the live filesystem,
+    # anchored at base. A component with an on-disk case variant
+    # takes that spelling. A component with no match stays literal
+    # (it is about to be created). Returns the input unchanged when
+    # nothing differs.
+    def live_case_walk(rel, base)
+      current = base
+      rel.split(%r{[\\/]+}).map do |part|
+        spelled = live_component_spelling(current, part)
+        current = "#{current}/#{spelled}"
+        spelled
+      end.join('/')
+    end
+
+    def live_component_spelling(dir, part)
+      return part if part.empty? || part == '.' || part == '..'
+
+      names = walk_entries(dir)
+      return part if names.include?(part)
+
+      lower = part.downcase
+      names.find { |name| name.downcase == lower } || part
+    rescue StandardError
+      part
+    end
+
+    # Directory listings for the live walk, memoized per filesystem
+    # generation. Probe misses are hot in Essentials games (sprite
+    # lookups probe several extensions per frame), and an unmemoized
+    # walk re-lists the same directories on every miss. Every
+    # mutating wrapper bumps the generation before it resolves, and
+    # the cache stays off during that resolution, so a listing never
+    # outlives the disk state it described.
+    def walk_entries(dir)
+      return engine_fs.dir_entries(dir) if @walk_cache_off
+
+      cache = (@walk_cache ||= {})
+      unless cache[:generation] == fs_generation
+        cache.clear
+        cache[:generation] = fs_generation
+      end
+      cache[dir] ||= engine_fs.dir_entries(dir)
+    end
+
+    def fs_generation
+      @fs_generation || 0
+    end
+
+    def bump_fs_generation!
+      @fs_generation = fs_generation + 1
+    end
+
+    # Spelling resolution for a mutating operation (open for write,
+    # delete, rename, mkdir, rmdir). The generation bump invalidates
+    # every earlier listing, and the walk reads the live filesystem
+    # during this resolution, so a listing of a directory the
+    # operation is about to change never gets cached.
+    def mutating_resolution
+      bump_fs_generation!
+      @walk_cache_off = true
+      begin
+        yield
+      ensure
+        @walk_cache_off = false
+      end
+    end
+
+    def change_spelling(target)
+      mutating_resolution { resolve_case_target(target) }
+    end
+
+    def change_target(path)
+      change_spelling(path_for(path))
+    end
+
+    # The engine starts every session in the game directory, and this
+    # file loads before any game script can chdir away. The captured
+    # spelling anchors absolute-path case resolution to the game root
+    # even when a game changes the working directory later. The
+    # capture call sits at the end of this file, outside the module
+    # guard, so test harnesses that reload the file refresh it too.
+    def capture_game_root!
+      @mkxp_game_root_prefix = "#{File.expand_path('.')}/"
+    end
+
+    def game_root_prefix
+      @mkxp_game_root_prefix
+    end
+
+    # True when an open mode creates, truncates, appends, or opens
+    # for update - every case where the open must land on the
+    # existing on-disk spelling instead of creating a duplicate.
+    # Encoding suffixes ("r:windows-1252") stay out of the check, and
+    # a keyword-style {mode: ...} hash contributes its :mode value.
+    def write_mode?(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
+      case mode
+      when Integer
+        (mode & (File::WRONLY | File::RDWR | File::APPEND | File::CREAT)) != 0
+      when String, Symbol
+        mode.to_s.split(':', 2)[0] =~ /[wa+]/ ? true : false
+      else
+        false
+      end
+    end
+
+    # Shared File.open / File.new front: legacy-save recovery first,
+    # then the write-mode case resolution.
+    def open_target(path, mode)
+      target = path_for(path)
+      return target unless write_mode?(mode)
+
+      MKXPWindowsFonts.ensure_dir(self, target)
+      change_spelling(target)
+    end
+
+    # Errno::ENOENT retry target for the open wrappers. The same
+    # resolution the write side uses, so absolute in-game paths and
+    # session-created files resolve for reads too. A path with a
+    # stray "\r" gets a second retry with those stripped: Windows
+    # forbids control characters in file names, so the "\r" can only
+    # come from CRLF text split with binary reads (Desolation's
+    # script loader parses its CSV listing this way). Windows' own
+    # text-mode reads drop the "\r" before the path is built.
+    def read_fallback_target(path)
+      str = path.to_s
+      fixed = case_variant(str)
+      return path_for(fixed) if fixed
+
+      return nil unless str.include?("\r")
+
+      cleaned = str.delete("\r")
+      return path_for(cleaned) if raw_exist?(cleaned)
+
+      fixed = case_variant(cleaned)
+      fixed ? path_for(fixed) : nil
+    rescue StandardError
+      nil
+    end
+
+    # True when a resolved directory target IS the per-game UserData
+    # root - the game using System.data_directory (trailing separator
+    # included) or a faked env var pointing at it. Callers use this
+    # to (a) filter engine-internal entries out of listings of the
+    # root and (b) no-op mkdir/rmdir of the root: the host owns that
+    # directory, games must never remove it, and "create my data
+    # folder" is always already satisfied.
+    def save_root_target?(target)
+      base = root
+      return false unless base && target.is_a?(String)
+
+      target.gsub(%r{[\\/]+\z}, '') == base
+    end
+
+    # --- Portable-save migration (virtual alias -> literal) ---
+    # Earlier builds virtualized the portable save dir: portable
+    # games wrote "Save Data/..." and the shim flattened it into the
+    # UserData root. "Save Data" is literal now, so affected
+    # installs have their portable content stranded at that root.
+    # The sweep below moves it back into the folder the game reads.
+    #
+    # The sweep is access-driven. No boot-time gate can know whether
+    # a game resolves saves through the portable dir. Rejuvenation-
+    # lineage builds go portable on the launcher identity alone
+    # (RTP.isPortable -> mobile? -> $empo/$kirin), with no marker
+    # file and no JoiPlay toggle. And a $joiplay-keyed boot sweep
+    # would move root saves for games that never read the portable
+    # dir. So the wrappers watch for the game itself to touch
+    # portable save content. The first qualifying access runs one
+    # sweep per boot:
+    #  - an enumeration of the portable dir (the Reborn-lineage
+    #    load screens list it), or
+    #  - a file access under "Save Data/" that misses literally
+    #    while the flattened counterpart exists at the root.
+    # A bare probe of a missing marker never qualifies. A
+    # non-portable game that only checks "Save Data/.portable"
+    # keeps its root saves untouched.
+    #
+    # The sweep moves every stranded entry, subdirectories included
+    # (the alias flattened "Save Data/Battle Logs/..." the same
+    # way). Engine bookkeeping entries and host ".empo-" artifacts
+    # stay at the root. On a name collision the newer mtime wins
+    # the canonical name (ties go to the root copy, which the alias
+    # preferred for both reads and writes). The loser is kept
+    # beside it as *.pre-literal.bak.
+    # Paths resolve against the engine cwd (the game folder, set by
+    # main.cpp/config.cpp before the binding boots), the same base
+    # the game's own "Save Data/" strings resolve against. The cwd
+    # guard skips the sweep while a game has chdir'd elsewhere.
+    def maybe_recover_portable_path(path)
+      return if @portable_sweep_done
+      return unless path.is_a?(String) && path.start_with?('Save')
+
+      normalized = normalize_path(path)
+      return unless normalized.start_with?(PORTABLE_PREFIX)
+
+      rel = normalized[PORTABLE_PREFIX.length..-1]
+      return if rel.nil? || rel.empty?
+      return if orig_exist?(normalized)
+
+      base = sweep_base
+      return unless base && orig_exist?("#{base}/#{rel}")
+
+      run_portable_sweep!
+    rescue StandardError
+      nil
+    end
+
+    def maybe_recover_portable_dir(path)
+      return if @portable_sweep_done
+      return unless path.is_a?(String) && path.start_with?('Save')
+
+      normalized = normalize_path(path).gsub(%r{/+\z}, '')
+      return unless normalized == PORTABLE_SAVE_DIR || normalized.start_with?(PORTABLE_PREFIX)
+
+      run_portable_sweep!
+    rescue StandardError
+      nil
+    end
+
+    def run_portable_sweep!
+      return if @portable_sweep_done
+      return unless cwd_at_game_root?
+
+      @portable_sweep_done = true
+      migrate_portable_saves!
+    end
+
+    # The boot section at the end of this file re-arms the sweep on
+    # every load, so test harness reloads start clean.
+    def arm_portable_sweep!
+      @portable_sweep_done = false
+    end
+
+    # UserData root for sweeps, or nil when the host config is
+    # degenerate (no data dir, or the data dir IS the game folder -
+    # a sweep there would shuffle shipped root saves into Save
+    # Data).
+    def sweep_base
+      base = root
+      return nil if base.nil? || base == '.'
+      return nil if same_directory?(base, '.')
+
+      base
+    end
+
+    def migrate_portable_saves!
+      base = sweep_base
+      return unless base
+
+      names = begin
+        Dir._mkxp_orig_entries(base)
+      rescue StandardError
+        nil
+      end
+      return if names.nil?
+
+      movable = names.reject { |name| skip_portable_entry?(name) }
+      return if movable.empty?
+
+      Dir._mkxp_orig_mkdir(PORTABLE_SAVE_DIR) unless orig_exist?(PORTABLE_SAVE_DIR)
+      movable.each do |name|
+        migrate_save_entry("#{base}/#{name}", "#{PORTABLE_PREFIX}#{name}")
+      end
+    rescue StandardError
+      nil
+    end
+
+    def skip_portable_entry?(name)
+      return true if ['.', '..'].include?(name)
+      return true if name == '.DS_Store'
+      return true if engine_internal_entry?(name)
+
+      empo_artifact?(name)
+    end
+
+    def migrate_save_entry(src, dst)
+      if File._mkxp_orig_file(src)
+        migrate_save_file(src, dst)
+      elsif File._mkxp_orig_directory(src)
+        migrate_save_tree(src, dst)
+      end
+    rescue StandardError
+      nil
+    end
+
+    # Directory form of the migration. A whole stranded tree renames
+    # over when the destination is free. Otherwise merge entry by
+    # entry, recursing into shared subdirectories. Per-file
+    # collisions follow the migrate_save_file mtime rule. The source
+    # directory goes away only when everything inside it moved.
+    def migrate_save_tree(src, dst)
+      return File._mkxp_orig_rename(src, dst) unless orig_exist?(dst)
+      return unless File._mkxp_orig_directory(dst)
+
+      Dir._mkxp_orig_entries(src).each do |name|
+        next if ['.', '..'].include?(name)
+
+        migrate_save_entry("#{src}/#{name}", "#{dst}/#{name}")
+      end
+      Dir._mkxp_orig_rmdir(src) if Dir._mkxp_orig_entries(src).size <= 2
+    rescue StandardError
+      nil
+    end
+
+    def migrate_save_file(src, dst)
+      # The same inode reached through two spellings must never
+      # "migrate": the rename pair below would strip the file down
+      # to its backup name and leave nothing at the canonical one.
+      return if same_entry?(src, dst)
+
+      unless orig_exist?(dst)
+        File._mkxp_orig_rename(src, dst)
+        return
+      end
+
+      backup = pre_literal_backup_name(dst)
+      if migrate_source_newer?(src, dst)
+        File._mkxp_orig_rename(dst, backup)
+        File._mkxp_orig_rename(src, dst)
+      else
+        File._mkxp_orig_rename(src, backup)
+      end
+    rescue StandardError
+      nil
+    end
+
+    # First free backup name beside dst. rename(2) replaces an
+    # existing target silently, so a fixed backup name would
+    # destroy the previous backup on a second collision.
+    def pre_literal_backup_name(dst)
+      name = "#{dst}.pre-literal.bak"
+      return name unless orig_exist?(name)
+
+      index = 2
+      index += 1 while orig_exist?("#{dst}.pre-literal-#{index}.bak")
+      "#{dst}.pre-literal-#{index}.bak"
+    end
+
+    # Ties go to the root (src) copy: on the first alias->literal
+    # boot equal stamps mean copies of the same file, and the alias
+    # treated the root as authoritative.
+    def migrate_source_newer?(src, dst)
+      File._mkxp_orig_mtime(src) >= File._mkxp_orig_mtime(dst)
+    rescue StandardError
+      true
+    end
+  end
+  # rubocop:enable Metrics/ModuleLength
+end
+
+# --- Windows text-mode read emulation ---
+# Windows Ruby opens files in text mode by default and folds CRLF to
+# LF on read. Games depend on that: Desolation's script loader splits
+# its CSV listing on "\n" and derives file paths and control flow
+# from the fields, and a kept "\r" breaks both. Pokemon Pathways ships
+# the RGSS Script Editor loader, which splits a CRLF load_order.txt on
+# "\n" and then rejects every entry because File.extname sees ".rb\r".
+# Fold the same way for plain read-mode opens on the modern VM. Binary
+# opens ('b' flag, integer flags), update modes, write modes, and calls
+# with explicit extra arguments stay raw.
+unless defined?(MKXPTextMode)
+  module MKXPTextMode
+    module_function
+
+    # File.read and its friends take no mode argument, so Windows
+    # applies text mode to every one of these calls. Fold the bare
+    # form only: a call that gives a length, a separator, or its own
+    # options keeps the arguments it was given.
+    def whole_file_args(args)
+      opts = universal_newline_opts
+      return args unless opts && args.empty?
+
+      [opts]
+    end
+
+    def read_args(args)
+      opts = universal_newline_opts
+      return args unless opts
+      return ['r', opts] if args.empty?
+      return args unless args.length == 1
+
+      mode = args[0]
+      return args unless mode.is_a?(String)
+
+      flags = mode.split(':', 2)[0]
+      return args unless %w[r rt].include?(flags)
+
+      [mode, opts]
+    end
+
+    # The option hash carries the ruby2_keywords flag so the splat
+    # in the File wrappers passes it as keywords.
+    def universal_newline_opts
+      return @universal_newline_opts if defined?(@universal_newline_opts)
+
+      capable = defined?(System) && System.respond_to?(:ruby_version) &&
+                System.ruby_version.to_f >= 3.1 &&
+                Hash.respond_to?(:ruby2_keywords_hash)
+      @universal_newline_opts =
+        capable ? Hash.ruby2_keywords_hash({ :newline => :universal }) : nil
+    end
+  end
+end
+
+# --- File API front: legacy-save recovery + case resolution ---
+# Paths resolve literally. path_for only performs the one-time
+# legacy-save recovery side effect. The case helpers keep destructive
+# operations on the on-disk spelling. IO.read is not hooked. No
+# observed game reads saves through it.
+class << File
+  alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
+  alias _mkxp_orig_delete delete unless method_defined?(:_mkxp_orig_delete)
+  alias _mkxp_orig_rename rename unless method_defined?(:_mkxp_orig_rename)
+  alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
+  alias _mkxp_orig_exist exist? unless method_defined?(:_mkxp_orig_exist)
+  alias _mkxp_orig_exists exists? unless method_defined?(:_mkxp_orig_exists)
+  alias _mkxp_orig_file file? unless method_defined?(:_mkxp_orig_file)
+  alias _mkxp_orig_directory directory? unless method_defined?(:_mkxp_orig_directory)
+  alias _mkxp_orig_size size unless method_defined?(:_mkxp_orig_size)
+  alias _mkxp_orig_size? size? unless method_defined?(:_mkxp_orig_size?)
+  alias _mkxp_orig_zero? zero? unless method_defined?(:_mkxp_orig_zero?)
+  alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
+
+  def open(path, *args, &block)
+    args = MKXPTextMode.read_args(args)
+    _mkxp_orig_open(MKXPSaveFS.open_target(path, args[0]), *args, &block)
+  rescue Errno::ENOENT
+    fixed = MKXPSaveFS.read_fallback_target(path)
+    raise unless fixed
+
+    _mkxp_orig_open(fixed, *args, &block)
+  end
+
+  def new(path, *args)
+    args = MKXPTextMode.read_args(args)
+    _mkxp_orig_new(MKXPSaveFS.open_target(path, args[0]), *args)
+  rescue Errno::ENOENT
+    fixed = MKXPSaveFS.read_fallback_target(path)
+    raise unless fixed
+
+    _mkxp_orig_new(fixed, *args)
+  end
+
+  def delete(*paths)
+    _mkxp_orig_delete(*paths.map { |path| MKXPSaveFS.change_target(path) })
+  end
+  # File.unlink is a distinct singleton method. Without this alias it
+  # would bypass the legacy-save recovery and the case resolution.
+  alias unlink delete
+
+  def rename(from, to)
+    _mkxp_orig_rename(MKXPSaveFS.change_target(from), MKXPSaveFS.change_target(to))
+  end
+
+  def exist?(path)
+    MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exist(target) }
+  end
+
+  def exists?(path)
+    MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exists(target) }
+  end
+
+  def file?(path)
+    MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_file(target) }
+  end
+
+  def directory?(path)
+    MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_directory(target) }
+  end
+
+  def size(path)
+    _mkxp_orig_size(MKXPSaveFS.path_for(path))
+  end
+
+  def size?(path)
+    _mkxp_orig_size?(MKXPSaveFS.path_for(path))
+  end
+
+  def zero?(path)
+    _mkxp_orig_zero?(MKXPSaveFS.path_for(path))
+  end
+
+  def mtime(path)
+    _mkxp_orig_mtime(MKXPSaveFS.path_for(path))
+  end
+
+  # Whole-file read/write helpers must resolve bare save names the
+  # same way File.open does, or a game's File.read of a save sees a
+  # different copy than its File.open (guard/act disagreement).
+  # binread/binwrite/write are guarded: absent on Ruby 1.8.
+  alias _mkxp_orig_read read unless method_defined?(:_mkxp_orig_read)
+
+  def read(path, *args)
+    _mkxp_orig_read(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args))
+  end
+
+  alias _mkxp_orig_readlines readlines unless method_defined?(:_mkxp_orig_readlines)
+
+  def readlines(path, *args)
+    _mkxp_orig_readlines(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args))
+  end
+
+  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
+
+  def foreach(path, *args, &block)
+    _mkxp_orig_foreach(MKXPSaveFS.path_for(path), *MKXPTextMode.whole_file_args(args), &block)
+  end
+
+  if (method_defined?(:binread) || private_method_defined?(:binread)) && !method_defined?(:_mkxp_orig_binread)
+    alias _mkxp_orig_binread binread
+
+    def binread(path, *args)
+      _mkxp_orig_binread(MKXPSaveFS.path_for(path), *args)
+    end
+  end
+
+  if (method_defined?(:write) || private_method_defined?(:write)) && !method_defined?(:_mkxp_orig_write)
+    alias _mkxp_orig_write write
+
+    def write(path, *args)
+      _mkxp_orig_write(MKXPSaveFS.change_target(path), *args)
+    end
+  end
+
+  if (method_defined?(:binwrite) || private_method_defined?(:binwrite)) &&
+     !method_defined?(:_mkxp_orig_binwrite)
+    alias _mkxp_orig_binwrite binwrite
+
+    def binwrite(path, *args)
+      _mkxp_orig_binwrite(MKXPSaveFS.change_target(path), *args)
+    end
+  end
+
+  # Ruby 3 separates keyword args from positionals. Without the
+  # ruby2_keywords flag these *args wrappers would collapse
+  # `File.open(path, mode: 'rb')`-style kwargs into a positional
+  # Hash and the original method raises TypeError. No-op relevant
+  # on 1.8/1.9 (hash-positional is the native semantic there).
+  if respond_to?(:ruby2_keywords, true)
+    ruby2_keywords :open
+    ruby2_keywords :new
+    ruby2_keywords :read
+    ruby2_keywords :readlines
+    ruby2_keywords :foreach
+    ruby2_keywords :binread if method_defined?(:_mkxp_orig_binread)
+    ruby2_keywords :write if method_defined?(:_mkxp_orig_write)
+    ruby2_keywords :binwrite if method_defined?(:_mkxp_orig_binwrite)
+  end
+end
+
+module FileTest
+  class << self
+    alias _mkxp_orig_exist exist? unless method_defined?(:_mkxp_orig_exist)
+    alias _mkxp_orig_file file? unless method_defined?(:_mkxp_orig_file)
+    alias _mkxp_orig_directory directory? unless method_defined?(:_mkxp_orig_directory)
+
+    def exist?(path)
+      MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exist(target) }
+    end
+
+    if (method_defined?(:exists?) || private_method_defined?(:exists?)) &&
+       !method_defined?(:_mkxp_orig_exists)
+      alias _mkxp_orig_exists exists?
+
+      def exists?(path)
+        MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exists(target) }
+      end
+    end
+
+    def file?(path)
+      MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_file(target) }
+    end
+
+    def directory?(path)
+      MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_directory(target) }
+    end
+
+    # Size probes need the same ENOENT casefold retry File.open has.
+    # Daybreak's AudioUtilities scans MP3 frames through an already
+    # casefolded File.open, then calls FileTest.size with the
+    # game's own mismatched spelling ("Audio/BGM/TITLE.mp3" for
+    # Title.mp3) and dies at the title screen without the retry.
+    if (method_defined?(:size) || private_method_defined?(:size)) && !method_defined?(:_mkxp_orig_size)
+      alias _mkxp_orig_size size
+
+      def size(path)
+        _mkxp_orig_size(MKXPSaveFS.path_for(path))
+      rescue Errno::ENOENT
+        fixed = MKXPSaveFS.read_fallback_target(path)
+        raise unless fixed
+
+        _mkxp_orig_size(fixed)
+      end
+    end
+
+    if (method_defined?(:size?) || private_method_defined?(:size?)) && !method_defined?(:_mkxp_orig_size?)
+      alias _mkxp_orig_size? size?
+
+      # size? answers nil for a missing file instead of raising, so
+      # the casefold retry keys on that rather than on ENOENT.
+      # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+      # -- nil-for-missing is FileTest.size?'s documented contract.
+      def size?(path)
+        found = _mkxp_orig_size?(MKXPSaveFS.path_for(path))
+        return found unless found.nil?
+
+        fixed = MKXPSaveFS.read_fallback_target(path)
+        fixed ? _mkxp_orig_size?(fixed) : nil
+      end
+      # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
+    end
+  end
+end
+
+class << Dir
+  alias _mkxp_orig_glob glob unless method_defined?(:_mkxp_orig_glob)
+  alias _mkxp_orig_brackets [] unless method_defined?(:_mkxp_orig_brackets)
+  alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
+  alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
+  alias _mkxp_orig_entries entries unless method_defined?(:_mkxp_orig_entries)
+  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
+  if (method_defined?(:exist?) || private_method_defined?(:exist?)) && !method_defined?(:_mkxp_orig_exist)
+    alias _mkxp_orig_exist exist?
+  end
+  alias _mkxp_orig_mkdir mkdir unless method_defined?(:_mkxp_orig_mkdir)
+
+  # Globs are literal. The one side effect: a bare save-file pattern
+  # first recovers any legacy saves stranded at the UserData root
+  # into the working directory (see recover_saves_for_glob), so slot
+  # enumeration and the open that follows see the same folder.
+  def glob(pattern, *args, &block)
+    MKXPSaveFS.recover_saves_for_glob(pattern)
+    _mkxp_orig_glob(pattern, *args, &block)
+  end
+  # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
+  # this) flowing through the *args wrapper. See the File note above.
+  ruby2_keywords :glob if respond_to?(:ruby2_keywords, true)
+
+  # Dir[] shares glob's recovery. Ancient slot pickers use both.
+  def [](*patterns)
+    MKXPSaveFS.recover_saves_for_glob(patterns)
+    _mkxp_orig_brackets(*patterns)
+  end
+  ruby2_keywords :[] if respond_to?(:ruby2_keywords, true)
+
+  # Dir.new / Dir.open enumerate too - the Reborn-lineage load
+  # screens list saves through Dir.new(getSaveFolder). Give both
+  # the portable recovery trigger. Paths stay literal.
+  def new(path, *args)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    _mkxp_orig_new(path, *args)
+  end
+  ruby2_keywords :new if respond_to?(:ruby2_keywords, true)
+
+  def open(path, *args, &block)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    _mkxp_orig_open(path, *args, &block)
+  end
+  ruby2_keywords :open if respond_to?(:ruby2_keywords, true)
+
+  def entries(path = '.', *args)
+    # Listings are literal. A listing of the portable save dir first
+    # recovers alias-era stranded content (maybe_recover_portable_dir).
+    # Listings of the UserData root (System.data_directory, faked
+    # env var spellings) hide engine-internal entries. Everything
+    # else passes through.
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    target = MKXPSaveFS.path_for(path)
+    result = _mkxp_orig_entries(target, *args)
+    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
+
+    result
+  end
+  ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
+
+  def foreach(path = '.', *args, &block)
+    MKXPSaveFS.maybe_recover_portable_dir(path)
+    target = MKXPSaveFS.path_for(path)
+    unless block
+      if MKXPSaveFS.save_root_target?(target)
+        return MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each
+      end
+
+      return _mkxp_orig_foreach(target, *args)
+    end
+
+    if MKXPSaveFS.save_root_target?(target)
+      MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each(&block)
+    else
+      _mkxp_orig_foreach(target, *args, &block)
+    end
+  end
+  ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
+
+  # Ruby 2.5+/2.6+ additions. Pokemon Rejuvenation's New Game Plus
+  # code lists the save folder via Dir.each_child.
+  if method_defined?(:children) || private_method_defined?(:children)
+    alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
+
+    def children(path, *args)
+      MKXPSaveFS.maybe_recover_portable_dir(path)
+      target = MKXPSaveFS.path_for(path)
+      result = _mkxp_orig_children(target, *args)
+      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
+
+      result
+    end
+    ruby2_keywords :children if respond_to?(:ruby2_keywords, true)
+  end
+
+  if method_defined?(:each_child) || private_method_defined?(:each_child)
+    alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
+
+    def each_child(path, *args, &block)
+      MKXPSaveFS.maybe_recover_portable_dir(path)
+      target = MKXPSaveFS.path_for(path)
+      unless block
+        if MKXPSaveFS.save_root_target?(target)
+          return MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each
+        end
+
+        return _mkxp_orig_each_child(target, *args)
+      end
+
+      if MKXPSaveFS.save_root_target?(target)
+        MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each(&block)
+      else
+        _mkxp_orig_each_child(target, *args, &block)
+      end
+    end
+    ruby2_keywords :each_child if respond_to?(:ruby2_keywords, true)
+  end
+
+  if method_defined?(:exist?) || private_method_defined?(:exist?)
+    def exist?(path)
+      MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exist(target) }
+    end
+  end
+
+  if (method_defined?(:exists?) || private_method_defined?(:exists?)) && !method_defined?(:_mkxp_orig_exists)
+    alias _mkxp_orig_exists exists?
+
+    def exists?(path)
+      MKXPSaveFS.probe_casefold(path) { |target| _mkxp_orig_exists(target) }
+    end
+  end
+
+  # The portable save dir is LITERAL: Pokemon Rejuvenation's
+  # portable mode (isPortable -> getSaveFolder == "Save Data/")
+  # creates it with
+  #   Dir.mkdir("Save Data/") unless File.exists?("Save Data/")
+  # and then runs
+  #   Dir.mkdir(RTP.getSaveFolder + "Battle Debug Logs/")
+  # at the start of every battle, unrescued. Both resolve relative
+  # to the game folder and must really create the directories there,
+  # exactly as on Windows/JoiPlay - an earlier alias scheme answered
+  # the first mkdir with a virtual success, which left the second
+  # one without a parent and black-screened the battle transition
+  # with Errno::ENOENT.
+  # The wrappers exist for one reason: the UserData root itself is
+  # host-owned - "create it" reports success instead of
+  # Errno::EEXIST, and "remove it" must never actually happen.
+  def mkdir(path, *args)
+    target = MKXPSaveFS.path_for(path)
+    return 0 if MKXPSaveFS.save_root_target?(target)
+
+    # Case-resolve so FileUtils.mkdir_p of "audio/bgs" extends the
+    # on-disk "Audio/BGS" tree instead of creating a duplicate one.
+    _mkxp_orig_mkdir(MKXPSaveFS.change_spelling(target), *args)
+  end
+
+  alias _mkxp_orig_rmdir rmdir unless method_defined?(:_mkxp_orig_rmdir)
+
+  def rmdir(path)
+    target = MKXPSaveFS.path_for(path)
+    return 0 if MKXPSaveFS.save_root_target?(target)
+
+    _mkxp_orig_rmdir(MKXPSaveFS.change_spelling(target))
+  end
+  alias delete rmdir
+  alias unlink rmdir
+end
+
+module Kernel
+  alias _mkxp_orig_load_data load_data unless method_defined?(:_mkxp_orig_load_data)
+  alias _mkxp_orig_save_data save_data unless method_defined?(:_mkxp_orig_save_data)
+
+  def load_data(path, *args)
+    _mkxp_orig_load_data(MKXPSaveFS.path_for(path), *args)
+  end
+
+  def save_data(obj, path, *args)
+    _mkxp_orig_save_data(obj, MKXPSaveFS.path_for(path), *args)
+  end
+  module_function :load_data, :save_data
+end
+
+# --- Dir.chdir nil/empty-safety ---
+# Pokemon Essentials and some plugin scripts pass nil or "" to
+# Dir.chdir. nil crashes Ruby pre-2.0 outright. "" raises
+# Errno::ENOENT on every Ruby version. Both are no-ops in spirit
+# (the script wants "stay where you are") so we route them through
+# the no-arg form, which is safe and well-defined (returns to home
+# dir or no-op when called with a block on no-arg).
+class << Dir
+  alias _mkxp_orig_chdir chdir unless method_defined?(:_mkxp_orig_chdir)
+  def chdir(dir = nil, &block)
+    return _mkxp_orig_chdir(&block) if dir.nil? || dir.empty?
+
+    _mkxp_orig_chdir(dir, &block)
+  end
+end
+if defined?(System) && System.respond_to?(:puts)
+  has_orig = Dir.respond_to?(:_mkxp_orig_chdir)
+  System.puts "[windows_fs] Dir.chdir patch applied (orig defined? #{has_orig})"
+end
+
+# --- Portable-save migration arming ---
+# The sweep is access-driven (see the portable-save migration
+# section in MKXPSaveFS): the wrappers above watch for the game to
+# touch portable "Save Data" content, and the first qualifying
+# access runs one sweep per boot through the _mkxp_orig_* aliases.
+# No boot-time gate: launcher-identity portable modes
+# (Rejuvenation's RTP.isPortable -> mobile? -> $empo) are invisible
+# before game scripts run, and a $joiplay-keyed boot sweep would
+# move root saves for games that never read the portable dir.
+MKXPSaveFS.capture_game_root!
+MKXPSaveFS.arm_portable_sweep!

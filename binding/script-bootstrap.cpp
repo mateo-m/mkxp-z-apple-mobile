@@ -195,6 +195,7 @@ void loadEnginePreloads() {
     }
 
     const char *enginePreloads[] = {
+        "windows_fs",
         "platform_compat",
         "pokemon_compat",
         "win32_wrap",
