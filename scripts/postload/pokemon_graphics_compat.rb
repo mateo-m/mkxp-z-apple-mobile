@@ -60,7 +60,7 @@ module Graphics
       end
     end
 
-    # Legacy PE feature probe. Always true on mkxp-z; some games
+    # Legacy PE feature probe. Always true on mkxp-z. Some games
     # branch on this to decide whether to call resize_screen.
     define_method(:haveresizescreen) { true } unless respond_to?(:haveresizescreen)
 
@@ -205,7 +205,7 @@ MkxpPokemonGraphicsCompat.patch_ball_animation_mixin
 class Module
   # `include` is private on this Ruby, so its alias is private too,
   # and `method_defined?` does not see private methods. An RGSS
-  # Reset re-runs this script; without the private check the alias
+  # Reset re-runs this script. Without the private check the alias
   # re-targets the already-wrapped `include`, and the wrapper then
   # calls itself without end (SystemStackError on the reset path).
   unless method_defined?(:__mkxp_graphics_compat_include) ||

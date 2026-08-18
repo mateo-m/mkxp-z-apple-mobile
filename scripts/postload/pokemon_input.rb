@@ -55,7 +55,7 @@ unless $PokemonSystem.nil?
   # `Input.triggerex?(:BACKSPACE)` correctly reports true on the
   # right frame but PE's update flow doesn't act on it, so the
   # name field never shrinks. PE 21 wired the trigger path
-  # directly; this preempt covers the older versions and is
+  # directly. This preempt covers the older versions and is
   # redundant-but-safe on PE 21.
   if defined?(Window_TextEntry_Keyboard)
     class Window_TextEntry_Keyboard

@@ -55,6 +55,46 @@ extern "C" void mkxp_debugLog(const char *tag, const char *source,
 namespace {
 
 // ----------------------------------------------------------------
+//  Map layer count
+// ----------------------------------------------------------------
+
+// Tile layers per map cell. RPG Maker XP map data is a Table whose
+// third dimension is always 3, so this is a property of the editor
+// format and not of any one game. Hmode7 is an RMXP-era plugin, so
+// every game that reaches this binding packs 3 layers.
+constexpr int kMapLayers = 3;
+
+// Hmode7's Ruby side packs its tilemap Table as one run of
+// `kMapLayers + 1` entries per cell: the 3 layer tiles, then the
+// bush-start index. The renderers stride by that number, so a table
+// whose width is not a multiple of it would be read at the wrong
+// offsets and draw garbage without ever failing.
+//
+// The binding cannot see the map's cell width, so divisibility is
+// the only check available. It still catches the case that matters,
+// which is a fork that repacked the table with a different stride.
+constexpr int kPackedStride = kMapLayers + 1;
+
+// True when a packed tilemap width can hold whole cells. Warns once
+// per process on the way out, because a stride mismatch is a
+// property of the game and repeats every frame.
+bool packed_tilemap_is_sane(int tilemap_xsize, const char *caller) {
+    if (tilemap_xsize > 0 && tilemap_xsize % kPackedStride == 0) return true;
+
+    static int strideWarned = 0;
+    if (!strideWarned) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+            "%s: tilemap width=%d is not a multiple of %d. This game packs "
+            "its Hmode7 tile table differently, so the map is not drawn.",
+            caller, tilemap_xsize, kPackedStride);
+        mkxp_debugLog("HM7-WARN", "hmode7-binding.cpp [C++]", buf);
+        strideWarned = 1;
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------
 //  Low-level unwrappers
 // ----------------------------------------------------------------
 
@@ -118,7 +158,7 @@ void commit_bitmap(VALUE v) {
 }
 
 // Unwrap a Ruby Table into a raw int16_t* + dims. The Table stores
-// its `std::vector<int16_t>` internally; `&t->at(0,0,0)` returns
+// its `std::vector<int16_t>` internally. `&t->at(0,0,0)` returns
 // a pointer into that contiguous backing buffer. Returns nullptr
 // for non-Table / zero-size inputs.
 std::int16_t *table_data(VALUE v, int *xs, int *ys, int *zs) {
@@ -238,7 +278,7 @@ RB_METHOD(hm7NativeApplyLighting) {
     if (!data) return Qnil;
 
     hm7::apply_lighting(data, raw_xs, raw_ys);
-    // Tables live on the CPU side; no commit needed.
+    // Tables live on the CPU side. No commit needed.
     return Qnil;
 }
 
@@ -311,7 +351,7 @@ RB_METHOD(hm7NativeComputeM7) {
 //
 // Ruby: `HM7.draw_heightmap(heightmap, heightpattern, map_tileset,
 //        tilemap_data)` from 210-HM7_NEW_CLASSES.rb:66.
-// `heightmap`, `tilemap_data` are Tables; `heightpattern`,
+// `heightmap`, `tilemap_data` are Tables. `heightpattern`,
 // `map_tileset` are Bitmaps.
 // ----------------------------------------------------------------
 
@@ -337,9 +377,10 @@ RB_METHOD(hm7NativeDrawHeightmap) {
     SDL_Surface *pattern = bitmap_surface(pattern_v);
     if (!map_tileset || !pattern) return INT2FIX(0);
 
-    // nb_layers is hardcoded to 3 in Insurgence; see design doc §10.1.
+    if (!packed_tilemap_is_sane(tm_xs, "draw_heightmap")) return INT2FIX(0);
+
     hm7::draw_heightmap(heightmap, hm_xs, tilemap, tm_xs, tm_ys,
-                        map_tileset, pattern, /*nb_layers=*/3);
+                        map_tileset, pattern, kMapLayers);
     return INT2FIX(0);
 }
 
@@ -352,8 +393,8 @@ RB_METHOD(hm7NativeDrawHeightmap) {
 // `texture_hash` is `Hash<Fixnum tile_num, Array value>` where
 // `value = [tile_value, texture_bitmap]` (Insurgence's shape) or
 // `value = [tile_value, texture_bitmap, anim_nbr, anim_index]`
-// (original plugin shape; animated textures). The binding reads
-// all 4 slots; missing entries default to 0.
+// (original plugin shape, animated textures). The binding reads
+// all 4 slots. Missing entries default to 0.
 // `colormap` is the destination Bitmap (the wall-strip atlas).
 // `texture_auto` is a single Bitmap (the autotile wall source,
 // used when tile_value < 384).
@@ -394,7 +435,7 @@ RB_METHOD(hm7NativeDrawTextureset) {
     SDL_Surface *colormap = bitmap_surface(colormap_v);
     if (!colormap) return INT2FIX(0);
     SDL_Surface *texture_auto = bitmap_surface(texture_auto_v);
-    // texture_auto can be nil if no autotile textures; that's fine,
+    // texture_auto can be nil if no autotile textures. That's fine,
     // the per-entry function handles null.
 
     if (!NIL_P(texture_hash_v) && RB_TYPE_P(texture_hash_v, T_HASH)) {
@@ -413,7 +454,7 @@ RB_METHOD(hm7NativeDrawTextureset) {
 //
 // Ruby: from 210-HM7_NEW_CLASSES.rb:53 and 974.
 // `tilemap_hash` is `Hash<Fixnum tile_num, Array>` where
-// `Array = [layer0, layer1, layer2, bush_start]` — 4 ints.
+// `Array = [layer0, layer1, layer2, bush_start]`. 4 ints.
 // `auto_tilesets` is a 14-entry Array of Bitmaps/0:
 //   [0..6]  autotile tileset graphics (nil-or-Bitmap each)
 //   [7..13] autotile heightset graphics
@@ -461,7 +502,7 @@ int hm7_draw_map_iter(VALUE key, VALUE val, VALUE ctx_val) {
                                 ctx->heightset, entry,
                                 ctx->auto_tilesets, 7,
                                 ctx->auto_heightsets, 7,
-                                /*nb_layers=*/3);
+                                kMapLayers);
     return ST_CONTINUE;
 }
 
@@ -478,7 +519,7 @@ int hm7_refresh_map_iter(VALUE key, VALUE val, VALUE ctx_val) {
     entry.layer_tile_values[3] = aref_int(val, 3);
 
     hm7::refresh_map_tileset_entry(ctx->map_tileset, ctx->tileset, entry,
-                                   ctx->auto_tilesets, 7, /*nb_layers=*/3);
+                                   ctx->auto_tilesets, 7, kMapLayers);
     return ST_CONTINUE;
 }
 }  // anonymous namespace
@@ -551,7 +592,7 @@ RB_METHOD(hm7NativeRefreshMapTileset) {
 //   210-HM7_NEW_CLASSES.rb:85. Returns the new camera Y offset
 //   (`oCamera`) used by the Ruby side to auto-track height.
 //
-// `params` array shape (Insurgence's 13-entry flavour; missing
+// `params` array shape (Insurgence's 13-entry flavour, missing
 // entries fall back to defaults in the binding):
 //   [0]  render (screen Bitmap)
 //   [1]  computetable (Table, projection LUT)
@@ -566,10 +607,10 @@ RB_METHOD(hm7NativeRefreshMapTileset) {
 //   [10] s_screen_bitmap (scratch Bitmap)
 //   [11] less_cut
 //   [12] no_black_cut
-//   [13..16] (not present in Insurgence; x_min/x_max/y_min/y_max)
+//   [13..16] (not present in Insurgence, x_min/x_max/y_min/y_max)
 //
 // `vars` array: [height_limit, display_x, display_y, filter, o_scr_y]
-// `surfaces` array: list of 11-Fixnum sub-arrays (see design doc §2.4)
+// `surfaces` array: list of 11-Fixnum sub-arrays (see design doc section 2.4)
 // ----------------------------------------------------------------
 
 RB_METHOD(hm7NativeRenderHM7) {
@@ -638,7 +679,7 @@ RB_METHOD(hm7NativeRenderHM7) {
     rv.filter = aref_int(vars_v, 3);
     rv.o_scr_y = aref_int(vars_v, 4);
 
-    // Unpack surfaces. Cap at 256 sprites; anything past that is
+    // Unpack surfaces. Cap at 256 sprites. Anything past that is
     // pathological for the game and would also overflow the stack
     // buffer we use below.
     constexpr int MAX_SURFACES = 256;
@@ -660,7 +701,8 @@ RB_METHOD(hm7NativeRenderHM7) {
             // horizontally when non-zero. Skip rather than risk it.
             if (RARRAY_LEN(s) < 11) continue;
             hm7::RenderSurface &rs = surfaces[surface_count];
-            rs.type = aref_int(s, 0);
+            // Slot [0] is the surface type. The renderer draws every
+            // sprite as a billboard, so it does not take that field.
             rs.screen_x1 = aref_int(s, 1);
             rs.screen_y1 = aref_int(s, 2);
             rs.screen_x2 = aref_int(s, 3);
@@ -679,7 +721,7 @@ RB_METHOD(hm7NativeRenderHM7) {
     // renderer packs 8 bytes per column slot (flag, blend, hbase hi/
     // lo, r, g, b, a) and a regular Bitmap's pitch is only 4 bytes
     // per pixel. The postload shim reallocates @params[10] in
-    // `HM7::Tilemap#initialize` to accomplish this; if the shim
+    // `HM7::Tilemap#initialize` to accomplish this. If the shim
     // failed to run (e.g. Ruby visibility / `method_defined?` quirk
     // on `initialize`), sprite writes at `sXt >= render_w / 2`
     // would wrap into adjacent rows and render sprites at bogus
@@ -746,8 +788,12 @@ RB_METHOD(hm7NativeRenderHM7) {
         }
     }
 
+    if (!packed_tilemap_is_sane(rp.tilemap_xsize, "render_hm7")) {
+        return INT2FIX(0);
+    }
+
     int o_camera = hm7::render_hm7(rp, rv, surfaces, surface_count,
-                                   /*nb_layers=*/3, wall_mode);
+                                   kMapLayers, wall_mode);
 
     // Commit all bitmaps the renderer wrote to.
     commit_bitmap(aref_or_nil(params_v, 0));   // screen_bitmap

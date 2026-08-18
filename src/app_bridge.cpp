@@ -4,7 +4,7 @@
 #include "app_bridge.h"
 
 // On non-mobile platforms app_bridge.h defines the whole API as
-// inline no-op stubs; this file must compile to nothing so the two
+// inline no-op stubs. This file must compile to nothing so the two
 // never clash if a desktop build sweeps it up.
 #if MKXPZ_MOBILE
 
@@ -48,7 +48,7 @@ static std::atomic<bool> s_terminateRequested{false};
 static std::atomic<bool> s_engineExitedCleanly{false};
 // Set when the RGSS thread didn't ack a termination request in time.
 // `mkxp_isEngineHung()` makes the UI surface a "close from app
-// switcher" alert; we can't recover the engine in-process.
+// switcher" alert. We can't recover the engine in-process.
 static std::atomic<bool> s_engineHung{false};
 static std::atomic<bool> s_glContextBroken{false};
 
@@ -141,7 +141,7 @@ struct BridgeCallback {
     }
 
     // Convenience: load + fire in one go. Args are forwarded straight
-    // to the stored function pointer; userdata is appended.
+    // to the stored function pointer. Userdata is appended.
     template <typename... Args>
     void fire(Args&&... args) noexcept {
         auto s = snapshot();
@@ -215,7 +215,7 @@ static std::string s_errorMessage;
 static BridgeCallback<mkxp_ErrorMessageCallback> s_errorMsgCb;
 
 // Info message routing: engine -> UI. Deliberate game dialogs
-// (msgbox / p) that are not errors; separate channel so the host
+// (msgbox / p) that are not errors. Separate channel so the host
 // can present them without error framing.
 static BridgeCallback<mkxp_InfoMessageCallback> s_infoMsgCb;
 
@@ -687,7 +687,7 @@ void mkxp_pushTextInput(const char *utf8) {
             while (chunk > 0 && (((unsigned char)p[chunk]) & 0xC0) == 0x80)
                 --chunk;
             if (chunk == 0) {
-                // Pathological input (continuation bytes only); bail
+                // Pathological input (continuation bytes only). Bail
                 // out rather than infinite-loop.
                 return;
             }
@@ -846,7 +846,7 @@ void mkxp_checkPause(void) {
         return;
 
     /* Pause every AL_PLAYING source. We deliberately don't detach
-     * the OpenAL context; keeping it current avoids the audio blip
+     * the OpenAL context. Keeping it current avoids the audio blip
      * Apple's implementation produces on alcMakeContextCurrent. */
     if (SharedState::instance)
         SharedState::instance->audio().pauseSources();
@@ -970,7 +970,7 @@ MKXPSyntaxTransformMode mkxp_getSyntaxTransformMode(void) {
 
 // Per-game active Ruby version. See header for rationale. "Active"
 // disambiguates from `mkxp_getRubyVersion()` which returns a string
-// for DebugOverlayView - the names look similar; treat with care.
+// for DebugOverlayView - the names look similar. Treat with care.
 static std::atomic<int> s_activeRubyVersion{MKXP_RUBY_UNSET};
 
 void mkxp_setActiveRubyVersion(MKXPRubyVersion version) {
@@ -1097,7 +1097,7 @@ void mkxp_resetSessionState(void) {
     s_fastForwardMultiplier.store(1, std::memory_order_release);
     s_cheatsEnabled.store(false, std::memory_order_release);
     // A crash-terminated session must not leak its viewport region
-    // into the next game's boot; the host re-sets it per session.
+    // into the next game's boot. The host re-sets it per session.
     s_hostViewportRegion.store(0, std::memory_order_relaxed);
     s_safeAreaInsetsChanged.store(true, std::memory_order_release);
 }
@@ -1138,7 +1138,7 @@ void mkxp_debugLog(const char *tag, const char *source, const char *message) {
 
 } // extern "C"
 
-// Internal helper; called by binding-mri.cpp, not part of the C bridge.
+// Internal helper. Called by binding-mri.cpp, not part of the C bridge.
 // Returns empty string if logging is disabled.
 std::string mkxp_getDebugLogPath(void) {
     std::lock_guard<std::mutex> lock(s_debugLogMutex);

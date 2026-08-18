@@ -24,7 +24,7 @@
 # and the skinformat=1 else branch hides the back sprite, dropping
 # the dialog's semi-transparent background. JoiPlay masks the bug
 # through looser Bitmap#dispose semantics inherited from Ruby
-# 1.9/2.1; we don't.
+# 1.9/2.1. We don't.
 #
 # Mainline Pokemon Essentials fixed this upstream by adding a
 # `RPG::Cache.retain(resolvedName)` call right after the new
@@ -42,8 +42,8 @@
 #
 # Detection heuristic: read the refcount on @customskin's bitmap
 # AFTER the original setSkin runs:
-#   - refcount == 1 -> original did NOT retain; we bump to 2
-#   - refcount  > 1 -> original already retained; skip
+#   - refcount == 1 -> original did NOT retain. We bump to 2
+#   - refcount  > 1 -> original already retained. Skip
 #   - no refcount attribute exposed -> engine is not using a
 #     refcounted cache at all, no bug to fix, skip.
 #
@@ -62,7 +62,7 @@
 # right before Main), so SpriteWindow_Base / SpriteWindow_Text /
 # etc. are guaranteed to be defined by the time we reach here.
 # The previous version wrapped this in Thread.new + sleep 0.3 ×
-# 60 to be defensive; on Ruby 1.8 native (mkxp18-merged.o) that
+# 60 to be defensive. On Ruby 1.8 native (mkxp18-merged.o) that
 # Thread spawn was hanging (green-threading interaction) and
 # defensive retry was unnecessary anyway. Plain inline is faster
 # and works on every Ruby version we target.
@@ -82,7 +82,7 @@ begin
         break
       end
     rescue NameError
-      # Constant disappeared between defined? and const_get; skip.
+      # Constant disappeared between defined? and const_get. Skip.
     end
   end
 

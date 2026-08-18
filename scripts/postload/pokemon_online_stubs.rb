@@ -29,7 +29,7 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   # modules (Downloader, GameJolt, URL probes) are left in place so
   # they can do their real work over the now-functional network
   # stack. The stubs below that *replace* game behavior only apply
-  # in offline mode; pure safety-net definitions (error-string
+  # in offline mode. Pure safety-net definitions (error-string
   # constants, FontInstaller, autosave) apply either way since they
   # neutralise Windows-only or undefined-constant crashes, not
   # networking.
@@ -79,8 +79,8 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
     end
   end
 
-  # Natural Green probes external URLs via pbGetTextFromInternet;
-  # return empty string so downstream `.split` etc. get an empty
+  # Natural Green probes external URLs via pbGetTextFromInternet.
+  # Return empty string so downstream `.split` etc. get an empty
   # array instead of nil. Offline mode only - with network access
   # the game's own implementation is left to run.
   unless network_on
@@ -97,7 +97,7 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
 
   # Top-level `autosave` no-op for PE19+ Autosave_Sapphire and
   # similar plugins. The plugin's `def autosave` lives at the top
-  # level (`Kernel#autosave`); without our stub the call site
+  # level (`Kernel#autosave`). Without our stub the call site
   # raises `NoMethodError: undefined method 'autosave' for main`.
   # Define on Kernel so it's reachable from every receiver. Variadic
   # arity in case a plugin variant passes a save slot or filename.
@@ -109,7 +109,7 @@ if defined?(PokemonSystem) && PokemonSystem.is_a?(Class)
   end
 
   # GameJolt leaderboard / trophy API. Stub every documented entry
-  # point; return sensible neutral values (nil, false, empty string,
+  # point. Return sensible neutral values (nil, false, empty string,
   # empty array) so games branching on "is the player logged in"
   # always take the offline path. Offline mode only.
   unless network_on

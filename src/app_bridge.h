@@ -5,7 +5,7 @@
 //
 // On non-mobile platforms the entire API degrades to inline no-op
 // stubs (see the bottom of this file), so engine code may call
-// mkxp_* functions unconditionally — no #ifdefs at call sites, no
+// mkxp_* functions unconditionally. No #ifdefs at call sites, no
 // link dependency on app_bridge.cpp, and zero runtime cost where no
 // host app exists.
 
@@ -15,8 +15,8 @@
 #include <stdbool.h>
 
 // MKXPZ_MOBILE - 1 on platforms where a host app embeds the engine
-// (iOS/iPadOS/tvOS), 0 elsewhere. Overridable from the build system;
-// defaults to Apple's own platform conditionals.
+// (iOS/iPadOS/tvOS), 0 elsewhere. Overridable from the build system.
+// Defaults to Apple's own platform conditionals.
 #ifndef MKXPZ_MOBILE
 #  ifdef __APPLE__
 #    include <TargetConditionals.h>
@@ -98,7 +98,7 @@ enum {
 // the no-op stubs use them).
 // ---------------------------------------------------------------------------
 
-// Lifecycle callbacks (Engine -> UI). Fire on the engine thread; UI
+// Lifecycle callbacks (Engine -> UI). Fire on the engine thread. UI
 // must dispatch to main for any UI updates.
 typedef void (*mkxp_EngineTerminatedCallback)(void *userdata);
 typedef void (*mkxp_GameRectChangedCallback)(float x, float y, float w, float h, void *userdata);
@@ -106,7 +106,7 @@ typedef void (*mkxp_GameRectChangedCallback)(float x, float y, float w, float h,
 // Key event callback (Engine -> UI, fires on background thread)
 typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 
-// Text-input mode callback (Engine -> UI); see the text-input bridge
+// Text-input mode callback (Engine -> UI). See the text-input bridge
 // section below.
 typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
 
@@ -133,7 +133,7 @@ typedef enum {
 // developer's mkxp.json stays free of host-managed keys. Default is
 // `UNSET` so desktop / test-harness builds that never call the
 // setter keep the legacy mkxp.json-driven path. Numeric values match
-// Config::syntaxTransform (0/1/2); the typed enum exists so callers
+// Config::syntaxTransform (0/1/2). The typed enum exists so callers
 // don't sprinkle magic numbers.
 typedef enum {
     MKXP_SYNTAX_TRANSFORM_UNSET     = -1,
@@ -146,7 +146,7 @@ typedef enum {
 //
 // Each Ruby version's libruby + binding is compiled separately and
 // merged into a relocatable .o with hidden symbols. At engine boot
-// the host calls the setter to pick which version to dispatch to;
+// the host calls the setter to pick which version to dispatch to.
 // main.cpp looks up `_mkxp_get_script_binding_<NN>()` from the
 // matching merged .o.
 //
@@ -160,7 +160,7 @@ typedef enum {
 // `MKXP_RUBY_30` is retained for back-compat with metadata.json
 // values written by older builds (when a native 3.0 binding shipped
 // in the merged.o set). New builds route 30 to the 3.1 binding +
-// Legacy syntax-transform mode at dispatch time; keeping the enum
+// Legacy syntax-transform mode at dispatch time. Keeping the enum
 // value here keeps old `rubyVersion: 30` JSON decoding correctly.
 typedef enum {
     MKXP_RUBY_UNSET = -1,
@@ -217,7 +217,7 @@ int         mkxp_didEngineExitCleanly(void);
 void        mkxp_setEngineExitedCleanly(void);
 
 // Set when the RGSS thread failed to respond to a termination
-// request. Engine is unrecoverable; the UI surfaces a "close from
+// request. Engine is unrecoverable. The UI surfaces a "close from
 // app switcher" alert because we can't recover in-process.
 int         mkxp_isEngineHung(void);
 void        mkxp_setEngineHung(void);
@@ -238,7 +238,7 @@ void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
 // patches.json, save metadata) outside the imported game folder so
 // the game directory stays a faithful mirror of what the user
 // imported. The host calls `mkxp_setManagedConfigDir` with the
-// per-game state path before each session; engine modules that used
+// per-game state path before each session. Engine modules that used
 // to load from cwd (Config::read, Patcher auto-discovery) check this
 // directory first and fall back to cwd only if the file isn't found.
 //
@@ -250,14 +250,14 @@ const char *mkxp_getManagedConfigDir(void);
 // In-memory config overlay (UI -> Engine).
 //
 // A JSON object the host merges over the base mkxp.json at config-
-// read time; overlay keys win per TOP-LEVEL key (shallow merge: an
+// read time. Overlay keys win per TOP-LEVEL key (shallow merge: an
 // overlay `bindingNames` replaces the whole object). JSON null
 // values neutralize a key so the engine's guarded reads fall back to
 // defaults. Lets hosts override config keys per session without
-// mutating the developer's on-disk file — same idea as the existing
+// mutating the developer's on-disk file. Same idea as the existing
 // per-session bridge setters, generalized.
 //
-// Set before each session start; NULL or "" clears any previous
+// Set before each session start. NULL or "" clears any previous
 // overlay. Reject inputs over 1 MiB (warn log, keep previous state).
 void        mkxp_setConfigOverlayJSON(const char *jsonUTF8);
 const char *mkxp_getConfigOverlayJSON(void);
@@ -281,7 +281,7 @@ const char *mkxp_getUserDataDirectory(void);
 // "Fonts" mountpoint (game-own files keep priority) so its fonts
 // load for every game, and the preload compatibility layer routes
 // Windows-style "<SystemRoot>\Fonts\<file>" writes (Essentials'
-// FontInstaller) into it. Unset = no shared pool; per-game fonts
+// FontInstaller) into it. Unset = no shared pool. Per-game fonts
 // only.
 void        mkxp_setSharedFontsDirectory(const char *path);
 const char *mkxp_getSharedFontsDirectory(void);
@@ -296,7 +296,7 @@ const char *mkxp_getSharedFontsDirectory(void);
 //                          identifier: [A-Za-z_][A-Za-z0-9_]*)
 //
 // This is the same detection contract JoiPlay established with its
-// `$joiplay` global; each host declares its own name so games and
+// `$joiplay` global. Each host declares its own name so games and
 // patches can branch on the specific launcher. Set once before the
 // engine boots. Pass NULL/"" to clear (no globals are defined).
 void        mkxp_setLauncherIdentity(const char *name);
@@ -311,7 +311,7 @@ const char *mkxp_getLauncherIdentity(void);
 // the engine starts, like the launcher identity.
 //
 // When unset, TLS connections fail closed (certificate verification
-// has no roots to succeed against) — plain http still works.
+// has no roots to succeed against). Plain http still works.
 void        mkxp_setCABundlePath(const char *path);
 const char *mkxp_getCABundlePath(void);
 
@@ -319,7 +319,7 @@ const char *mkxp_getCABundlePath(void);
 //
 // Games request text input via `Input.text_input = true`, which calls
 // `SDL_StartTextInput()` inside EventThread. The mode callback fires
-// from the main thread on state changes; iOS uses it to auto-show
+// from the main thread on state changes. iOS uses it to auto-show
 // the system keyboard.
 //
 // `mkxp_pushTextInput` is the inverse: the soft keyboard's
@@ -390,13 +390,13 @@ bool        mkxp_consumeSafeAreaInsetsChanged(void);
 // The host may confine the game picture to a sub-rectangle of the
 // window. x/y/w/h are fractions of the window in [0,1], top-left
 // origin. isPortrait tags the orientation the region was computed
-// for; the engine draws automatic placement while the window
+// for. The engine draws automatic placement while the window
 // orientation does not match (rotation safety). With fixed aspect
 // ratio on (the default), the picture aspect-fits centered inside
-// the region; with it off, the picture stretches to fill the
+// the region. With it off, the picture stretches to fill the
 // region, mirroring the no-region path. The vertical-alignment
 // preset and the safe-area insets apply only on the no-region path.
-// Sets the relayout flag; the engine applies the region at its next
+// Sets the relayout flag. The engine applies the region at its next
 // relayout poll.
 void        mkxp_setHostViewportRegion(float x, float y, float w, float h,
                                        bool isPortrait);
@@ -412,14 +412,14 @@ bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
 float       mkxp_getScreenScale(void);
 
 // SDL's UIKit UIWindow*, or NULL before the engine creates its window.
-// Owned by SDL; do not retain. For embedding host controls in the
+// Owned by SDL. Do not retain. For embedding host controls in the
 // same window stack as the game view on iOS.
 void       *mkxp_getSDLUIKitWindow(void);
 
 // Per-game settings (UI -> Engine), set by the host before engine
 // boot and read by the engine during the run.
 //
-// Prefer `mkxp_applySessionConfig()` for pre-boot settings; it
+// Prefer `mkxp_applySessionConfig()` for pre-boot settings. It
 // groups the fields the host sets together on every launch. Individual
 // setters remain for mid-session toggles and legacy call sites.
 
@@ -447,14 +447,14 @@ void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
 // Force the Pokemon Essentials in-game keyboard scene, overriding
 // the iOS soft keyboard. Default false (soft keyboard). Flip on for
 // games whose keyboard scene adds custom keys the soft keyboard
-// can't drive; `pokemon_input.rb` re-applies the historical
+// can't drive. `pokemon_input.rb` re-applies the historical
 // `USEKEYBOARDTEXTENTRY = false` overrides when this is set.
 void mkxp_setUseInGameKeyboard(bool enabled);
 bool mkxp_getUseInGameKeyboard(void);
 
 // JoiPlay-compat signal (`$joiplay = true` in the game's Ruby VM).
 // Several games ship JoiPlay-specific patches that branch on the
-// global; whether those help or hurt depends on the game, so the
+// global. Whether those help or hurt depends on the game, so the
 // host decides per boot. Default false. `platform_compat.rb` reads
 // this via `System.joiplay_compat?` before game scripts load.
 void mkxp_setJoiplayCompat(bool enabled);
@@ -475,7 +475,7 @@ void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);
 
 // Cheat menu toggle (UI -> Engine). The postload layer reads the
-// current value each update; Ruby reassigns $CHEATS from the bridge
+// current value each update. Ruby reassigns $CHEATS from the bridge
 // so the toggle takes effect mid-game without re-entering scripts.
 void        mkxp_setCheatsEnabled(bool enabled);
 bool        mkxp_getCheatsEnabled(void);
@@ -483,15 +483,15 @@ bool        mkxp_getCheatsEnabled(void);
 /* Controls whether the engine consumes SDL game-controller events
  * for its built-in input bindings. Hosts that implement their own
  * physical-controller handling disable this to avoid double input.
- * Default: enabled. Must be set before or during session start;
- * takes effect immediately. */
+ * Default: enabled. Must be set before or during session start.
+ * Takes effect immediately. */
 void        mkxp_setGameControllerCaptureEnabled(bool enabled);
 bool        mkxp_getGameControllerCaptureEnabled(void);
 
 /* Controls whether touch-synthesized SDL mouse events
  * (which == SDL_TOUCH_MOUSEID) are delivered to the engine input
  * layer. Default: false = upstream behavior (touch never synthesizes
- * mouse input); hosts that want touch-as-mouse set it true. */
+ * mouse input). Hosts that want touch-as-mouse set it true. */
 void        mkxp_setTouchMouseEnabled(bool enabled);
 bool        mkxp_getTouchMouseEnabled(void);
 
@@ -504,7 +504,7 @@ void        mkxp_getViewportBoundsColor(float *r, float *g, float *b, float *a);
 void        mkxp_setErrorMessage(const char *message);
 
 /* Present an error in the host UI and block the calling thread until
- * the user dismisses the alert. iOS only; no-op elsewhere. */
+ * the user dismisses the alert. iOS only. No-op elsewhere. */
 void        mkxp_presentErrorAndWait(const char *message);
 
 /* Called by the host UI when the user dismisses an error alert that
@@ -527,7 +527,7 @@ void        mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *use
 // mirroring mkxp_presentErrorAndWait.
 
 /* Present an informational message in the host UI and block the
- * calling thread until the user dismisses it. iOS only; fires the
+ * calling thread until the user dismisses it. iOS only. Fires the
  * info callback without blocking elsewhere. */
 void        mkxp_presentInfoAndWait(const char *message);
 
@@ -615,10 +615,10 @@ int         mkxp_debugLogEnabled(void);
 // ---------------------------------------------------------------------------
 // Inert stubs (desktop and every non-mobile platform).
 //
-// Engine code calls mkxp_* unconditionally; here each call collapses
+// Engine code calls mkxp_* unconditionally. Here each call collapses
 // to an inline no-op the compiler deletes. Getter defaults are chosen
 // to reproduce stock desktop mkxp-z behavior, NOT the mobile bridge's
-// boot defaults — where the two differ (networkEnabled, vertical
+// boot defaults, where the two differ (networkEnabled, vertical
 // alignment) the stub comment says why.
 // ---------------------------------------------------------------------------
 
@@ -700,7 +700,7 @@ static inline MKXPRubyVersion  mkxp_getActiveRubyVersion(void) { return MKXP_RUB
 
 static inline void        mkxp_applySessionConfig(const MKXPSessionConfig *config) { (void)config; }
 
-// Desktop has no soft keyboard; a game's own keyboard scene is the
+// Desktop has no soft keyboard. A game's own keyboard scene is the
 // only text-entry path, so "use in-game keyboard" is trivially true.
 static inline bool        mkxp_getUseInGameKeyboard(void) { return true; }
 static inline void        mkxp_setUseInGameKeyboard(bool enabled) { (void)enabled; }
@@ -726,7 +726,7 @@ static inline void        mkxp_getViewportBoundsColor(float *r, float *g, float 
 { if (r) *r = 0; if (g) *g = 0; if (b) *b = 0; if (a) *a = 1; }
 
 // Error/info surfaces: desktop presents through SDL message boxes at
-// the call sites that own them; the bridge routes are inert.
+// the call sites that own them. The bridge routes are inert.
 static inline void        mkxp_setErrorMessage(const char *message) { (void)message; }
 static inline void        mkxp_presentErrorAndWait(const char *message) { (void)message; }
 static inline void        mkxp_signalErrorDismissed(void) {}

@@ -18,8 +18,8 @@
 #
 # The facade class itself binds to the `Net::HTTP` constant LAZILY,
 # through `Net.const_missing`. Berka's downloader (Pokemon Daybreak
-# and friends) declares `module Net; module HTTP` at script load;
-# with an eagerly defined class in place, that declaration dies with
+# and friends) declares `module Net; module HTTP` at script load.
+# With an eagerly defined class in place, that declaration dies with
 # "HTTP is not a module" (TypeError). Lazy binding lets a game that
 # defines its own Net::HTTP own the constant, while a game that
 # only references Net::HTTP gets the facade on first use. The cost:
@@ -29,10 +29,10 @@
 #
 # Deliberate deviations from real Net::HTTP, all on the "keep old
 # games running" side:
-# - One-shot connections: `start` doesn't hold a socket open;
-#   each request is an independent native call.
+# - One-shot connections: `start` doesn't hold a socket open.
+#   Each request is an independent native call.
 # - `read_body` with a block yields the whole body as one chunk
-#   (the native client buffers; per-chunk streaming isn't worth the
+#   (the native client buffers, per-chunk streaming isn't worth the
 #   C plumbing for progress-bar use cases - HTTPLite.download covers
 #   real streaming).
 # - Timeout setters store their value but the native client's own
@@ -103,7 +103,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
         ctype && ctype.split(';').first
       end
 
-      # `value` raises on non-2xx like the real thing; games use it
+      # `value` raises on non-2xx like the real thing. Games use it
       # as a quick "did this work" assert.
       def value
         return nil if code_type_success?
@@ -143,7 +143,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
     end
 
     # Marker classes for is_a? dispatch above. Games never
-    # instantiate these; responses are always Net::HTTPResponse.
+    # instantiate these. Responses are always Net::HTTPResponse.
     class HTTPSuccess < HTTPResponse; end
     class HTTPOK < HTTPSuccess; end
     class HTTPRedirection < HTTPResponse; end
@@ -186,7 +186,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
       end
 
       def basic_auth(user, password)
-        # pack('m') is base64; strip the newlines pack inserts.
+        # pack('m') is base64. Strip the newlines pack inserts.
         encoded = ["#{user}:#{password}"].pack('m').delete("\n")
         @headers['Authorization'] = "Basic #{encoded}"
       end
@@ -420,7 +420,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
     HTTPGenericRequest = HTTPRequestBase
 
     # Lazy binding for the HTTP constant: first real reference
-    # installs the facade; a game-defined `module Net; module HTTP`
+    # installs the facade. A game-defined `module Net; module HTTP`
     # never triggers const_missing and simply owns the constant.
     # Everything else falls through to the global stub hook in
     # platform_compat.rb.
@@ -431,7 +431,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
     end
   end
 
-  # Games rescue SocketError on connection failures; define it when
+  # Games rescue SocketError on connection failures. Define it when
   # the socket ext isn't registered so those rescue clauses resolve
   # to a real exception class instead of a const_missing stub.
   class SocketError < StandardError; end unless defined?(SocketError)
@@ -453,7 +453,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
 
   # These VMs have no real openssl ext (the era exts predate
   # OpenSSL 3 and cannot build). The engine's MKXPCrypto binding
-  # exposes libcrypto's EVP one-shots instead; this facade builds
+  # exposes libcrypto's EVP one-shots instead. This facade builds
   # the familiar OpenSSL::Cipher / Digest / HMAC / PKCS5 / Random
   # API on top so crypto-dependent game code (rubyzip-AES updaters,
   # HMAC-signed APIs) runs identically on every VM. Without the
@@ -654,7 +654,7 @@ if RUBY_VERSION < '2' && defined?(HTTPLite)
         end
 
         def block_size
-          # Good enough for the buffer-sizing games do; EVP block
+          # Good enough for the buffer-sizing games do. EVP block
           # size differs only for stream modes where callers never
           # depend on it.
           16

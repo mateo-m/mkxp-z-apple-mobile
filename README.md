@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-GPLv2%2B-blue.svg)](#license)
 [![Upstream](https://img.shields.io/badge/upstream-mkxp--z-blue.svg)](https://github.com/mkxp-z/mkxp-z)
 
-This fork powers [Empo](https://github.com/mateo-m/empo-app), the iOS / iPadOS RPG Maker player. Upstream mkxp-z doesn't target mobile Apple platforms; this fork has diverged enough that upstream convergence is no longer a goal, though individual fixes still land upstream as targeted patches.
+This fork powers [Empo](https://github.com/mateo-m/empo-app), the iOS and iPadOS RPG Maker player. Upstream mkxp-z does not target Apple mobile platforms. This fork now differs too much to merge back, but single fixes still go upstream as separate patches.
 
 ## Table of Contents
 
@@ -19,50 +19,50 @@ This fork powers [Empo](https://github.com/mateo-m/empo-app), the iOS / iPadOS R
 
 ## Background
 
-The original mkxp-z runs RPG Maker XP / VX / VX Ace games on desktop Linux, macOS, and Windows. iOS adds constraints that desktop builds never have to think about:
+The original mkxp-z runs RPG Maker XP, VX, and VX Ace games on desktop Linux, macOS, and Windows. iOS adds limits that desktop builds never meet:
 
-- Apps can't kill themselves and respawn between games. SDL, the GL context, OpenAL, and the active Ruby VM stay alive for the entire process lifetime.
-- Apple deprecated OpenGL ES in iOS 12 and the legacy EAGL path crashed on rotation, so this fork renders through ANGLE (OpenGL ES on top of Metal) exclusively.
-- App Store review rules forbid programmatic process termination anywhere in the codebase.
-- RPG Maker games span four Ruby generations (1.8, 1.9, 3.0, 3.1) and a single host Ruby can't cover all of them.
+- An app cannot stop and restart itself between games. SDL, the GL context, OpenAL, and the running Ruby VM stay alive for the whole process.
+- Apple made OpenGL ES obsolete in iOS 12, and the old EAGL path crashed on rotation. This fork therefore draws only through ANGLE, which runs OpenGL ES on top of Metal.
+- App Store review rules do not let any code stop the process.
+- RPG Maker games use four Ruby generations (1.8, 1.9, 3.0, 3.1), and one Ruby cannot run all of them.
 
-This fork addresses each of those plus the usual Apple-platform quirks (CAMetalLayer rotation, AVAudioSession coordination, screen-FBO capture timing for SwiftUI pause snapshots).
+This fork answers each of those. It also handles the usual Apple-platform problems: CAMetalLayer rotation, AVAudioSession timing, and screen-FBO capture for SwiftUI pause snapshots.
 
 ## Highlights
 
-- **Multi-Ruby native dispatch.** Four Ruby interpreters (1.8, 1.9, 3.0, 3.1) ship in the binary as per-version merged `.o` files with hidden symbol islanding. The host picks which one to dispatch to per game via `mkxp_setActiveRubyVersion()`. Vintage RGSS1 games run on actual Ruby 1.8; modern mkxp-z forks run on 3.1.
-- **Persistent engine state.** SDL, the ANGLE EGL context, OpenAL, and the active Ruby VM survive the entire process lifetime. Sessions reuse one set of resources.
-- **ANGLE rendering.** OpenGL ES over Metal. The legacy EAGL path was removed.
-- **Syntax-transform patches on Ruby 3.1.** Mixed-grammar Pokemon Essentials forks (1.8 syntax + 1.9+ runtime methods) parse on Ruby 3.1's VM with the [PR #304](https://github.com/mkxp-z/mkxp-z/pull/304) patches applied. Activated per game via `mkxp_setSyntaxTransformMode()`.
-- **`src/app_bridge.h`.** Small C ABI that the SwiftUI host calls into for pause, resume, input injection, game-path handoff, and similar lifecycle operations. The host never touches engine internals.
-- **Clean exit handling.** `Kernel.exit!` and `Process.exit!` redirect to `Kernel.exit` so the engine catches `SystemExit`. App Store guideline 2.5.1 forbids programmatic process termination, so the engine sets a clean-exit flag and the host shows an alert instead of killing the process.
+- **Three Ruby versions in one binary.** Ruby 1.8, 1.9, and 3.1 ship as merged `.o` files, one per version, with their symbols hidden so the copies cannot clash. The host picks one per game with `mkxp_setActiveRubyVersion()`. Old RGSS1 games run on real Ruby 1.8. Newer mkxp-z games run on 3.1, which also covers games built for Ruby 3.0.
+- **Engine state stays alive.** SDL, the ANGLE EGL context, OpenAL, and the running Ruby VM last for the whole process. Every session reuses the same set of resources.
+- **ANGLE drawing.** OpenGL ES on top of Metal. The old EAGL path is gone.
+- **Syntax patches on Ruby 3.1.** The [PR #304](https://github.com/mkxp-z/mkxp-z/pull/304) patches let Pokemon Essentials games that mix 1.8 syntax with newer methods parse on Ruby 3.1. The host turns them on per game with `mkxp_setSyntaxTransformMode()`.
+- **`src/app_bridge.h`.** A small C interface that the SwiftUI host calls for pause, resume, input, game paths, and similar session steps. The host never reaches into engine internals.
+- **Clean exit.** `Kernel.exit!` and `Process.exit!` redirect to `Kernel.exit`, so the engine catches `SystemExit`. App Store rule 2.5.1 does not let code stop the process, so the engine raises a clean-exit flag and the host shows an alert instead.
 
 ## Layout
 
 ```text
-binding/         Ruby C extension layer (per-version compiled)
-src/             Engine core (graphics, audio, input, scripting bridge)
-src/theoraplay/  Vendored ogg/theora decoder (upstream)
-syntax-transform/3.1/   Ruby 3.1 parser patches for legacy grammar
-scripts/         Ruby preload + postload shims
+binding/         Ruby C extension layer, compiled once per version
+src/             Engine core (graphics, audio, input, script bridge)
+src/theoraplay/  Vendored ogg and theora decoder (upstream)
+syntax-transform/3.1/   Ruby 3.1 parser patches for older grammar
+scripts/         Ruby scripts that load before and after the game
 hmode7/          H-Mode7 native port (git submodule)
 ```
 
 ## Build
 
-This engine is consumed as a git submodule by [empo-app](https://github.com/mateo-m/empo-app), which builds it via Xcode along with the app shell, dependency libraries, and packaging. **It does not build standalone.** Refer to the empo-app README for build instructions.
+[empo-app](https://github.com/mateo-m/empo-app) includes this engine as a git submodule. Xcode builds it there together with the app, the dependency libraries, and the packaging steps. **It does not build on its own.** See the empo-app README for the build steps.
 
-Desktop builds (macOS / Linux / Windows) are not supported. Desktop-specific code paths, build system files (meson, platform Makefiles, the macOS Xcode project), and platform shims have all been removed. Use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) for desktop.
+This fork does not build for macOS, Linux, or Windows. The desktop code, the desktop build files (meson, platform Makefiles, the macOS Xcode project), and the desktop stand-ins are all removed. Use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) for desktop.
 
 ## Contributing
 
-Issues and PRs welcome on [GitHub](https://github.com/mateo-m/mkxp-z-apple-mobile/issues). Most engine-level changes happen in lockstep with the [empo-app](https://github.com/mateo-m/empo-app) host; coordinate through an issue first if you're proposing a change to `src/app_bridge.h` or anything else that crosses the host boundary.
+Issues and PRs are welcome on [GitHub](https://github.com/mateo-m/mkxp-z-apple-mobile/issues). Most engine changes land together with a change in the [empo-app](https://github.com/mateo-m/empo-app) host. If you plan to change `src/app_bridge.h`, or anything else the host calls, open an issue first.
 
-When opening a PR:
+When you open a PR:
 
 - Run `bun install` once so LeftHook installs the local hooks.
-- Build green via the empo-app build pipeline.
-- Match the existing code style; no formatter is enforced.
+- Get a green build through the empo-app build pipeline.
+- Match the code style around you. No formatter runs on this repo.
 - Reference any related issue.
 
 ## License

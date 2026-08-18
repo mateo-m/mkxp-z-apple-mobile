@@ -69,7 +69,7 @@ class Window_GetItem < Window_Selectable
       opacity = contents.font.color == normal_color ? 255 : 128
       contents.blt(x, y + 4, bitmap, Rect.new(0, 0, 24, 24), opacity)
     rescue StandardError
-      # Icon name missing on this RPG Maker XP build; skip the icon.
+      # Icon name missing on this RPG Maker XP build. Skip the icon.
     end
     contents.draw_text(x + 28, y, 212, 32, item.name, 0)
     contents.draw_text(x + 240, y, 88, 32, item.price.to_s, 2)
@@ -79,7 +79,7 @@ end
 
 class Scene_Cheat
   # rubocop:disable Metrics/AbcSize -- builds the full menu set
-  # in one pass; splitting the windows would scatter related
+  # in one pass. Splitting the windows would scatter related
   # state across many helper methods.
   def main
     @cheat_window = Window_Command.new(160, ['Level Up', 'Gain Gold', 'Get Items', 'Cancel'])
@@ -301,11 +301,11 @@ end
 # Object-rooted Game_Player constant in place. When the game's
 # own `Scripts/Game_Player.rb` later runs with
 # `class Game_Player < Game_Character`, Ruby detects
-# `superclass mismatch` and raises TypeError; Reborn's
+# `superclass mismatch` and raises TypeError. Reborn's
 # ScriptLoader rescues + logs and proceeds, so the game keeps
 # running with a half-defined Game_Player that has no `moveto`
 # of its own. A later script (or the scene chain) then defines
-# `moveto` via a separate reopen; `super` in that moveto fails
+# `moveto` via a separate reopen. `super` in that moveto fails
 # because the superclass chain doesn't include Game_Character.
 #
 # Symptom: `Save Data/errorlog.txt` fills with
