@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # Unit tests for the alias-era save recovery guards in
-# platform_compat.rb: the cwd gate, the symlink-proof identity
+# windows_fs.rb: the cwd gate, the symlink-proof identity
 # guard, artifact exclusion, and unique collision backups.
 #
 # The defect these tests pin: on iOS the host config spells the
@@ -44,11 +44,11 @@ def ensure_ruby31_compat_aliases!
   end
 end
 
-# Loads (or reloads) platform_compat.rb with the data dir set to
+# Loads (or reloads) windows_fs.rb with the data dir set to
 # `data_dir`. Loading must happen with the cwd at GAME: the file
 # captures the game root from the cwd, exactly like the engine
 # boot does.
-def load_platform_compat!(data_dir)
+def load_windows_fs!(data_dir)
   ensure_ruby31_compat_aliases!
   Object.send(:remove_const, :System) if defined?(System)
   Object.const_set(:System, Module.new do
@@ -68,7 +68,7 @@ def load_platform_compat!(data_dir)
   $VERBOSE = nil
   begin
     Dir.chdir(GAME) do
-      load File.join(ROOT, 'scripts', 'preload', 'platform_compat.rb')
+      load File.join(ROOT, 'scripts', 'preload', 'windows_fs.rb')
     end
   ensure
     $VERBOSE = prev_verbose
@@ -106,7 +106,7 @@ end
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Game.rxdata'), 'latest save')
 File.write(File.join(USERDATA_REAL, 'Game.rxdata.bak'), 'backup save')
-load_platform_compat!("#{USERDATA_ALIAS}/")
+load_windows_fs!("#{USERDATA_ALIAS}/")
 
 globbed = Dir.chdir("#{USERDATA_ALIAS}/") { Dir.glob('*').sort }
 assert_eq(globbed, ['Game.rxdata', 'Game.rxdata.bak'], 'glob inside symlink-spelled data dir lists saves')
@@ -130,7 +130,7 @@ assert_eq(
 # Save (absolute path through the symlink), enumerate, save again,
 # enumerate again: names and bytes must hold through every step.
 reset_workspace!
-load_platform_compat!("#{USERDATA_ALIAS}/")
+load_windows_fs!("#{USERDATA_ALIAS}/")
 
 File.binwrite("#{USERDATA_ALIAS}/Game.rxdata", 'first save')
 Dir.chdir("#{USERDATA_ALIAS}/") { Dir.glob('*') }
@@ -151,7 +151,7 @@ reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Game.rxdata'), 'root save')
 elsewhere = File.join(GAME, 'Mods')
 FileUtils.mkdir_p(elsewhere)
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 Dir.chdir(elsewhere) { Dir.glob('Game.rxdata') }
 assert_eq(raw_entries(elsewhere), [], 'no save teleported into a non-root cwd')
@@ -161,7 +161,7 @@ assert_eq(raw_entries(USERDATA_REAL), ['Game.rxdata'], 'root save stays put')
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Save12.rxdata'), 'stranded slot')
 File.write(File.join(USERDATA_REAL, 'Keep.rxdata'), 'not matched')
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 # A non-matching pattern must move nothing.
 Dir.chdir(GAME) { Dir.glob('Other*.rxdata') }
@@ -190,7 +190,7 @@ assert_eq(
 # Dir[] shares the glob recovery. Ancient slot pickers use both.
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Save03.rxdata'), 'bracket slot')
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 Dir.chdir(GAME) { Dir['Save*.rxdata'] }
 assert_true(
@@ -203,7 +203,7 @@ reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Game.rxdata'), 'stranded root save')
 elsewhere2 = File.join(GAME, 'SubShop')
 FileUtils.mkdir_p(elsewhere2)
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 Dir.chdir(elsewhere2) do
   begin
@@ -231,7 +231,7 @@ assert_false(
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Game.rxdata.pre-literal.bak'), 'chained victim')
 File.write(File.join(USERDATA_REAL, 'Game.rxdata.pre-literal.bak.pre-literal.bak'), 'chained twice')
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 assert_false(MKXPSaveFS.save_filename?('Game.rxdata.pre-literal.bak'), 'chained name is not save-shaped')
 assert_false(MKXPSaveFS.save_filename?('Game.rxdata.pre-literal-2.bak'), 'numbered backup is not save-shaped')
@@ -245,7 +245,7 @@ assert_eq(
 # --- Self-identity bail in the migration itself ---
 reset_workspace!
 File.write(File.join(USERDATA_REAL, 'Game.rxdata'), 'the one save')
-load_platform_compat!("#{USERDATA_ALIAS}/")
+load_windows_fs!("#{USERDATA_ALIAS}/")
 
 MKXPSaveFS.migrate_save_file(
   File.join(USERDATA_ALIAS, 'Game.rxdata'),
@@ -270,7 +270,7 @@ now = Time.now
 set_mtime(old, now - 300)
 set_mtime(mid, now - 200)
 set_mtime(dst, now - 100)
-load_platform_compat!("#{USERDATA_REAL}/")
+load_windows_fs!("#{USERDATA_REAL}/")
 
 MKXPSaveFS.migrate_save_file(old, dst)
 MKXPSaveFS.migrate_save_file(mid, dst)
