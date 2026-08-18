@@ -188,10 +188,81 @@ unless $PokemonSystem.nil?
       jpress?(button)
     end
 
+    # Fan games put hotkey handling inside their own `Input.update`.
+    # Pokemon Rejuvenation toggles turbo (T), mute (M), and the
+    # screenshot key (F3) there, and reads the gamepad triggers for
+    # its dynamic turbo. Defining `update` here replaced that method
+    # and every key it served went dead.
+    #
+    # So keep the game's method and call it. A game that overrides
+    # `update` aliases the previous one first, so the chain usually
+    # ends at the engine's own update. A game with no override of its
+    # own leaves that update in place, which is what `jupdate` calls
+    # anyway. Games that break the chain are handled below.
+    #
+    # The guard matters: without it a second load would alias the
+    # method below to itself and recurse forever.
+    class << self
+      alias mkxp_chained_update update unless method_defined?(:mkxp_chained_update)
+    end
+
     def self.update
       @mkxp_read = nil
       @mkxp_release_read = nil
-      jupdate
+      idle_before = mkxp_engine_idle_time
+      mkxp_chained_update
+      jupdate if mkxp_engine_update_missing?(idle_before)
+    end
+
+    # Seconds since the engine last refreshed its input state. The
+    # engine stamps that time inside its own update, so this value
+    # tells us whether the update ran.
+    def self.mkxp_engine_idle_time
+      delta
+    rescue StandardError
+      nil
+    end
+
+    # Some games replace `Input.update` with a Win32 polling loop that
+    # never reaches the engine. Pokemon Insurgence is one of them. We
+    # already replaced the predicates that loop feeds, so the chain
+    # gives the engine nothing, and every read below would freeze on
+    # the same frame forever.
+    #
+    # A game that chains correctly cuts the idle time down on every
+    # call, because the engine update runs inside the chain. A game
+    # that does not leaves the idle time where it was, or higher.
+    # Count those frames, and after a short run take the engine
+    # update back.
+    #
+    # The count must reach a limit first. One stale frame is possible
+    # in a healthy game, when the game calls `Input.update` twice in
+    # one frame and does work between the engine update and its
+    # return. A single extra engine update would throw away the
+    # trigger edges of that frame.
+    def self.mkxp_engine_update_missing?(idle_before)
+      return true if @mkxp_engine_needs_update
+
+      idle_after = mkxp_engine_idle_time
+      if idle_before.nil? || idle_after.nil?
+        # The idle time is not readable, so the chain cannot be
+        # measured. Keep the engine fed: a lost trigger edge costs
+        # less than dead input.
+        @mkxp_engine_needs_update = true
+        return true
+      end
+
+      if idle_after >= idle_before
+        @mkxp_stale_updates = (@mkxp_stale_updates || 0) + 1
+        # Ten frames in a row. A healthy chain feeds the engine on
+        # every frame, so a short run is enough to tell the two
+        # shapes apart.
+        @mkxp_engine_needs_update = true if @mkxp_stale_updates >= 10
+      else
+        @mkxp_stale_updates = 0
+      end
+
+      @mkxp_engine_needs_update == true
     end
 
     def self.press?(button)
