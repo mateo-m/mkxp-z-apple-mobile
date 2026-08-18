@@ -89,7 +89,7 @@ module Win32API_Impl
 
     # Convert UTF-16LE bytes to a single-byte/multi-byte encoding
     # (typically UTF-8). Vinemon's `Zeus::Encode` round-trips
-    # every MCI command and result through this; without a real
+    # every MCI command and result through this. Without a real
     # conversion the round-trip yields an empty string and the
     # caller's `str.index("\0")` returns nil, raising TypeError
     # on `str[0, nil]`.
@@ -130,7 +130,7 @@ module Win32API_Impl
     # script that depends on it works.
     class MultiByteToWideChar
       # rubocop:disable Metrics/AbcSize -- mirrors Win32
-      # MultiByteToWideChar's signature; the per-arg validation +
+      # MultiByteToWideChar's signature. The per-arg validation +
       # encode round-trip is inherent to the API.
       def call(args)
         codepage = args[0].to_i

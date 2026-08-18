@@ -18,7 +18,7 @@
 # wrapper and recurse forever.
 #
 # VX/Ace variants bind under the same Ruby names (WindowVX ->
-# Window, TilemapVX -> Tilemap); setters a variant lacks (e.g.
+# Window, TilemapVX -> Tilemap). Setters a variant lacks (e.g.
 # Window#stretch on VX) are skipped by the method_defined? guard.
 {
   'Font' => %w[bold italic shadow outline],

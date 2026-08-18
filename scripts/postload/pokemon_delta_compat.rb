@@ -12,11 +12,11 @@
 # the Unreal Time plugin advances its in-game clock by it, weather
 # fades scale by it, phone-call timers count down by it. Feeding them
 # microseconds runs every delta-timed effect about a million times
-# too fast — the visible symptom is day/night overlays and tints
+# too fast. The visible symptom is day/night overlays and tints
 # strobing every few frames on outdoor maps.
 #
 # v21 games declare the engine they were built against in
-# Essentials::MKXPZ_VERSION (e.g. "2.4.2/c9378cf"); v20 and older
+# Essentials::MKXPZ_VERSION (e.g. "2.4.2/c9378cf"). v20 and older
 # don't define the constant at all. Convert to seconds exactly when
 # the declared target is >= 2.4.2, so pre-2.4.2 games keep the
 # microsecond unit their own wrappers require.

@@ -97,7 +97,7 @@ if defined?(MKXP) && MKXP.respond_to?(:rpg_version) && MKXP.rpg_version > 2
 end
 
 # Bitmap#exportBitmap is called by several plugins to dump a
-# screenshot PNG; route through engine Graphics.screenshot which
+# screenshot PNG. Route through engine Graphics.screenshot which
 # knows how to write to the sandboxed cache dir.
 class Bitmap
   def exportBitmap(fn, _type, _back = nil)
@@ -131,7 +131,7 @@ end
 # --- tktk_bitmap no-op ---
 # HN_Light and a few other plugins require tktk_bitmap's
 # blend_blt. The real implementation does per-pixel blending via
-# a Win32 DLL; no-op is safer than crashing.
+# a Win32 DLL. No-op is safer than crashing.
 module TKTK_Bitmap
   # rubocop:disable Metrics/ParameterLists -- matches the upstream
   # tktk_bitmap signature game scripts call.
@@ -161,7 +161,7 @@ begin
     end
   end
 rescue StandardError
-  # MOG plugin not loaded; nothing to patch.
+  # MOG plugin not loaded. Nothing to patch.
 end
 
 # --- YSE Patch System quit_fake suppression ---
@@ -171,7 +171,7 @@ end
 begin
   YSE::PATCH_SYSTEM::LOAD_CONFIGURATION[:quit_fake] = false if defined?(YSE::PATCH_SYSTEM::LOAD_CONFIGURATION)
 rescue StandardError
-  # YSE patch system not loaded; nothing to disable.
+  # YSE patch system not loaded. Nothing to disable.
 end
 
 # --- KGC BitmapExtension default ---
@@ -229,7 +229,7 @@ begin
     def draw_save_bitmap; end
   end
 rescue StandardError
-  # ZiifSaveLayoutA plugin not loaded; nothing to patch.
+  # ZiifSaveLayoutA plugin not loaded. Nothing to patch.
 end
 
 # --- HN_Light / Sprite_Dark inert shells ---
@@ -262,7 +262,7 @@ begin
     def refresh; end
   end
 rescue StandardError
-  # HN_Light Sprite_Dark not in scope; nothing to stub.
+  # HN_Light Sprite_Dark not in scope. Nothing to stub.
 end
 
 # --- InputMouse module stub ---
@@ -283,7 +283,7 @@ module InputMouse
   end
 
   # rubocop:disable Naming/PredicateMethod
-  # `set_pos` mirrors the upstream InputMouse plugin API; returns
+  # `set_pos` mirrors the upstream InputMouse plugin API. Returns
   # false to mean "not supported on this platform".
   def self.set_pos(_x, _y)
     false

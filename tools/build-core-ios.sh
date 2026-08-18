@@ -2,7 +2,7 @@
 # Build libmkxpz-core.a - the engine-core static library (everything
 # under src/: renderer, audio, event loop, filesystem, host bridge) -
 # for one Apple SDK. The Ruby binding half (binding/ + hmode7/) is NOT
-# included; it links against a specific libruby and is built separately
+# included. It links against a specific libruby and is built separately
 # by its consumer (e.g. the Empo launcher's mkxp*-merged.o targets).
 #
 # This script is the single source of truth for compiling the engine
@@ -72,7 +72,7 @@ AR="$(xcrun --sdk "$SDK" -f ar)"
 RANLIB="$(xcrun --sdk "$SDK" -f ranlib)"
 
 # Compiler launcher: use ccache when available (CORE_NO_CCACHE=1
-# opts out). Purely a speed layer — output is identical.
+# opts out). Purely a speed layer. Output is identical.
 LAUNCHER=""
 if [ "${CORE_NO_CCACHE:-0}" != "1" ] && command -v ccache >/dev/null 2>&1; then
     LAUNCHER="ccache"
@@ -135,7 +135,7 @@ needs_rebuild() {
     [ -f "$1" ] || return 0
     [ "$ENGINE/$2" -nt "$1" ] && return 0
     # Any engine header newer than the object invalidates it (headers
-    # define shared struct layouts; a coarse check beats silent UB).
+    # define shared struct layouts, a coarse check beats silent UB).
     [ -n "$(find "$ENGINE/src" -name '*.h' -newer "$1" -print | head -n 1)" ]
 }
 

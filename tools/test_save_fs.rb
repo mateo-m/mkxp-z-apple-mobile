@@ -13,7 +13,7 @@ require 'fileutils'
 # case-sensitive host the simulation collides with the real disk -
 # mkdir_p('audio/...') resolves onto the existing 'Audio' and raises
 # EEXIST - so the run proves nothing rather than finding a defect.
-# Linux CI is case-sensitive; skip there instead of failing.
+# Linux CI is case-sensitive. Skip there instead of failing.
 # Probes the filesystem the workspace will live on, not the system
 # temp dir: on macOS those two can differ in case behaviour.
 def host_folds_case?
@@ -42,7 +42,7 @@ def reset_workspace!
 end
 
 # platform_compat.rb targets the in-game VMs (1.8 / 1.9 / 3.1), which
-# all still have the `exists?` aliases; Ruby 3.2 removed them. Restore
+# all still have the `exists?` aliases. Ruby 3.2 removed them. Restore
 # them so this harness also runs on a modern host Ruby.
 def ensure_ruby31_compat_aliases!
   class << File
@@ -77,7 +77,7 @@ def load_platform_compat!(joiplay = false)
     end
   end
   # Reloading the whole file re-evaluates constants that production
-  # only defines once per VM; silence the redefinition warnings.
+  # only defines once per VM. Silence the redefinition warnings.
   prev_verbose = $VERBOSE
   $VERBOSE = nil
   begin
@@ -154,7 +154,7 @@ assert_true(raw_dir?(USERDATA), 'UserData survives root rmdir')
 Dir.chdir(GAME) do
   # rubocop:disable Lint/DeprecatedClassMethods -- the deprecated
   # aliases are exactly what Reborn-lineage getSaveFolder/PBDebug
-  # call; exercise their wrappers.
+  # call. Exercise their wrappers.
   assert_false(File.exists?('Save Data/'), 'portable dir absent before mkdir')
   assert_false(Dir.exist?('Save Data/'), 'Dir.exist? portable dir absent')
   Dir.mkdir('Save Data/')
@@ -255,7 +255,7 @@ assert_true(leftover.include?('keybindings.mkxp3'), 'engine file stays at the ro
 assert_true(leftover.include?('Game.rxdata.empo-displaced.bak'), 'host backup stays at the root')
 assert_true(leftover.include?('.empo-origin.json'), 'host marker stays at the root')
 
-# One sweep per boot; the next boot converges later stragglers.
+# One sweep per boot. The next boot converges later stragglers.
 File.write(File.join(USERDATA, 'Save03.rvdata2'), 'later straggler')
 Dir.chdir(GAME) do
   assert_false(File.exist?('Save Data/Save03.rvdata2'), 'no second sweep in one boot')
@@ -318,7 +318,7 @@ assert_true(raw_entries(USERDATA).include?('Game.rxdata'), 'joiplay boot leaves 
 assert_false(raw_entries(GAME).include?('Save Data'), 'joiplay boot creates no portable dir')
 
 # --- Sweep collision, alias-era shape: the root copy is the newer
-# alias-active save, it wins; the stale literal copy is kept as
+# alias-active save, it wins. The stale literal copy is kept as
 # *.pre-literal.bak. Trigger: Dir.entries listing. ---
 reset_workspace!
 FileUtils.mkdir_p(File.join(GAME, 'Save Data'))
@@ -368,7 +368,7 @@ assert_false(
 )
 
 # --- Sweep merge into an existing subdirectory: stranded and
-# literal files coexist; per-file collisions follow the mtime rule.
+# literal files coexist. Per-file collisions follow the mtime rule.
 # Trigger: Dir.foreach of the subdirectory. ---
 reset_workspace!
 FileUtils.mkdir_p(File.join(GAME, 'Save Data', 'Battle Logs'))
@@ -438,7 +438,7 @@ assert_eq(
 # Earlier builds redirected bare working-directory save names into
 # UserData, so upgraded installs have saves stranded at the UserData
 # root. The first bare-name access (probe, read, glob, load_data)
-# moves the stranded copy into the game folder; after that every
+# moves the stranded copy into the game folder. After that every
 # operation is literal. Modern games address UserData by absolute
 # path and never trigger it.
 reset_workspace!
@@ -482,7 +482,7 @@ Dir.chdir(GAME) do
   assert_true(raw_entries(GAME).include?('Save07.rxdata'), 'load_data recovers the stranded save')
 end
 
-# Collision: the newer copy keeps the canonical name; the loser is
+# Collision: the newer copy keeps the canonical name. The loser is
 # kept as *.pre-literal.bak. Shipped starter save vs real progress:
 reset_workspace!
 Dir.chdir(GAME) { load_platform_compat!(false) }
@@ -535,7 +535,7 @@ end
 # read/enumerate/delete see one coherent world through every spelling
 # a game might use. New wrappers must be added to these API lists.
 # rubocop:disable Lint/DeprecatedClassMethods -- the deprecated
-# spellings are part of the API surface games call; the matrix must
+# spellings are part of the API surface games call. The matrix must
 # hold for them too.
 FILE_PROBES = {
   'File.exist?' => lambda { |p| File.exist?(p) },
@@ -803,7 +803,7 @@ def assert_case_variant_writes(records)
   )
 end
 
-# Files created after boot are invisible to the cache stub; only the
+# Files created after boot are invisible to the cache stub. Only the
 # live walk can resolve them.
 def assert_session_created_resolution
   File.open('Audio/BGS/New Track.WAV', 'wb') { |f| f.write('x') }

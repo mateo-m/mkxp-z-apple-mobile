@@ -4,7 +4,7 @@
 # library): src/**/*.{c,cpp,mm,h}.
 #
 # tools/build-core-ios.sh writes this value next to the library as
-# .mkxp-core-fingerprint after each build; consumers (e.g. the Empo
+# .mkxp-core-fingerprint after each build. Consumers (e.g. the Empo
 # launcher's scripts/verify-native-deps.sh) recompute it per build and
 # fail when the prebuilt core is stale relative to the checked-out
 # engine sources. Paths are hashed relative to the engine root so the

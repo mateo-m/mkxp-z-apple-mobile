@@ -148,7 +148,7 @@ static void raiseEventHook(rb_event_flag_t, VALUE, VALUE, ID, VALUE)
 
 static void installRaiseHook() {
     /* loadEnginePreloads runs once per game session, but the VM
-     * outlives a session on iOS; a second registration would record
+     * outlives a session on iOS. A second registration would record
      * every raise twice. */
     if (g_raiseHookInstalled)
         return;
@@ -163,7 +163,7 @@ static void installRaiseHook() {
 
 // Expose the host launcher's identity to game scripts (see
 // mkxp_setLauncherIdentity in app_bridge.h): `$userAgent` carries the
-// name verbatim; `$<name> = true` follows the JoiPlay `$joiplay`
+// name verbatim. `$<name> = true` follows the JoiPlay `$joiplay`
 // detection convention and is only defined when the name is a valid
 // Ruby identifier.
 static void setLauncherIdentityGlobals() {
