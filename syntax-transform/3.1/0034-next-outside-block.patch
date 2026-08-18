@@ -1,0 +1,56 @@
+# syntax-transform/3.1/0034-next-outside-block.patch
+#
+# This file is part of mkxp.
+#
+# Copyright (C) 2026 The mkxp-z authors
+#
+# mkxp is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# mkxp is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with mkxp.  If not, see <http://www.gnu.org/licenses/>.
+
+# In Ruby 1.8, `next` with no block or loop around it compiles. The interpreter
+# throws the jump when the line runs, so an enclosing block up the call stack
+# can catch it, and the code raises LocalJumpError ("unexpected next") only if
+# nothing catches it. Game authors write this by mistake in place of `return`,
+# usually on a branch that almost never runs. For example:
+#
+#   def pbLoadStage(id)
+#     unless safeExists?(savefile)
+#       pbPlayBuzzerSE
+#       next
+#     end
+#     ...
+#   end
+#
+# In Ruby 1.9 and later, the same code is a compile error ("Invalid next"), and
+# the error kills the whole script section, not just that one method. A game
+# then fails with NameError on every method in the section. This patch emits the
+# same throw as Ruby 1.8 when syntax transform is active and targeting
+# Ruby <= 1.8, so the section compiles and only the bad line raises.
+
+--- a/compile.c
++++ b/compile.c
+@@ -7460,6 +7460,14 @@ compile_next(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *const node, in
+ 
+ 	    ip = ip->body->parent_iseq;
+ 	}
++	if (ip == 0 && mkxp_iseq_is_syntax_transform_active(iseq, 1, 8, -1)) {
++	    /* If syntax transform is active and targeting Ruby <= 1.8, throw
++	     * the jump instead of failing the compile, to match Ruby 1.8's
++	     * behavior. The throw walks up the frames: a block that catches
++	     * `next` gets it, and if none does, the VM raises LocalJumpError. */
++	    throw_flag = VM_THROW_NO_ESCAPE_FLAG;
++	    ip = iseq;
++	}
+ 	if (ip != 0) {
+ 	    CHECK(COMPILE(ret, "next val", node->nd_stts));
+             ADD_INSN1(ret, line_node, throw, INT2FIX(throw_flag | TAG_NEXT));

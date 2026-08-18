@@ -1,0 +1,171 @@
+# syntax-transform/3.1/0035-rescue-modifier-op-assign.patch
+#
+# This file is part of mkxp.
+#
+# Copyright (C) 2026 The mkxp-z authors
+#
+# mkxp is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# mkxp is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with mkxp.  If not, see <http://www.gnu.org/licenses/>.
+
+# In Ruby 1.8, the `rescue` modifier cannot sit inside an expression. A line
+# like this one is a statement with a `rescue` modifier around all of it:
+#
+#   @sprites["char"].opacity -= 40 rescue nil
+#
+# The rescue therefore also covers the receiver and the read of `opacity`, so
+# the line does nothing when the sprite is missing. Ruby 1.9 and later bind the
+# modifier to the new value alone, which turns the same line into a crash
+# ("undefined method `opacity' for nil:NilClass"). Fan games use this idiom to
+# guard sprite fades, and Pokemon Realidea dies on it when the player opens the
+# quest log.
+#
+# This patch takes the modifier off the value of an assignment and puts it
+# around the whole assignment when syntax transform is active and targeting
+# Ruby <= 1.8. The modifier rule marks its NODE_RESCUE with a spare flag bit,
+# and the op-assign builders act only on a marked node. Parentheses still
+# scope the rescue as written, because a parenthesized `rescue` clause comes
+# from the statement rule, which does not set the mark. The parser keeps no
+# state between statements for this.
+--- a/parse.y
++++ b/parse.y
+@@ -988,6 +988,11 @@
+     set_line_body(body, loc->beg_pos.lineno);
+     return n;
+ }
++
++/* Bit 6 of `flags` is FL_PROMOTED for heap objects. Parser nodes live in
++ * AST buffers, not on the heap, so the bit is free on a NODE. Only the
++ * parser reads it, and only on NODE_RESCUE. */
++#define MKXP_NODE_FL_RESCUE_MOD (((VALUE)1)<<6)
+ 
+ static NODE *
+ rescued_expr(struct parser_params *p, NODE *arg, NODE *rescue,
+@@ -996,7 +1001,54 @@
+     YYLTYPE loc = code_loc_gen(mod_loc, res_loc);
+     rescue = NEW_RESBODY(0, remove_begin(rescue), 0, &loc);
+     loc.beg_pos = arg_loc->beg_pos;
+-    return NEW_RESCUE(arg, rescue, 0, &loc);
++    rescue = NEW_RESCUE(arg, rescue, 0, &loc);
++    /* Mark the node, so that the assignment builders below can tell a
++     * `rescue` modifier from a `rescue` clause that parentheses hold. */
++    rescue->flags |= MKXP_NODE_FL_RESCUE_MOD;
++    return rescue;
++}
++
++/**
++ * In Ruby 1.8, the `rescue` modifier cannot sit inside an expression, so
++ * `sprite.opacity -= 32 rescue nil` parses as
++ * `(sprite.opacity -= 32) rescue nil`. The rescue then also covers the
++ * receiver and the read of `opacity`. Ruby 1.9 and later bind the modifier
++ * to the new value alone, so the same line raises NoMethodError when the
++ * receiver is nil.
++ *
++ * `mkxp_take_rescue_mod` takes the modifier off the value of an assignment
++ * and `mkxp_apply_rescue_mod` puts it around the whole assignment, which
++ * gives back the Ruby 1.8 behavior. Both do nothing unless syntax transform
++ * is active and targeting Ruby <= 1.8.
++ */
++static NODE *
++mkxp_take_rescue_mod(struct parser_params *p, NODE **rhs)
++{
++    NODE *rescue;
++
++    if (!rhs || !*rhs || !((*rhs)->flags & MKXP_NODE_FL_RESCUE_MOD)) {
++        return 0;
++    }
++    if (!mkxp_parser_is_syntax_transform_active(p, 1, 8, -1)) {
++        return 0;
++    }
++
++    rescue = *rhs;
++    rescue->flags &= ~MKXP_NODE_FL_RESCUE_MOD;
++    *rhs = rescue->nd_head;
++    return rescue;
++}
++
++static NODE *
++mkxp_apply_rescue_mod(NODE *asgn, NODE *rescue, const YYLTYPE *loc)
++{
++    if (!rescue) {
++        return asgn;
++    }
++
++    rescue->nd_head = asgn;
++    nd_set_loc(rescue, loc);
++    return rescue;
+ }
+ 
+ #endif /* RIPPER */
+@@ -12622,6 +12674,7 @@
+ new_op_assign(struct parser_params *p, NODE *lhs, ID op, NODE *rhs, struct lex_context ctxt, const YYLTYPE *loc)
+ {
+     NODE *asgn;
++    NODE *rescue_mod = mkxp_take_rescue_mod(p, &rhs);
+ 
+     if (lhs) {
+ 	ID vid = lhs->nd_vid;
+@@ -12673,7 +12726,7 @@
+     else {
+ 	asgn = NEW_BEGIN(0, loc);
+     }
+-    return asgn;
++    return mkxp_apply_rescue_mod(asgn, rescue_mod, loc);
+ }
+ 
+ static NODE *
+@@ -12681,6 +12734,7 @@
+ 		  NODE *args, ID op, NODE *rhs, const YYLTYPE *args_loc, const YYLTYPE *loc)
+ {
+     NODE *asgn;
++    NODE *rescue_mod = mkxp_take_rescue_mod(p, &rhs);
+ 
+     args = make_list(args, args_loc);
+     if (nd_type_p(args, NODE_BLOCK_PASS)) {
+@@ -12691,7 +12745,7 @@
+     }
+     asgn = NEW_OP_ASGN1(ary, op, args, loc);
+     fixpos(asgn, ary);
+-    return asgn;
++    return mkxp_apply_rescue_mod(asgn, rescue_mod, loc);
+ }
+ 
+ static NODE *
+@@ -12699,16 +12753,18 @@
+ 		   ID atype, ID attr, ID op, NODE *rhs, const YYLTYPE *loc)
+ {
+     NODE *asgn;
++    NODE *rescue_mod = mkxp_take_rescue_mod(p, &rhs);
+ 
+     asgn = NEW_OP_ASGN2(lhs, CALL_Q_P(atype), attr, op, rhs, loc);
+     fixpos(asgn, lhs);
+-    return asgn;
++    return mkxp_apply_rescue_mod(asgn, rescue_mod, loc);
+ }
+ 
+ static NODE *
+ new_const_op_assign(struct parser_params *p, NODE *lhs, ID op, NODE *rhs, struct lex_context ctxt, const YYLTYPE *loc)
+ {
+     NODE *asgn;
++    NODE *rescue_mod = mkxp_take_rescue_mod(p, &rhs);
+ 
+     if (lhs) {
+ 	rhs = shareable_constant_value(p, ctxt.shareable_constant_value, lhs, rhs, loc);
+@@ -12718,7 +12774,7 @@
+ 	asgn = NEW_BEGIN(0, loc);
+     }
+     fixpos(asgn, lhs);
+-    return asgn;
++    return mkxp_apply_rescue_mod(asgn, rescue_mod, loc);
+ }
+ 
+ static NODE *
