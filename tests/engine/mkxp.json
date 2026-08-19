@@ -1,0 +1,6 @@
+{
+  "customScript": "mega_bitmap.rb",
+  "maxTextureSize": 2048,
+  "rgssVersion": 1,
+  "printFPS": false
+}

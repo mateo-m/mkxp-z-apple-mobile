@@ -34,6 +34,19 @@ jobs:
             ruby "$test"
           done
 
+  cpp:
+    name: C++ (host tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      # These build the engine sources under test directly. No SDL,
+      # no GPU, no Ruby, and no launcher, so a plain runner is enough.
+      - name: host tests
+        run: tools/run-cpp-tests.sh
+
   markdown:
     name: Markdown (markdownlint)
     runs-on: ubuntu-latest
@@ -63,7 +76,7 @@ jobs:
   # "Lint" context exactly (same pattern as empo-app's workflows).
   summary:
     name: Lint
-    needs: [ruby, markdown]
+    needs: [ruby, cpp, markdown]
     if: always()
     runs-on: ubuntu-latest
     steps:

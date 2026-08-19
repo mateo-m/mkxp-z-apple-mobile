@@ -1,0 +1,20 @@
+# Prebuilt dependency pins for the iOS test host.
+#
+# Both tarballs are public release assets on the empo-deps repository.
+# tools/fetch-deps-ios.sh downloads them into deps/ and checks the
+# sha256 before it extracts anything.
+#
+# native-ios-prebuilt.tar.gz holds the dependency libraries and
+# headers (SDL2, physfs, OpenAL, pixman, freetype, uchardet, theora,
+# openssl) plus the per-version libruby archives and the Ruby stdlib
+# subsets.
+#
+# angle-ios-prebuilt.tar.gz holds the ANGLE static libraries, which
+# run OpenGL ES on top of Metal.
+DEPS_REPO=mateo-m/empo-deps
+
+NATIVE_DEPS_VERSION=native-2026-08-18-r3
+NATIVE_DEPS_SHA256=a6f49df94df1c1bcdfbfb32098f7c8d07f36f5e64ea5598d0bc1d1ce813f47da
+
+ANGLE_VERSION=angle-2026-05-04
+ANGLE_SHA256=0cd2b87b132b2c1344fe356ebcb57fa6ec63675d33d6fa11deb8a16bd57d3b9c

@@ -41,16 +41,49 @@ This fork answers each of those. It also handles the usual Apple-platform proble
 
 ```text
 binding/         Ruby C extension layer, compiled once per version
+multiruby/       The one entry point each per-version merged object exports
 src/             Engine core (graphics, audio, input, script bridge)
 src/theoraplay/  Vendored ogg and theora decoder (upstream)
 syntax-transform/3.1/   Ruby 3.1 parser patches for older grammar
 scripts/         Ruby scripts that load before and after the game
 hmode7/          H-Mode7 native port (git submodule)
+tools/           Build recipes, dependency fetch, and test runners
+tests/           C++ host tests, an in-engine RGSS suite, and its host
+deps/            Prebuilt dependency libraries, fetched by a script
 ```
 
 ## Build
 
-[empo-app](https://github.com/mateo-m/empo-app) includes this engine as a git submodule. Xcode builds it there together with the app, the dependency libraries, and the packaging steps. **It does not build on its own.** See the empo-app README for the build steps.
+This repository owns both halves of the engine build. Each half is one script, and a host calls it:
+
+| Script | Builds | Needs |
+| --- | --- | --- |
+| `tools/build-core-ios.sh` | `libmkxpz-core.a`, everything under `src/` | Dependency headers only |
+| `tools/build-binding-ios.sh` | `mkxp<NN>-merged.o`, one per Ruby version | That version's libruby archives |
+
+A host supplies the SDK, the dependency headers, and the libruby archives. It gets back artifacts that came out of these recipes at a public commit.
+
+[empo-app](https://github.com/mateo-m/empo-app) includes this engine as a git submodule, calls both scripts, and links the result into a launcher. That is the only shipping app. See the empo-app README for those steps.
+
+### Build and test on your own
+
+This repository also builds a small app of its own, and that app runs
+the in-engine suite. It needs no launcher:
+
+```sh
+tools/fetch-deps-ios.sh      # prebuilt dependency libraries, once
+tools/run-engine-tests.sh    # builds the test host, then runs the suite
+```
+
+`tools/fetch-deps-ios.sh` downloads the pinned dependency release named
+in `deps/.version` and checks its hash. `tools/build-test-host-ios.sh`
+links the engine into `EngineTests.app` and puts the suite inside it.
+`tools/run-engine-tests.sh` installs that app on a booted simulator and
+reads the results back. The test host has no interface: it names its
+own game folder and the engine boots it.
+
+The C++ tests under `tests/cpp/` need none of this, not even the
+dependencies. See [tests/README.md](tests/README.md).
 
 This fork does not build for macOS, Linux, or Windows. The desktop code, the desktop build files (meson, platform Makefiles, the macOS Xcode project), and the desktop stand-ins are all removed. Use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) for desktop.
 
