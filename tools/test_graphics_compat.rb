@@ -8,9 +8,12 @@
 # SystemStackError at the first battle transition.
 # Run: ruby mkxp-z-apple-mobile/tools/test_graphics_compat.rb
 
+require_relative 'assertion_count'
+
 ROOT = File.expand_path('..', __dir__)
 
 def assert_eq(actual, expected, label)
+  asserted
   return if actual == expected
 
   warn "FAIL: #{label}\n  expected: #{expected.inspect}\n  actual:   #{actual.inspect}"
@@ -137,4 +140,4 @@ Graphics.instance_variable_set(:@__mkxp_native_play_movie, nil)
 Graphics.zeus_play_movie('late.avi')
 assert_eq(Graphics::CALLS.last, [:native_movie, 'late.avi'], 'missing snapshot falls back to the live method')
 
-puts 'test_graphics_compat: all tests passed'
+test_passed('test_graphics_compat', 10)

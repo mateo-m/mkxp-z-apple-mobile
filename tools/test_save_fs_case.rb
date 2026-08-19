@@ -336,4 +336,4 @@ Dir.chdir(GAME) do
   end
 end
 
-puts 'OK: test_save_fs_case.rb passed'
+test_passed('test_save_fs_case', 101)

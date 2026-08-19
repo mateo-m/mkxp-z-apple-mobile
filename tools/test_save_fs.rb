@@ -544,4 +544,4 @@ Dir.chdir(GAME) do
   assert_dir_lifecycle_consistent('PlainMatrix', 'plain dir')
 end
 
-puts 'OK: test_save_fs.rb passed'
+test_passed('test_save_fs', 311)

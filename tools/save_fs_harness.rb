@@ -5,6 +5,7 @@
 # on purpose: this file is a library, not a test.
 
 require 'fileutils'
+require_relative 'assertion_count'
 
 # The tests simulate a device (case-sensitive) filesystem on top of a
 # case-folding host: an MKXPSaveFS.engine_fs fake answers the engine
@@ -26,7 +27,16 @@ ensure
 end
 
 unless host_folds_case?
-  puts "#{File.basename($PROGRAM_NAME)}: skipped, this host filesystem is case-sensitive"
+  name = File.basename($PROGRAM_NAME)
+  # A skip that reads like a pass is worse than no test. CI runs these
+  # on a case-folding host as well, and sets MKXP_TESTS_NO_SKIP there
+  # so the skip cannot hide a break.
+  if ENV['MKXP_TESTS_NO_SKIP']
+    warn "FAIL: #{name} skipped, but MKXP_TESTS_NO_SKIP is set."
+    warn '  This host filesystem is case-sensitive. Run it on one that folds case.'
+    exit 1
+  end
+  puts "SKIP: #{name}, this host filesystem is case-sensitive"
   exit 0
 end
 
@@ -88,6 +98,7 @@ def load_windows_fs!(joiplay = false)
 end
 
 def assert_eq(actual, expected, label)
+  asserted
   return if actual == expected
 
   warn "FAIL: #{label}\n  expected: #{expected.inspect}\n  actual:   #{actual.inspect}"

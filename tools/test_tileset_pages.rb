@@ -26,38 +26,37 @@ PATCH = File.join(ROOT, 'scripts', 'postload', 'pokemon_tilemap_fix.rb')
 SCENARIOS = %w[immediate deferred no_helper legacy small_gpu
                 watcher_stops_legacy watcher_stops_plain real_max_size].freeze
 
+require_relative 'assertion_count'
+
 $failures = []
 
 def assert(condition, label)
+  asserted
   return if condition
 
   $failures << label
 end
 
 def assert_eq(actual, expected, label)
+  asserted
   return if actual == expected
 
   $failures << "#{label}\n    expected: #{expected.inspect}\n    actual:   #{actual.inspect}"
 end
 
 def assert_quiet(label)
+  asserted
   yield
 rescue StandardError, SystemStackError => e
   $failures << "#{label}: raised #{e.class}: #{e.message}"
 end
 
-def assert_raises(label)
-  yield
-  $failures << "#{label}: expected a raise, got none"
-rescue StandardError
-  nil
-end
-
 def report(scenario)
-  if $failures.empty?
-    puts "  ok (#{scenario})"
+  if $failures.empty? && $assertions.positive?
+    puts "  ok (#{scenario}, #{$assertions} assertions)"
     exit 0
   end
+  $failures << 'the scenario ran no assertion' if $assertions.zero?
   warn "  FAILED (#{scenario}):"
   $failures.each { |f| warn "  - #{f}" }
   exit 1
@@ -1086,6 +1085,11 @@ end
 #===============================================================================
 
 def run_all
+  if SCENARIOS.empty?
+    warn 'no scenario registered'
+    exit 1
+  end
+
   results = SCENARIOS.map do |name|
     puts "== #{name}"
     [name, system(RbConfig.ruby, __FILE__, name)]
