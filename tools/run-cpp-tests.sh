@@ -74,7 +74,9 @@ $CXX -std=c++17 -g -O0 \
         exit 2
     }
 
-STDERR="$(mktemp -t mkxp-cpp-tests)"
+# Spell out the template. GNU mktemp rejects a -t prefix that holds
+# no X, so the BSD short form fails on Linux.
+STDERR="$(mktemp "${TMPDIR:-/tmp}/mkxp-cpp-tests.XXXXXX")"
 STATUS=0
 "$BINARY" 2> "$STDERR" || STATUS=$?
 
