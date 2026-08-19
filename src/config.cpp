@@ -272,7 +272,10 @@ try { exp } catch (...) {}
      * prefer it; otherwise fall back to the historic cwd-relative
      * `mkxp.json` (desktop builds, raw mkxp-z usage, hosts that
      * don't manage state). */
-    std::string managedDir(mkxp_getManagedConfigDir());
+    /* A host that set no managed directory hands back a null
+     * pointer, which std::string must not be built from. */
+    const char *managedPath = mkxp_getManagedConfigDir();
+    std::string managedDir(managedPath ? managedPath : "");
     std::string conf_path = CONF_FILE;
     if (!managedDir.empty()) {
         std::string managedConf = managedDir + "/" + CONF_FILE;

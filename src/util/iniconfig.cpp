@@ -44,10 +44,18 @@ bool INIConfiguration::load (std::istream& is)
 	std::string currSectionName;
 
 	std::string line;
-	std::getline (is, line);
 
-	while (!is.eof() && !is.bad())
+	/* `while (getline)`, not `getline` and then `while (!eof)`. The
+	 * second form drops the last line of a file that ends without a
+	 * newline, which a hand-edited Game.ini often does. Losing that
+	 * line loses the game title. */
+	while (std::getline (is, line))
 	{
+		if (line.empty())
+		{
+			continue;
+		}
+
 		if (line[0] == '[')
 		{
 			currSectionName = line.substr (1, line.find_last_of (']') - 1);
@@ -69,8 +77,6 @@ bool INIConfiguration::load (std::istream& is)
 				addProperty (currSectionName, key , val);
 			}
 		}
-
-		std::getline (is, line);
 	}
 
 	if (is.bad())
