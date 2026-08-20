@@ -27,7 +27,13 @@
 #
 # Outputs into <libdir>:
 #   mkxp<NN>-merged.o
-#   .mkxp-binding-fingerprint   (see tools/binding-fingerprint.sh)
+#
+# It does NOT write <libdir>/.mkxp-binding-fingerprint. That stamp
+# says every merged object matches the binding sources, and one run
+# builds one version, so it cannot make that claim. The caller that
+# builds the full set records it. A run that dies after two of three
+# versions must leave the old stamp in place, so the consumer sees a
+# mismatch and rebuilds.
 set -eu
 
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -274,5 +280,4 @@ if [ "$COUNT" != "1" ] || [ "$GLOBALS" != "$ENTRY" ]; then
 fi
 echo "  strong text symbols: 1 ($ENTRY)"
 
-"$ENGINE/tools/binding-fingerprint.sh" > "$OUT/.mkxp-binding-fingerprint"
 echo "[mkxp$RUBY] Done: $MERGED"
