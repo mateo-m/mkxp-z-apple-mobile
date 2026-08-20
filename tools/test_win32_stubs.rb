@@ -20,9 +20,12 @@
 # constant in test code resolves to a stub instead of raising
 # NameError, so always assert against exact expected values.
 
+require_relative 'assertion_count'
+
 ROOT = File.expand_path('..', __dir__)
 
 def assert_eq(actual, expected, label)
+  asserted
   return if actual == expected
 
   warn "FAIL: #{label}\n  expected: #{expected.inspect}\n  actual:   #{actual.inspect}"
@@ -34,6 +37,7 @@ def assert_true(value, label)
 end
 
 def assert_nonzero(value, label)
+  asserted
   return if value.is_a?(Integer) && value != 0
 
   warn "FAIL: #{label}\n  expected: nonzero Integer\n  actual:   #{value.inspect}"
@@ -447,4 +451,4 @@ assert_true(net_err.is_a?(Class) && net_err.ancestors.include?(StandardError),
             'error-suffixed Net constant becomes a StandardError subclass')
 assert_eq(Net::SomePlainThing, IOS::NullStub, 'plain Net constant resolves to NullStub')
 
-puts 'test_win32_stubs: all tests passed'
+test_passed('test_win32_stubs', 65)

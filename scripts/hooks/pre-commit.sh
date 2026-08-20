@@ -27,24 +27,38 @@ require_tool() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed"
 }
 
-RUBY_STAGED=$(printf '%s\n' "$STAGED" | grep -E '^scripts/(preload|postload)/' || true)
+RUBY_PATHS="scripts/preload scripts/postload tests"
+RUBY_STAGED=$(printf '%s\n' "$STAGED" | grep -E '^(scripts/(preload|postload)|tests)/' || true)
 if [ -n "$RUBY_STAGED" ]; then
-    section "rubocop --autocorrect-all (Ruby compat scripts)"
+    section "rubocop --autocorrect-all (Ruby scripts)"
     require_tool bundle
-    bundle exec rubocop --autocorrect-all --format quiet scripts/preload scripts/postload
-    if ! git diff --quiet -- scripts/preload scripts/postload; then
-        git add scripts/preload scripts/postload
+    # RUBY_PATHS is a word list, so it stays unquoted.
+    # shellcheck disable=SC2086
+    bundle exec rubocop --autocorrect-all --format quiet $RUBY_PATHS
+    # shellcheck disable=SC2086
+    if ! git diff --quiet -- $RUBY_PATHS; then
+        # shellcheck disable=SC2086
+        git add $RUBY_PATHS
     fi
 
-    section "rubocop (Ruby compat scripts)"
-    bundle exec rubocop scripts/preload scripts/postload ||
+    section "rubocop (Ruby scripts)"
+    # shellcheck disable=SC2086
+    bundle exec rubocop $RUBY_PATHS ||
         die "rubocop failed"
 
-    section "regression tests (Ruby compat scripts)"
+    section "regression tests (Ruby scripts)"
     require_tool ruby
     for test in tools/test_*.rb; do
         ruby "$test" >/dev/null || die "$test failed"
     done
+fi
+
+CPP_STAGED=$(printf '%s\n' "$STAGED" | grep -E '^(src/|tests/cpp/)' || true)
+if [ -n "$CPP_STAGED" ]; then
+    section "host tests (C++)"
+    require_tool c++
+    "$REPO_ROOT/tools/run-cpp-tests.sh" ||
+        die "the C++ host tests failed"
 fi
 
 MD_FILES=$(printf '%s\n' "$STAGED" | grep -E '\.md$' | grep -Ev '^(src/theoraplay/|hmode7/)' || true)

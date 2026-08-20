@@ -1,4 +1,5 @@
-# Rubocop config for Empo's preload/postload compatibility scripts.
+# Rubocop config for Empo's preload/postload compatibility scripts
+# and for the in-engine test suites under tests/.
 #
 # Posture: defaults stay on. Disables below correspond to real
 # technical or API-compatibility constraints, NOT "the existing
@@ -17,6 +18,7 @@ AllCops:
   Include:
     - scripts/preload/**/*.rb
     - scripts/postload/**/*.rb
+    - tests/**/*.rb
   Exclude:
     - hmode7/**/*
     - src/**/*

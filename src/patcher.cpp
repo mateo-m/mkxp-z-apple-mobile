@@ -52,7 +52,10 @@ Patcher::Patcher(const std::vector<std::string> &patches)
      * support without trampling the curated file is on the
      * roadmap.) */
     if (patches.empty()) {
-        std::string managedDir(mkxp_getManagedConfigDir());
+        /* A host that set no managed directory hands back a null
+         * pointer, which std::string must not be built from. */
+        const char *managedPath = mkxp_getManagedConfigDir();
+        std::string managedDir(managedPath ? managedPath : "");
         if (!managedDir.empty()) {
             std::string managed = managedDir + "/patches.json";
             std::ifstream check(managed.c_str());

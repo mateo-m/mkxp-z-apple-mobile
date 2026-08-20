@@ -12,6 +12,8 @@
 # tests run on any host, case-folding or not.
 # Run: ruby mkxp-z-apple-mobile/tools/test_save_recovery.rb
 
+require_relative 'assertion_count'
+
 require 'fileutils'
 
 ROOT = File.expand_path('..', __dir__)
@@ -76,6 +78,7 @@ def load_windows_fs!(data_dir)
 end
 
 def assert_eq(actual, expected, label)
+  asserted
   return if actual == expected
 
   warn "FAIL: #{label}\n  expected: #{expected.inspect}\n  actual:   #{actual.inspect}"
@@ -285,4 +288,4 @@ backups = [
 assert_eq(backups, %w[middle oldest], 'no backup clobbered another')
 
 FileUtils.rm_rf(WORK)
-puts 'test_save_recovery: all assertions passed'
+test_passed('test_save_recovery', 25)

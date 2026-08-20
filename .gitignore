@@ -87,3 +87,14 @@ node_modules/
 
 # Scratch tree that tools/test_save_fs.rb builds when it runs.
 tools/test_save_fs_workspace/
+
+# Built by tools/run-cpp-tests.sh --keep.
+tests/cpp/build/
+
+# Prebuilt dependency libraries, fetched by tools/fetch-deps-ios.sh
+/deps/build-*/
+/deps/ANGLE/
+/deps/.fetched-*
+
+# Test host build output
+/build/
