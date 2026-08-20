@@ -62,7 +62,7 @@ do
     esac
 done
 
-for required in ruby sdk out obj static-lib ext-lib
+for required in ruby sdk out obj static-lib ext-lib ruby-include
 do
     name="$(echo "$required" | tr 'a-z-' 'A-Z_')"
     eval "value=\$$name"

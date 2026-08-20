@@ -7,6 +7,7 @@
 #include "harness.h"
 
 #include <cstdio>
+#include <exception>
 #include <string>
 #include <vector>
 
