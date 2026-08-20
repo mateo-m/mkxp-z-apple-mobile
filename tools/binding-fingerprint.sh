@@ -9,12 +9,14 @@
 #     compiled engine half sees a different ABI.
 #   - multiruby/wrapper.cpp
 #
-# tools/build-binding-ios.sh writes this value to
-# <libdir>/.mkxp-binding-fingerprint after each merged.o build. A
-# consumer recomputes it per build and fails when the merged objects
-# are stale. Paths are hashed relative to the repository root, so the
-# fingerprint is identical across machines. Prebuilt tarballs must
-# verify on a fresh clone.
+# Whoever builds all three merged objects writes this value to
+# <libdir>/.mkxp-binding-fingerprint, and only after the last one
+# succeeds. tools/build-binding-ios.sh must not write it: it builds
+# one version per run, so a partial build would stamp a set that is
+# not there. A consumer recomputes the value per build and fails when
+# the merged objects are stale. Paths are hashed relative to the
+# repository root, so the fingerprint is identical across machines.
+# Prebuilt tarballs must verify on a fresh clone.
 set -eu
 
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
