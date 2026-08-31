@@ -71,6 +71,14 @@ jobs:
       - name: Run the in-engine suite
         run: tools/run-engine-tests.sh --timeout 300
 
+      # A second game folder, because the legacy-method shims only
+      # run for scripts that come out of Scripts.rxdata. See
+      # tests/README.md.
+      - name: Run the legacy-method suite
+        run: |
+          ruby tests/legacy-methods/pack_scripts.rb
+          tools/run-engine-tests.sh --game tests/legacy-methods --timeout 300
+
   # Aggregate gate, so the ruleset has one context to require.
   summary:
     name: Engine tests summary
