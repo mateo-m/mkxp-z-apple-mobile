@@ -6,7 +6,8 @@ Two suites, split by what they need to run.
 | --- | --- | --- |
 | `cpp/` | Your machine, in about a second | A C++ compiler |
 | `engine/` | Inside a running engine | A simulator and the dependencies |
-| `host/` | - | It is what runs `engine/` |
+| `legacy-methods/` | Inside a running engine | The same, plus a Ruby on your machine |
+| `host/` | - | It is what runs `engine/` and `legacy-methods/` |
 
 Neither suite needs a launcher. `cpp/` needs nothing but this
 repository.
@@ -71,6 +72,27 @@ Any other mkxp-z build can boot the same folder:
 ```sh
 mkxp-z --gameFolder=/path/to/mkxp-z-apple-mobile/tests/engine
 ```
+
+## Legacy methods
+
+`legacy-methods/` covers the methods that Ruby 1.9 removed and that
+`binding/binding-mri.cpp` defines again for the Ruby 3.1 build:
+`Array#nitems`, `Array#choice`, `Object#id`, and the rest. Each one
+runs only for a script that the syntax transform parsed, and raises
+NoMethodError everywhere else.
+
+The engine sets that flag on the sections of `Scripts.rxdata` alone,
+so this folder is a game that boots from `Scripts.rxdata` rather than
+from a `customScript`. Pack the file first:
+
+```sh
+ruby tests/legacy-methods/pack_scripts.rb
+tools/run-engine-tests.sh --game tests/legacy-methods
+```
+
+`pack_scripts.rb` compresses `engine/harness.rb` and
+`legacy-methods/legacy_methods.rb` into `legacy-methods/Data/`, which
+git ignores. Edit the `.rb` files and pack again.
 
 ## The test host
 

@@ -98,3 +98,6 @@ tests/cpp/build/
 
 # Test host build output
 /build/
+
+# Packed by tests/legacy-methods/pack_scripts.rb.
+/tests/legacy-methods/Data/
