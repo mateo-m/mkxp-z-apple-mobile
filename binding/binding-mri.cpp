@@ -219,6 +219,13 @@ static VALUE legacy_array_choice(int argc, VALUE *argv, VALUE self) {
     return rb_funcallv(self, rb_intern("sample"), argc, argv);
 }
 
+static VALUE legacy_array_nitems(VALUE self) {
+    if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
+        mkxp_raise_no_method_exception(self, "nitems");
+    return rb_funcall(rb_funcall(self, rb_intern("compact"), 0),
+                      rb_intern("length"), 0);
+}
+
 static VALUE legacy_array_indexes(int argc, VALUE *argv, VALUE self) {
     if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
         mkxp_raise_no_method_exception(self, "indexes");
@@ -346,7 +353,7 @@ struct MkxpLegacyStub {
     int minor;
 };
 
-static MkxpLegacyStub mkxp_legacy_stubs[16];
+static MkxpLegacyStub mkxp_legacy_stubs[32];
 static size_t mkxp_legacy_stub_count = 0;
 static ID mkxp_legacy_respond_to_orig = 0;
 
@@ -406,6 +413,7 @@ static void mriBindingInit() {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 #if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
     rb_define_method(rb_cArray, "choice", legacy_array_choice, -1);
+    rb_define_method(rb_cArray, "nitems", legacy_array_nitems, 0);
     rb_define_method(rb_cArray, "indexes", legacy_array_indexes, -1);
     rb_define_method(rb_cArray, "indices", legacy_array_indices, -1);
     rb_define_method(rb_cHash, "indexes", legacy_hash_indexes, -1);
@@ -415,6 +423,7 @@ static void mriBindingInit() {
     rb_define_method(rb_cSymbol, "to_i", legacy_symbol_to_i, 0);
     rb_define_method(rb_cSymbol, "to_int", legacy_symbol_to_int, 0);
     mkxp_register_legacy_stub(rb_cArray, "choice", false, 1, 8);
+    mkxp_register_legacy_stub(rb_cArray, "nitems", false, 1, 8);
     mkxp_register_legacy_stub(rb_cArray, "indexes", false, 1, 8);
     mkxp_register_legacy_stub(rb_cArray, "indices", false, 1, 8);
     mkxp_register_legacy_stub(rb_cHash, "indexes", false, 1, 8);
