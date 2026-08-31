@@ -73,17 +73,30 @@ jobs:
           GH_TOKEN: ${{ secrets.EMPO_DEPS_TOKEN }}
         run: |
           set -eu
+          # `gh release list` pages at 30 by default. empo-deps holds
+          # one native-* release per dep bump, and they passed 30 on
+          # 2026-08-31. That pushed angle-* off the page, the tag
+          # resolved to "", and `gh release download ""` fell back to
+          # the newest release, which carries no angle asset.
+          fetch_headers() {
+            prefix="$1"
+            asset="$2"
+            tag="$(gh release list --repo mateo-m/empo-deps --limit 200 \
+              --json tagName \
+              --jq "[.[].tagName | select(startswith(\"$prefix\"))] | first")"
+            if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+              echo "::error::no empo-deps release starts with $prefix"
+              exit 1
+            fi
+            echo "using $tag for $asset"
+            gh release download --repo mateo-m/empo-deps \
+              --pattern "$asset" --dir deps-headers "$tag"
+          }
           mkdir -p deps-headers
-          gh release download --repo mateo-m/empo-deps \
-            --pattern native-ios-prebuilt.tar.gz --dir deps-headers \
-            "$(gh release list --repo mateo-m/empo-deps \
-              --json tagName --jq '[.[].tagName | select(startswith("native-"))] | first')"
+          fetch_headers native- native-ios-prebuilt.tar.gz
           tar -xzf deps-headers/native-ios-prebuilt.tar.gz -C deps-headers \
             '*/include'
-          gh release download --repo mateo-m/empo-deps \
-            --pattern angle-ios-prebuilt.tar.gz --dir deps-headers \
-            "$(gh release list --repo mateo-m/empo-deps \
-              --json tagName --jq '[.[].tagName | select(startswith("angle-"))] | first')"
+          fetch_headers angle- angle-ios-prebuilt.tar.gz
           mkdir -p deps-headers/angle
           tar -xzf deps-headers/angle-ios-prebuilt.tar.gz -C deps-headers/angle \
             '*/include'
