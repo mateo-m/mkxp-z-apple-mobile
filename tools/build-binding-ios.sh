@@ -130,6 +130,15 @@ SDK_VERSION="$(xcrun --sdk "$SDK" --show-sdk-version)"
 CXX="$(xcrun --sdk "$SDK" -f clang++)"
 LD="$(xcrun --sdk "$SDK" -f ld)"
 
+# Compiler launcher: use ccache when available (CORE_NO_CCACHE=1 opts
+# out, the same switch tools/build-core-ios.sh reads). Purely a speed
+# layer. Output is identical. This loop has no up-to-date check, so
+# without it every build compiles all three Ruby versions again.
+LAUNCHER=""
+if [ "${CORE_NO_CCACHE:-0}" != "1" ] && command -v ccache >/dev/null 2>&1; then
+    LAUNCHER="ccache"
+fi
+
 # Engine include dirs mirror the flat header layout the sources expect.
 ENGINE_INCLUDES="\
  -I$ENGINE \
@@ -209,7 +218,7 @@ do
     echo "  -> $(basename "$obj")"
     # Flag lists below are word lists, so they stay unquoted.
     # shellcheck disable=SC2086,SC2090
-    "$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
+    $LAUNCHER "$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
         -std=c++14 -fdeclspec -fobjc-arc -O3 \
         $INCLUDES $DEFINES $WARNFLAGS \
         -c "$src" -o "$obj"
@@ -217,7 +226,7 @@ done
 
 echo "[mkxp$RUBY] Compiling per-version wrapper..."
 # shellcheck disable=SC2086,SC2090
-"$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
+$LAUNCHER "$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
     -std=c++14 -fdeclspec -O3 \
     "-DMULTIRUBY_SUFFIX=_$RUBY" \
     $INCLUDES \

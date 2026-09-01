@@ -52,8 +52,10 @@ jobs:
           DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
 
       # Most of this job is the two builds, and a push changes a few
-      # of the 54 core sources at a time. ccache turns the rest into
-      # a hit. tools/build-core-ios.sh picks it up on its own.
+      # sources at a time. ccache turns the rest into a hit. The two
+      # build scripts pick it up on their own. It also helps inside
+      # one job: the binding loop has no up-to-date check, so the
+      # second build compiles all three Ruby versions again.
       - name: Set up ccache
         run: |
           command -v ccache >/dev/null || brew install ccache
