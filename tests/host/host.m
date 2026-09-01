@@ -24,6 +24,9 @@
 // game, so a suite that covers interpreter behaviour needs the same
 // choice here.
 
+#include <stdlib.h>
+#include <string.h>
+
 #import <Foundation/Foundation.h>
 
 #import "app_bridge.h"
