@@ -51,6 +51,35 @@ jobs:
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
 
+      # Most of this job is the two builds, and a push changes a few
+      # of the 54 core sources at a time. ccache turns the rest into
+      # a hit. tools/build-core-ios.sh picks it up on its own.
+      - name: Set up ccache
+        run: |
+          command -v ccache >/dev/null || brew install ccache
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            # This job picks the newest Xcode above. The default
+            # compiler check reads size and mtime, so a runner image
+            # that ships a new clang could serve objects the old one
+            # built. Hashing the compiler removes the doubt.
+            echo "CCACHE_COMPILERCHECK=content"
+            # The cache travels to and from the runner on every job.
+            echo "CCACHE_MAXSIZE=800M"
+          } >> "$GITHUB_ENV"
+
+      # Restore on every run, but save only on a push to dev. A cache
+      # a pull request writes is scoped to that pull request, so no
+      # other run can read it. Saving one per push would fill the
+      # 10 GB the repository gets and evict the cache dev wrote.
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-engine-tests-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-engine-tests-${{ runner.os }}-
+
       # The host Ruby tests need no engine, so run them before the
       # long build. A break here fails the job in seconds.
       - name: Host Ruby tests, with no skips allowed
@@ -98,6 +127,17 @@ jobs:
         run: |
           ruby tests/legacy-methods/pack_scripts.rb
           tools/run-engine-tests.sh --game tests/legacy-methods --timeout 300
+
+      - name: Report the cache hit rate
+        if: always()
+        run: ccache -s || true
+
+      - name: Save the compiler cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ccache-engine-tests-${{ runner.os }}-${{ github.sha }}
 
   # Aggregate gate, so the ruleset has one context to require.
   summary:
