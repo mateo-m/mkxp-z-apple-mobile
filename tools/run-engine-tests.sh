@@ -12,7 +12,10 @@
 #                             [--timeout <seconds>] [--keep] [--no-build]
 #
 # --suite names another file in the game folder to run in place of
-# the one mkxp.json points at.
+# the one mkxp.json points at. The suite must call
+# EngineTest.suite with its own file name, minus ".rb" and with
+# every "_" written as "-". This script compares the two, so a
+# selection the host dropped cannot pass as a clean run.
 #
 # --ruby picks the interpreter the suite runs on. Without it the
 # engine keeps its own default.
@@ -33,7 +36,6 @@ RUBY=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
-STAGE=""
 CONSOLE=""
 
 while [ "$#" -gt 0 ]
@@ -56,39 +58,20 @@ do
 done
 
 cleanup() {
-    [ "$KEEP" = "1" ] && return
-    [ -n "$STAGE" ] && rm -rf "$STAGE"
+    [ "$KEEP" = "1" ] && return 0
     [ -n "$CONSOLE" ] && rm -f "$CONSOLE"
     return 0
 }
 trap cleanup EXIT INT TERM
 
-# The staged folder reaches the engine through the app bundle, and only
-# the build step packages it. With --no-build the run would report on
-# whichever suite the last build baked in.
-if [ -n "$SUITE" ] && [ "$BUILD" = "0" ]; then
-    echo "run-engine-tests: --suite needs a build. Drop --no-build." >&2
+if [ -n "$SUITE" ] && [ ! -f "$GAME/$SUITE" ]; then
+    echo "run-engine-tests: $GAME/$SUITE missing" >&2
     exit 2
 fi
 
 if ! xcrun simctl help >/dev/null 2>&1; then
     echo "run-engine-tests: simctl not available. Install Xcode." >&2
     exit 2
-fi
-
-# The engine reads the suite name out of mkxp.json, so --suite stages
-# a copy of the game folder with that one key rewritten. The folder in
-# the repository keeps its own default.
-if [ -n "$SUITE" ]; then
-    if [ ! -f "$GAME/$SUITE" ]; then
-        echo "run-engine-tests: $GAME/$SUITE missing" >&2
-        exit 2
-    fi
-    STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxpz-suite.XXXXXX")"
-    cp -R "$GAME/." "$STAGE"
-    sed "s|\"customScript\": \"[^\"]*\"|\"customScript\": \"$SUITE\"|" \
-        "$GAME/mkxp.json" > "$STAGE/mkxp.json"
-    GAME="$STAGE"
 fi
 
 APP="$ENGINE/build/iphonesimulator-arm64/EngineTests.app"
@@ -134,9 +117,12 @@ fi
 # --- Run --------------------------------------------------------------
 CONSOLE="$(mktemp "${TMPDIR:-/tmp}/mkxpz-engine-tests.XXXXXX")"
 
-echo "run-engine-tests: launching${RUBY:+ on Ruby $RUBY}..."
+echo "run-engine-tests: launching${SUITE:+ $SUITE}${RUBY:+ on Ruby $RUBY}..."
 if [ -n "$RUBY" ]; then
     export SIMCTL_CHILD_MKXP_TEST_RUBY="$RUBY"
+fi
+if [ -n "$SUITE" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_SUITE="$SUITE"
 fi
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!
@@ -173,6 +159,19 @@ if [ -z "$DONE_LINE" ]; then
     echo "Last 20 console lines:" >&2
     tail -n 20 "$CONSOLE" >&2
     exit 1
+fi
+
+# The host applies --suite to the copy of the game folder it makes at
+# launch. Nothing before this point proves the engine read that copy,
+# so compare the name the harness printed against the file asked for.
+if [ -n "$SUITE" ]; then
+    WANT="$(printf '%s' "${SUITE%.rb}" | tr '_' '-')"
+    GOT="$(grep -a '^\[TEST\] SUITE' "$CONSOLE" | tail -n 1 |
+        sed -n 's/^\[TEST\] SUITE \([^ ]*\).*/\1/p')"
+    if [ "$GOT" != "$WANT" ]; then
+        echo "run-engine-tests: asked for $SUITE, but the run reported suite '$GOT', not '$WANT'." >&2
+        exit 1
+    fi
 fi
 
 field() {

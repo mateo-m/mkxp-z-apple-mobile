@@ -68,6 +68,8 @@ jobs:
       - name: Fetch the dependencies
         run: tools/fetch-deps-ios.sh --sdk iphonesimulator
 
+      # This step builds the host. The two after it pick their suite
+      # and their interpreter at launch, so they reuse the build.
       - name: Run the in-engine suite
         run: tools/run-engine-tests.sh --timeout 300
 
@@ -77,24 +79,25 @@ jobs:
         run: |
           for v in 18 19 31; do
             tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" \
-              --timeout 300
+              --no-build --timeout 300
           done
 
-      # A second game folder, because the legacy-method shims only
-      # run for scripts that come out of Scripts.rxdata. See
-      # tests/README.md.
+      # The other side of the legacy-method check: with the transform
+      # off, no script can call a legacy method, so the engine must
+      # not define one. A game reads Module#method_defined? and
+      # installs its own copy.
+      - name: Run the legacy-method suite with the transform off
+        run: |
+          tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31 \
+            --no-build --timeout 300
+
+      # Last, because it needs a second game folder and so a second
+      # build. The legacy-method support only runs for scripts that
+      # come out of Scripts.rxdata. See tests/README.md.
       - name: Run the legacy-method suite
         run: |
           ruby tests/legacy-methods/pack_scripts.rb
           tools/run-engine-tests.sh --game tests/legacy-methods --timeout 300
-
-      # The other side: with the transform off, no script can call a
-      # legacy method, so the engine must not define one. A game reads
-      # Module#method_defined? and installs its own copy.
-      - name: Run the legacy-method suite with the transform off
-        run: |
-          tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31 \
-            --timeout 300
 
   # Aggregate gate, so the ruleset has one context to require.
   summary:

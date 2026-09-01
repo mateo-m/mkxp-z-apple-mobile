@@ -58,15 +58,20 @@ non-zero when a check fails or when the suite never finishes. Pass
 simulator, and `--keep` to hold on to the console log.
 
 `--suite <file>` runs another file in the same folder, and
-`--ruby 18|19|31` picks the interpreter. The engine ships three, so a
-suite that covers interpreter behaviour runs once per version:
+`--ruby 18|19|31` picks the interpreter. The host reads both at
+launch, so one build runs every suite on every interpreter. Add
+`--no-build` to each run after the first:
 
 ```sh
+tools/run-engine-tests.sh
 for v in 18 19 31
 do
-    tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v"
+    tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" --no-build
 done
 ```
+
+`--game` is the exception. That folder goes into the app bundle, so a
+second folder needs a second build.
 
 `ruby_compat.rb` is that suite. Each check there states a behaviour a
 game gets on all three. It covers `$DEBUG` today: Ruby 1.8 and 1.9
@@ -78,9 +83,11 @@ Run `tools/fetch-deps-ios.sh` once first. It downloads the prebuilt
 dependency libraries the engine links against.
 
 `mkxp.json` names the suite to run in its `customScript` key. Change
-that key to run another one, or pass `--suite`, which stages a copy of
-the folder with that key rewritten. It also sets `maxTextureSize`,
-which is how the mega suite reaches the mega paths. See below.
+that key to run another one, or pass `--suite`. The host copies the
+folder out of the read-only bundle at launch and writes the key into
+that copy, so the file in the repository keeps its own default. It
+also sets `maxTextureSize`, which is how the mega suite reaches the
+mega paths. See below.
 
 Write that file as strict JSON. The engine reads JSON5 and would
 accept comments and unquoted keys, but a host launcher may parse the
@@ -189,7 +196,10 @@ Start from `mega_bitmap.rb`. A suite:
 1. Loads the harness on its first lines. The engine skips
    `preloadScript` for a game that boots from a `customScript`, so
    each suite loads the harness itself.
-2. Calls `EngineTest.suite('<name>')`.
+2. Calls `EngineTest.suite('<name>')`. Name it after the file, minus
+   `.rb` and with every `_` written as `-`. `run-engine-tests.sh`
+   compares the two after a `--suite` run, so a suite the host failed
+   to select cannot report a clean pass.
 3. Wraps each check in `EngineTest.test('<name>') { ... }`.
 4. Ends with `EngineTest.finish` and `exit`.
 
