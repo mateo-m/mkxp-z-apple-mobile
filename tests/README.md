@@ -43,6 +43,7 @@ game, which is the only way to reach the drawing code.
 | `mkxp.json` | Config that turns the folder into a game. |
 | `mega_bitmap.rb` | Mega-surface suite. |
 | `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
+| `legacy_methods_off.rb` | The legacy methods stay away when the transform is off. |
 
 Run it on a simulator with one command:
 
@@ -112,6 +113,17 @@ tools/run-engine-tests.sh --game tests/legacy-methods
 `pack_scripts.rb` compresses `engine/harness.rb` and
 `legacy-methods/legacy_methods.rb` into `legacy-methods/Data/`, which
 git ignores. Edit the `.rb` files and pack again.
+
+`engine/legacy_methods_off.rb` covers the other side. The transform
+target is a whole-run setting, so with the transform off no script can
+call these methods. The engine must then leave the names alone, because
+a game tests for them with `Module#method_defined?` and installs its own
+copy. `engine/` has no `syntaxTransform` key, which the engine reads as
+off:
+
+```sh
+tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31
+```
 
 ## The test host
 

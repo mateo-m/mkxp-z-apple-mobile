@@ -88,6 +88,14 @@ jobs:
           ruby tests/legacy-methods/pack_scripts.rb
           tools/run-engine-tests.sh --game tests/legacy-methods --timeout 300
 
+      # The other side: with the transform off, no script can call a
+      # legacy method, so the engine must not define one. A game reads
+      # Module#method_defined? and installs its own copy.
+      - name: Run the legacy-method suite with the transform off
+        run: |
+          tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31 \
+            --timeout 300
+
   # Aggregate gate, so the ruleset has one context to require.
   summary:
     name: Engine tests summary
