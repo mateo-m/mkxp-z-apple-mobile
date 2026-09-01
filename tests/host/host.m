@@ -18,6 +18,11 @@
 // bundle is read only and the engine writes a path cache next to the
 // game. The folder holds an mkxp.json with a customScript, so the
 // engine runs the suite instead of a game.
+//
+// MKXP_TEST_RUBY picks the interpreter: 18, 19 or 31. Without it the
+// engine keeps its own default. A launcher picks the version per
+// game, so a suite that covers interpreter behaviour needs the same
+// choice here.
 
 #import <Foundation/Foundation.h>
 
@@ -39,6 +44,17 @@ static NSString *prepareGameFolder(NSString *source, NSString *documents) {
     return source;
 }
 
+static MKXPRubyVersion requestedRubyVersion(void) {
+    const char *want = getenv("MKXP_TEST_RUBY");
+    if (!want)
+        return MKXP_RUBY_UNSET;
+    if (!strcmp(want, "18")) return MKXP_RUBY_18;
+    if (!strcmp(want, "19")) return MKXP_RUBY_19;
+    if (!strcmp(want, "31")) return MKXP_RUBY_31;
+    NSLog(@"[host] MKXP_TEST_RUBY=%s is not 18, 19 or 31", want);
+    return MKXP_RUBY_UNSET;
+}
+
 static void engineTestHostStart(void) {
     @autoreleasepool {
         NSString *resources = NSBundle.mainBundle.resourcePath;
@@ -47,6 +63,10 @@ static void engineTestHostStart(void) {
 
         NSString *game = prepareGameFolder(
             [resources stringByAppendingPathComponent:@"Game"], documents);
+
+        MKXPRubyVersion ruby = requestedRubyVersion();
+        if (ruby != MKXP_RUBY_UNSET)
+            mkxp_setActiveRubyVersion(ruby);
 
         mkxp_setLauncherIdentity("mkxp-z engine tests");
         mkxp_setUserDataDirectory(documents.fileSystemRepresentation);

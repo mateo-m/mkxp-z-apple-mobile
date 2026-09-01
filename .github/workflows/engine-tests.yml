@@ -71,6 +71,15 @@ jobs:
       - name: Run the in-engine suite
         run: tools/run-engine-tests.sh --timeout 300
 
+      # Once per interpreter: the engine ships three, and a game
+      # that runs on one has to run on the others.
+      - name: Run the interpreter suite
+        run: |
+          for v in 18 19 31; do
+            tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" \
+              --timeout 300
+          done
+
       # A second game folder, because the legacy-method shims only
       # run for scripts that come out of Scripts.rxdata. See
       # tests/README.md.

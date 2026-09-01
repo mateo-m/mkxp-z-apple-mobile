@@ -588,7 +588,33 @@ static void mriBindingInit() {
     /* Load global constants */
     rb_gv_set("MKXP", Qtrue);
     rb_gv_set("MKXP_MAX_TEX_SIZE", INT2NUM(glState.caps.realMaxTexSize));
-    
+
+#if RAPI_FULL < 200
+    /* Give $DEBUG storage of its own on Ruby 1.8 and 1.9.
+     *
+     * Those two bind $DEBUG to the interpreter's own `ruby_debug`,
+     * which changes how strict Ruby is. sprintf.c then raises
+     * "too many arguments for format string" for a call that passes
+     * a spare argument, eval.c prints every exception, and a thread
+     * that raises kills the process. RGSS games use $DEBUG as a game
+     * flag for debug menus, and Pokemon Essentials passes a spare
+     * argument in many sprintf calls, so a game that turns $DEBUG on
+     * dies at the first one (issue #67, the "Logros" script of
+     * Pokemon Z). Ruby 3.1 in this engine leaves sprintf alone, so
+     * the same game runs there.
+     *
+     * Point $DEBUG and its alias $-d at our own value. Game code
+     * reads and writes it as before, and `ruby_debug` stays false.
+     *
+     * A host that starts a second VM in one process needs the
+     * reset below. The static still holds the object the last game
+     * assigned, and the new VM would mark that dead address. */
+    static VALUE legacyDebugFlag = Qfalse;
+    legacyDebugFlag = Qfalse;
+    rb_define_variable("$DEBUG", &legacyDebugFlag);
+    rb_define_variable("$-d", &legacyDebugFlag);
+#endif
+
     VALUE debug = rb_bool_new(shState->config().editor.debug);
     if (rgssVer == 1)
         rb_gv_set("DEBUG", debug);

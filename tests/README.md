@@ -42,6 +42,7 @@ game, which is the only way to reach the drawing code.
 | `harness.rb` | Assertions and result reporting. |
 | `mkxp.json` | Config that turns the folder into a game. |
 | `mega_bitmap.rb` | Mega-surface suite. |
+| `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
 
 Run it on a simulator with one command:
 
@@ -55,12 +56,30 @@ non-zero when a check fails or when the suite never finishes. Pass
 `--no-build` to reuse the last build, `--device <udid>` to pick a
 simulator, and `--keep` to hold on to the console log.
 
+`--suite <file>` runs another file in the same folder, and
+`--ruby 18|19|31` picks the interpreter. The engine ships three, so a
+suite that covers interpreter behaviour runs once per version:
+
+```sh
+for v in 18 19 31
+do
+    tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v"
+done
+```
+
+`ruby_compat.rb` is that suite. Each check there states a behaviour a
+game gets on all three. It covers `$DEBUG` today: Ruby 1.8 and 1.9
+bind that name to the interpreter's own debug flag, which makes
+`sprintf` raise for a call that passes a spare argument, so
+`binding/binding-mri.cpp` gives the name storage of its own.
+
 Run `tools/fetch-deps-ios.sh` once first. It downloads the prebuilt
 dependency libraries the engine links against.
 
 `mkxp.json` names the suite to run in its `customScript` key. Change
-that key to run another one. It also sets `maxTextureSize`, which is
-how the suite reaches the mega paths. See below.
+that key to run another one, or pass `--suite`, which stages a copy of
+the folder with that key rewritten. It also sets `maxTextureSize`,
+which is how the mega suite reaches the mega paths. See below.
 
 Write that file as strict JSON. The engine reads JSON5 and would
 accept comments and unquoted keys, but a host launcher may parse the

@@ -8,7 +8,14 @@
 #
 # Usage:
 #   tools/run-engine-tests.sh [--device <name or udid>] [--game <dir>]
+#                             [--suite <file>] [--ruby 18|19|31]
 #                             [--timeout <seconds>] [--keep] [--no-build]
+#
+# --suite names another file in the game folder to run in place of
+# the one mkxp.json points at.
+#
+# --ruby picks the interpreter the suite runs on. Without it the
+# engine keeps its own default.
 #
 # Exit status:
 #   0  every test passed
@@ -21,6 +28,8 @@ ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE=""
 GAME="$ENGINE/tests/engine"
 TIMEOUT=180
+SUITE=""
+RUBY=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
@@ -30,6 +39,8 @@ do
     case "$1" in
         --device) DEVICE="$2"; shift 2 ;;
         --game) GAME="$2"; shift 2 ;;
+        --suite) SUITE="$2"; shift 2 ;;
+        --ruby) RUBY="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
@@ -40,6 +51,21 @@ done
 if ! xcrun simctl help >/dev/null 2>&1; then
     echo "run-engine-tests: simctl not available. Install Xcode." >&2
     exit 2
+fi
+
+# The engine reads the suite name out of mkxp.json, so --suite stages
+# a copy of the game folder with that one key rewritten. The folder in
+# the repository keeps its own default.
+if [ -n "$SUITE" ]; then
+    if [ ! -f "$GAME/$SUITE" ]; then
+        echo "run-engine-tests: $GAME/$SUITE missing" >&2
+        exit 2
+    fi
+    STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxpz-suite.XXXXXX")"
+    cp -R "$GAME/." "$STAGE"
+    sed "s|\"customScript\": \"[^\"]*\"|\"customScript\": \"$SUITE\"|" \
+        "$GAME/mkxp.json" > "$STAGE/mkxp.json"
+    GAME="$STAGE"
 fi
 
 APP="$ENGINE/build/iphonesimulator-arm64/EngineTests.app"
@@ -88,7 +114,10 @@ if [ "$KEEP" = "0" ]; then
     trap 'rm -f "$CONSOLE"' EXIT INT TERM
 fi
 
-echo "run-engine-tests: launching..."
+echo "run-engine-tests: launching${RUBY:+ on Ruby $RUBY}..."
+if [ -n "$RUBY" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_RUBY="$RUBY"
+fi
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!
 
