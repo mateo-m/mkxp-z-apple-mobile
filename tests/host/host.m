@@ -18,6 +18,21 @@
 // bundle is read only and the engine writes a path cache next to the
 // game. The folder holds an mkxp.json with a customScript, so the
 // engine runs the suite instead of a game.
+//
+// Two variables pick what the run covers, both read at launch:
+//
+//   MKXP_TEST_RUBY   the interpreter: 18, 19 or 31. Without it the
+//                    engine keeps its own default. A launcher picks
+//                    the version per game, so a suite that covers
+//                    interpreter behaviour needs the same choice here.
+//   MKXP_TEST_SUITE  a file in the game folder to run in place of the
+//                    one mkxp.json names.
+//
+// Both belong to the launch and not to the build, so one build of
+// this host runs every suite on every interpreter.
+
+#include <stdlib.h>
+#include <string.h>
 
 #import <Foundation/Foundation.h>
 
@@ -39,6 +54,56 @@ static NSString *prepareGameFolder(NSString *source, NSString *documents) {
     return source;
 }
 
+// The engine reads the suite name out of mkxp.json, so the choice
+// has to land in the writable copy before the engine opens it.
+static void applyRequestedSuite(NSString *game) {
+    const char *want = getenv("MKXP_TEST_SUITE");
+    if (!want || !*want)
+        return;
+
+    NSString *suite = @(want);
+    if (![NSFileManager.defaultManager
+            fileExistsAtPath:[game stringByAppendingPathComponent:suite]]) {
+        NSLog(@"[host] MKXP_TEST_SUITE=%@ names no file in %@", suite, game);
+        return;
+    }
+
+    NSString *path = [game stringByAppendingPathComponent:@"mkxp.json"];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data
+                                                       options:0
+                                                         error:nil]
+                     : nil;
+    if (![parsed isKindOfClass:NSDictionary.class]) {
+        NSLog(@"[host] %@ holds no JSON object", path);
+        return;
+    }
+
+    NSMutableDictionary *config = [parsed mutableCopy];
+    config[@"customScript"] = suite;
+
+    NSData *out = [NSJSONSerialization dataWithJSONObject:config
+                                                  options:0
+                                                    error:nil];
+    if (!out || ![out writeToFile:path atomically:YES]) {
+        NSLog(@"[host] could not write %@", path);
+        return;
+    }
+
+    NSLog(@"[host] suite: %@", suite);
+}
+
+static MKXPRubyVersion requestedRubyVersion(void) {
+    const char *want = getenv("MKXP_TEST_RUBY");
+    if (!want)
+        return MKXP_RUBY_UNSET;
+    if (!strcmp(want, "18")) return MKXP_RUBY_18;
+    if (!strcmp(want, "19")) return MKXP_RUBY_19;
+    if (!strcmp(want, "31")) return MKXP_RUBY_31;
+    NSLog(@"[host] MKXP_TEST_RUBY=%s is not 18, 19 or 31", want);
+    return MKXP_RUBY_UNSET;
+}
+
 static void engineTestHostStart(void) {
     @autoreleasepool {
         NSString *resources = NSBundle.mainBundle.resourcePath;
@@ -47,6 +112,11 @@ static void engineTestHostStart(void) {
 
         NSString *game = prepareGameFolder(
             [resources stringByAppendingPathComponent:@"Game"], documents);
+        applyRequestedSuite(game);
+
+        MKXPRubyVersion ruby = requestedRubyVersion();
+        if (ruby != MKXP_RUBY_UNSET)
+            mkxp_setActiveRubyVersion(ruby);
 
         mkxp_setLauncherIdentity("mkxp-z engine tests");
         mkxp_setUserDataDirectory(documents.fileSystemRepresentation);

@@ -8,7 +8,17 @@
 #
 # Usage:
 #   tools/run-engine-tests.sh [--device <name or udid>] [--game <dir>]
+#                             [--suite <file>] [--ruby 18|19|31]
 #                             [--timeout <seconds>] [--keep] [--no-build]
+#
+# --suite names another file in the game folder to run in place of
+# the one mkxp.json points at. The suite must call
+# EngineTest.suite with its own file name, minus ".rb" and with
+# every "_" written as "-". This script compares the two, so a
+# selection the host dropped cannot pass as a clean run.
+#
+# --ruby picks the interpreter the suite runs on. Without it the
+# engine keeps its own default.
 #
 # Exit status:
 #   0  every test passed
@@ -21,21 +31,43 @@ ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE=""
 GAME="$ENGINE/tests/engine"
 TIMEOUT=180
+SUITE=""
+RUBY=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
+CONSOLE=""
 
 while [ "$#" -gt 0 ]
 do
     case "$1" in
         --device) DEVICE="$2"; shift 2 ;;
         --game) GAME="$2"; shift 2 ;;
+        --suite) SUITE="$2"; shift 2 ;;
+        --ruby)
+            case "$2" in
+                18|19|31) ;;
+                *) echo "run-engine-tests: --ruby takes 18, 19 or 31, not $2" >&2; exit 2 ;;
+            esac
+            RUBY="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
         *) echo "run-engine-tests: unknown argument $1" >&2; exit 2 ;;
     esac
 done
+
+cleanup() {
+    [ "$KEEP" = "1" ] && return 0
+    [ -n "$CONSOLE" ] && rm -f "$CONSOLE"
+    return 0
+}
+trap cleanup EXIT INT TERM
+
+if [ -n "$SUITE" ] && [ ! -f "$GAME/$SUITE" ]; then
+    echo "run-engine-tests: $GAME/$SUITE missing" >&2
+    exit 2
+fi
 
 if ! xcrun simctl help >/dev/null 2>&1; then
     echo "run-engine-tests: simctl not available. Install Xcode." >&2
@@ -84,11 +116,14 @@ fi
 
 # --- Run --------------------------------------------------------------
 CONSOLE="$(mktemp "${TMPDIR:-/tmp}/mkxpz-engine-tests.XXXXXX")"
-if [ "$KEEP" = "0" ]; then
-    trap 'rm -f "$CONSOLE"' EXIT INT TERM
-fi
 
-echo "run-engine-tests: launching..."
+echo "run-engine-tests: launching${SUITE:+ $SUITE}${RUBY:+ on Ruby $RUBY}..."
+if [ -n "$RUBY" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_RUBY="$RUBY"
+fi
+if [ -n "$SUITE" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_SUITE="$SUITE"
+fi
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!
 
@@ -124,6 +159,19 @@ if [ -z "$DONE_LINE" ]; then
     echo "Last 20 console lines:" >&2
     tail -n 20 "$CONSOLE" >&2
     exit 1
+fi
+
+# The host applies --suite to the copy of the game folder it makes at
+# launch. Nothing before this point proves the engine read that copy,
+# so compare the name the harness printed against the file asked for.
+if [ -n "$SUITE" ]; then
+    WANT="$(printf '%s' "${SUITE%.rb}" | tr '_' '-')"
+    GOT="$(grep -a '^\[TEST\] SUITE' "$CONSOLE" | tail -n 1 |
+        sed -n 's/^\[TEST\] SUITE \([^ ]*\).*/\1/p')"
+    if [ "$GOT" != "$WANT" ]; then
+        echo "run-engine-tests: asked for $SUITE, but the run reported suite '$GOT', not '$WANT'." >&2
+        exit 1
+    fi
 fi
 
 field() {

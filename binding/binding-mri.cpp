@@ -213,6 +213,28 @@ RB_METHOD(mkxpParseCSV);
 
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 #if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
+/* True when the run's syntax transform target can satisfy a gate at
+ * major.minor. The target is a whole-run setting, so a stub that fails this
+ * test can only raise. Module#method_defined? still reports it as present, and
+ * a game that guards its own copy with that idiom then keeps the dead one:
+ *
+ *   if !Array.method_defined?(:nitems)
+ *     class Array
+ *       def nitems
+ *         count { |x| !x.nil? }
+ *       end
+ *     end
+ *   end
+ *
+ * Pokemon Rejuvenation writes that, and every Poke Ball throw failed. */
+static bool mkxp_legacy_stub_can_run(unsigned int major, unsigned int minor) {
+    extern unsigned int mkxp_syntax_transform_target_ruby_version_major,
+                        mkxp_syntax_transform_target_ruby_version_minor;
+    if (mkxp_syntax_transform_target_ruby_version_major != major)
+        return mkxp_syntax_transform_target_ruby_version_major < major;
+    return mkxp_syntax_transform_target_ruby_version_minor <= minor;
+}
+
 static VALUE legacy_array_choice(int argc, VALUE *argv, VALUE self) {
     if (!mkxp_ec_is_syntax_transform_active(1, 8, -1))
         mkxp_raise_no_method_exception(self, "choice");
@@ -412,41 +434,47 @@ static void mkxp_install_legacy_respond_to() {
 static void mriBindingInit() {
 #ifdef MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
 #if RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
-    rb_define_method(rb_cArray, "choice", legacy_array_choice, -1);
-    rb_define_method(rb_cArray, "nitems", legacy_array_nitems, 0);
-    rb_define_method(rb_cArray, "indexes", legacy_array_indexes, -1);
-    rb_define_method(rb_cArray, "indices", legacy_array_indices, -1);
-    rb_define_method(rb_cHash, "indexes", legacy_hash_indexes, -1);
-    rb_define_method(rb_cHash, "indices", legacy_hash_indices, -1);
-    rb_define_method(rb_mKernel, "id", legacy_kernel_id, 0);
-    rb_define_method(rb_mKernel, "type", legacy_kernel_type, 0);
-    rb_define_method(rb_cSymbol, "to_i", legacy_symbol_to_i, 0);
-    rb_define_method(rb_cSymbol, "to_int", legacy_symbol_to_int, 0);
-    mkxp_register_legacy_stub(rb_cArray, "choice", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cArray, "nitems", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cArray, "indexes", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cArray, "indices", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cHash, "indexes", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cHash, "indices", false, 1, 8);
-    mkxp_register_legacy_stub(rb_mKernel, "id", false, 1, 8);
-    mkxp_register_legacy_stub(rb_mKernel, "type", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cSymbol, "to_i", false, 1, 8);
-    mkxp_register_legacy_stub(rb_cSymbol, "to_int", false, 1, 8);
+    if (mkxp_legacy_stub_can_run(1, 8)) {
+        rb_define_method(rb_cArray, "choice", legacy_array_choice, -1);
+        rb_define_method(rb_cArray, "nitems", legacy_array_nitems, 0);
+        rb_define_method(rb_cArray, "indexes", legacy_array_indexes, -1);
+        rb_define_method(rb_cArray, "indices", legacy_array_indices, -1);
+        rb_define_method(rb_cHash, "indexes", legacy_hash_indexes, -1);
+        rb_define_method(rb_cHash, "indices", legacy_hash_indices, -1);
+        rb_define_method(rb_mKernel, "id", legacy_kernel_id, 0);
+        rb_define_method(rb_mKernel, "type", legacy_kernel_type, 0);
+        rb_define_method(rb_cSymbol, "to_i", legacy_symbol_to_i, 0);
+        rb_define_method(rb_cSymbol, "to_int", legacy_symbol_to_int, 0);
+        mkxp_register_legacy_stub(rb_cArray, "choice", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cArray, "nitems", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cArray, "indexes", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cArray, "indices", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cHash, "indexes", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cHash, "indices", false, 1, 8);
+        mkxp_register_legacy_stub(rb_mKernel, "id", false, 1, 8);
+        mkxp_register_legacy_stub(rb_mKernel, "type", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cSymbol, "to_i", false, 1, 8);
+        mkxp_register_legacy_stub(rb_cSymbol, "to_int", false, 1, 8);
+    }
 #endif // RAPI_MAJOR > 1 || (RAPI_MAJOR == 1 && RAPI_MINOR > 8)
 #if RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
-    rb_define_method(rb_cHash, "index", legacy_hash_index, -1);
-    mkxp_register_legacy_stub(rb_cHash, "index", false, 2, 7);
+    if (mkxp_legacy_stub_can_run(2, 7)) {
+        rb_define_method(rb_cHash, "index", legacy_hash_index, -1);
+        mkxp_register_legacy_stub(rb_cHash, "index", false, 2, 7);
+    }
 #endif // RAPI_MAJOR > 2 || (RAPI_MAJOR == 2 && RAPI_MINOR > 7)
 #if RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
-    rb_define_singleton_method(rb_cDir, "exists?", legacy_dir_exists, 1);
-    rb_define_singleton_method(rb_cFile, "exists?", legacy_file_exists, 1);
-    rb_define_module_function(rb_mFileTest, "exists?", legacy_file_test_exists, 1);
-    rb_define_method(rb_mKernel, "=~", legacy_kernel_match, 1);
-    mkxp_register_legacy_stub(rb_cDir, "exists?", true, 3, 1);
-    mkxp_register_legacy_stub(rb_cFile, "exists?", true, 3, 1);
-    mkxp_register_legacy_stub(rb_mFileTest, "exists?", true, 3, 1);
-    /* Kernel#=~ stays out of the table. Stock Ruby keeps Object#=~
-     * through 3.1, so a false answer would be the wrong one. */
+    if (mkxp_legacy_stub_can_run(3, 1)) {
+        rb_define_singleton_method(rb_cDir, "exists?", legacy_dir_exists, 1);
+        rb_define_singleton_method(rb_cFile, "exists?", legacy_file_exists, 1);
+        rb_define_module_function(rb_mFileTest, "exists?", legacy_file_test_exists, 1);
+        rb_define_method(rb_mKernel, "=~", legacy_kernel_match, 1);
+        mkxp_register_legacy_stub(rb_cDir, "exists?", true, 3, 1);
+        mkxp_register_legacy_stub(rb_cFile, "exists?", true, 3, 1);
+        mkxp_register_legacy_stub(rb_mFileTest, "exists?", true, 3, 1);
+        /* Kernel#=~ stays out of the table. Stock Ruby keeps Object#=~
+         * through 3.1, so a false answer would be the wrong one. */
+    }
 #endif // RAPI_MAJOR > 3 || (RAPI_MAJOR == 3 && RAPI_MINOR > 1)
     mkxp_install_legacy_respond_to();
 #endif // MKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES
@@ -588,7 +616,33 @@ static void mriBindingInit() {
     /* Load global constants */
     rb_gv_set("MKXP", Qtrue);
     rb_gv_set("MKXP_MAX_TEX_SIZE", INT2NUM(glState.caps.realMaxTexSize));
-    
+
+#if RAPI_FULL < 200
+    /* Give $DEBUG storage of its own on Ruby 1.8 and 1.9.
+     *
+     * Those two bind $DEBUG to the interpreter's own `ruby_debug`,
+     * which changes how strict Ruby is. sprintf.c then raises
+     * "too many arguments for format string" for a call that passes
+     * a spare argument, eval.c prints every exception, and a thread
+     * that raises kills the process. RGSS games use $DEBUG as a game
+     * flag for debug menus, and Pokemon Essentials passes a spare
+     * argument in many sprintf calls, so a game that turns $DEBUG on
+     * dies at the first one (issue #67, the "Logros" script of
+     * Pokemon Z). Ruby 3.1 in this engine leaves sprintf alone, so
+     * the same game runs there.
+     *
+     * Point $DEBUG and its alias $-d at our own value. Game code
+     * reads and writes it as before, and `ruby_debug` stays false.
+     *
+     * A host that starts a second VM in one process needs the
+     * reset below. The static still holds the object the last game
+     * assigned, and the new VM would mark that dead address. */
+    static VALUE legacyDebugFlag = Qfalse;
+    legacyDebugFlag = Qfalse;
+    rb_define_variable("$DEBUG", &legacyDebugFlag);
+    rb_define_variable("$-d", &legacyDebugFlag);
+#endif
+
     VALUE debug = rb_bool_new(shState->config().editor.debug);
     if (rgssVer == 1)
         rb_gv_set("DEBUG", debug);
@@ -1359,7 +1413,7 @@ json5pp::value loadUserSettings() {
     json5pp::value ret;
     VALUE cpath = mkxp_str_new_cstr(shState->config().userConfPath.c_str());
     
-    if (rb_funcall(rb_cFile, rb_intern("exists?"), 1, cpath) == Qtrue) {
+    if (rb_funcall(rb_cFile, rb_intern("exist?"), 1, cpath) == Qtrue) {
         VALUE f = rb_funcall(rb_cFile, rb_intern("open"), 2, cpath, rb_str_new("r", 1));
         VALUE data = rb_funcall(f, rb_intern("read"), 0);
         rb_funcall(f, rb_intern("close"), 0);

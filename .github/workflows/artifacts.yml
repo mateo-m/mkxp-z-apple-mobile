@@ -58,7 +58,15 @@ jobs:
       - name: Set up ccache
         run: |
           brew install ccache
-          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            # This job picks the newest Xcode above. The default
+            # compiler check reads size and mtime, so a runner image
+            # that ships a new clang could serve objects the old one
+            # built. Hashing the compiler removes the doubt.
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=800M"
+          } >> "$GITHUB_ENV"
 
       - name: Cache compiler cache
         uses: actions/cache@v4

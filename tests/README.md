@@ -42,6 +42,8 @@ game, which is the only way to reach the drawing code.
 | `harness.rb` | Assertions and result reporting. |
 | `mkxp.json` | Config that turns the folder into a game. |
 | `mega_bitmap.rb` | Mega-surface suite. |
+| `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
+| `legacy_methods_off.rb` | The legacy methods stay away when the transform is off. |
 
 Run it on a simulator with one command:
 
@@ -55,12 +57,37 @@ non-zero when a check fails or when the suite never finishes. Pass
 `--no-build` to reuse the last build, `--device <udid>` to pick a
 simulator, and `--keep` to hold on to the console log.
 
+`--suite <file>` runs another file in the same folder, and
+`--ruby 18|19|31` picks the interpreter. The host reads both at
+launch, so one build runs every suite on every interpreter. Add
+`--no-build` to each run after the first:
+
+```sh
+tools/run-engine-tests.sh
+for v in 18 19 31
+do
+    tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" --no-build
+done
+```
+
+`--game` is the exception. That folder goes into the app bundle, so a
+second folder needs a second build.
+
+`ruby_compat.rb` is that suite. Each check there states a behaviour a
+game gets on all three. It covers `$DEBUG` today: Ruby 1.8 and 1.9
+bind that name to the interpreter's own debug flag, which makes
+`sprintf` raise for a call that passes a spare argument, so
+`binding/binding-mri.cpp` gives the name storage of its own.
+
 Run `tools/fetch-deps-ios.sh` once first. It downloads the prebuilt
 dependency libraries the engine links against.
 
 `mkxp.json` names the suite to run in its `customScript` key. Change
-that key to run another one. It also sets `maxTextureSize`, which is
-how the suite reaches the mega paths. See below.
+that key to run another one, or pass `--suite`. The host copies the
+folder out of the read-only bundle at launch and writes the key into
+that copy, so the file in the repository keeps its own default. It
+also sets `maxTextureSize`, which is how the mega suite reaches the
+mega paths. See below.
 
 Write that file as strict JSON. The engine reads JSON5 and would
 accept comments and unquoted keys, but a host launcher may parse the
@@ -93,6 +120,17 @@ tools/run-engine-tests.sh --game tests/legacy-methods
 `pack_scripts.rb` compresses `engine/harness.rb` and
 `legacy-methods/legacy_methods.rb` into `legacy-methods/Data/`, which
 git ignores. Edit the `.rb` files and pack again.
+
+`engine/legacy_methods_off.rb` covers the other side. The transform
+target is a whole-run setting, so with the transform off no script can
+call these methods. The engine must then leave the names alone, because
+a game tests for them with `Module#method_defined?` and installs its own
+copy. `engine/` has no `syntaxTransform` key, which the engine reads as
+off:
+
+```sh
+tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31
+```
 
 ## The test host
 
@@ -158,7 +196,10 @@ Start from `mega_bitmap.rb`. A suite:
 1. Loads the harness on its first lines. The engine skips
    `preloadScript` for a game that boots from a `customScript`, so
    each suite loads the harness itself.
-2. Calls `EngineTest.suite('<name>')`.
+2. Calls `EngineTest.suite('<name>')`. Name it after the file, minus
+   `.rb` and with every `_` written as `-`. `run-engine-tests.sh`
+   compares the two after a `--suite` run, so a suite the host failed
+   to select cannot report a clean pass.
 3. Wraps each check in `EngineTest.test('<name>') { ... }`.
 4. Ends with `EngineTest.finish` and `exit`.
 
