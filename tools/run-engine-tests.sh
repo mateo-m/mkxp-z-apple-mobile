@@ -33,6 +33,8 @@ RUBY=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
+STAGE=""
+CONSOLE=""
 
 while [ "$#" -gt 0 ]
 do
@@ -40,13 +42,34 @@ do
         --device) DEVICE="$2"; shift 2 ;;
         --game) GAME="$2"; shift 2 ;;
         --suite) SUITE="$2"; shift 2 ;;
-        --ruby) RUBY="$2"; shift 2 ;;
+        --ruby)
+            case "$2" in
+                18|19|31) ;;
+                *) echo "run-engine-tests: --ruby takes 18, 19 or 31, not $2" >&2; exit 2 ;;
+            esac
+            RUBY="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
         *) echo "run-engine-tests: unknown argument $1" >&2; exit 2 ;;
     esac
 done
+
+cleanup() {
+    [ "$KEEP" = "1" ] && return
+    [ -n "$STAGE" ] && rm -rf "$STAGE"
+    [ -n "$CONSOLE" ] && rm -f "$CONSOLE"
+    return 0
+}
+trap cleanup EXIT INT TERM
+
+# The staged folder reaches the engine through the app bundle, and only
+# the build step packages it. With --no-build the run would report on
+# whichever suite the last build baked in.
+if [ -n "$SUITE" ] && [ "$BUILD" = "0" ]; then
+    echo "run-engine-tests: --suite needs a build. Drop --no-build." >&2
+    exit 2
+fi
 
 if ! xcrun simctl help >/dev/null 2>&1; then
     echo "run-engine-tests: simctl not available. Install Xcode." >&2
@@ -110,9 +133,6 @@ fi
 
 # --- Run --------------------------------------------------------------
 CONSOLE="$(mktemp "${TMPDIR:-/tmp}/mkxpz-engine-tests.XXXXXX")"
-if [ "$KEEP" = "0" ]; then
-    trap 'rm -f "$CONSOLE"' EXIT INT TERM
-fi
 
 echo "run-engine-tests: launching${RUBY:+ on Ruby $RUBY}..."
 if [ -n "$RUBY" ]; then
