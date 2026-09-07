@@ -683,9 +683,15 @@ bool SharedFontState::fontPresent(std::string family) const
 	std::transform(family.begin(), family.end(), family.begin(),
 		[](unsigned char c){ return std::tolower(c); });
 
-	/* Check for substitutions */
+	/* Check for substitutions. An empty target is the bundled
+	 * font, so the family is present. Without this, Font.exist?
+	 * ("Arial") is false on iOS and games that gate on it quit. */
 	if (p->subs.contains(family))
+	{
 		family = p->subs[family];
+		if (family.empty())
+			return true;
+	}
 
 	const FontSet &set = p->sets[family];
 
