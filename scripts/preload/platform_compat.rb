@@ -191,6 +191,16 @@ if defined?(System) && System.respond_to?(:data_directory) && !System.respond_to
   end
 end
 
+# mkxp-z moved mouse_in_window from System to Input. Pokemon
+# Essentials v20 and v20.1 still call the System name in
+# Mouse.getMousePos, so every mouse read raised NoMethodError.
+if defined?(System) && defined?(Input) &&
+   Input.respond_to?(:mouse_in_window) && !System.respond_to?(:mouse_in_window)
+  def System.mouse_in_window
+    Input.mouse_in_window
+  end
+end
+
 save_root = nil
 begin
   if defined?(System) && System.respond_to?(:data_directory)
