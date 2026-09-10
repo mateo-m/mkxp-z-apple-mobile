@@ -15,6 +15,7 @@
 #include "config.h"
 #include <atomic>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <condition_variable>
 #include <string>
@@ -164,6 +165,11 @@ struct BridgeCallback {
 // Key event callback: engine -> UI notification for hardware key events.
 static BridgeCallback<mkxp_KeyEventCallback> s_keyEventCb;
 static bool s_keyWatcherInstalled = false;
+
+// Mouse trace: engine -> UI notification for every mouse event on the
+// SDL queue, whatever produced it.
+static BridgeCallback<mkxp_MouseTraceCallback> s_mouseTraceCb;
+static bool s_mouseTraceWatcherInstalled = false;
 
 // Text-input mode change callback: engine -> UI notification when
 // SDL_StartTextInput / SDL_StopTextInput fires inside EventThread.
@@ -514,7 +520,7 @@ void *mkxp_getSDLUIKitWindow(void) {
 
 // Input bridge
 
-void mkxp_injectKeyEvent(int scancode, int pressed) {
+static Uint32 injectedWindowID() {
     if (s_sdlWindowID.load(std::memory_order_relaxed) == 0) {
         SDL_Window *w = SDL_GetGrabbedWindow();
         if (w) {
@@ -524,17 +530,61 @@ void mkxp_injectKeyEvent(int scancode, int pressed) {
             s_sdlWindowID.store(1, std::memory_order_relaxed);
         }
     }
+    return s_sdlWindowID.load(std::memory_order_relaxed);
+}
 
+void mkxp_injectKeyEvent(int scancode, int pressed) {
     SDL_Event event{};
     event.type              = pressed ? SDL_KEYDOWN : SDL_KEYUP;
     event.key.timestamp     = SDL_GetTicks();
-    event.key.windowID      = s_sdlWindowID.load(std::memory_order_relaxed);
+    event.key.windowID      = injectedWindowID();
     event.key.state         = pressed ? SDL_PRESSED : SDL_RELEASED;
     event.key.repeat        = 0;
     event.key.keysym.scancode = (SDL_Scancode)scancode;
     event.key.keysym.sym    = SDL_GetKeyFromScancode((SDL_Scancode)scancode);
     event.key.keysym.mod    = KMOD_NONE;
     SDL_PushEvent(&event);
+}
+
+/* Mirrors what SDL's own touch-to-mouse synthesis emits
+ * (SDL_touch.c), so an injecting host and the SDL view produce the
+ * same event stream:
+ *   - a press sends motion first, then the button, at one point
+ *   - a release sends the button only
+ * Coordinates arrive in top-left window points. The host decides
+ * which finger owns the pointer and how to clamp. */
+void mkxp_injectPointerEvent(int x, int y, MKXPPointerPhase phase) {
+    const Uint32 windowID = injectedWindowID();
+    const bool pressed    = (phase == MKXP_POINTER_DOWN);
+    const bool released   = (phase == MKXP_POINTER_UP ||
+                             phase == MKXP_POINTER_CANCEL);
+
+    if (pressed || phase == MKXP_POINTER_MOVE) {
+        SDL_Event motion{};
+        motion.type             = SDL_MOUSEMOTION;
+        motion.motion.timestamp = SDL_GetTicks();
+        motion.motion.windowID  = windowID;
+        motion.motion.which     = SDL_TOUCH_MOUSEID;
+        motion.motion.state     = pressed ? 0 : SDL_BUTTON_LMASK;
+        motion.motion.x         = x;
+        motion.motion.y         = y;
+        SDL_PushEvent(&motion);
+    }
+
+    if (pressed || released) {
+        SDL_Event button{};
+        button.type             = pressed ? SDL_MOUSEBUTTONDOWN
+                                          : SDL_MOUSEBUTTONUP;
+        button.button.timestamp = SDL_GetTicks();
+        button.button.windowID  = windowID;
+        button.button.which     = SDL_TOUCH_MOUSEID;
+        button.button.button    = SDL_BUTTON_LEFT;
+        button.button.state     = pressed ? SDL_PRESSED : SDL_RELEASED;
+        button.button.clicks    = 1;
+        button.button.x         = x;
+        button.button.y         = y;
+        SDL_PushEvent(&button);
+    }
 }
 
 static int keyEventWatcherFn(void * /*userdata*/, SDL_Event *event) {
@@ -551,6 +601,42 @@ void mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata) {
     if (!s_keyWatcherInstalled) {
         SDL_AddEventWatch(keyEventWatcherFn, NULL);
         s_keyWatcherInstalled = true;
+    }
+}
+
+static double uptimeSeconds() {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_UPTIME_RAW, &ts) != 0)
+        return 0.0;
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Watches the queue rather than the injection call, so a host sees
+ * the SDL view's events and its own injected events through one lens.
+ * Comparing the two streams is the point. */
+static int mouseTraceWatcherFn(void * /*userdata*/, SDL_Event *event) {
+    switch (event->type) {
+    case SDL_MOUSEMOTION:
+        s_mouseTraceCb.fire((int)event->type, event->motion.x, event->motion.y,
+                            0, (int)event->motion.which, uptimeSeconds());
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        s_mouseTraceCb.fire((int)event->type, event->button.x, event->button.y,
+                            (int)event->button.button,
+                            (int)event->button.which, uptimeSeconds());
+        break;
+    default:
+        break;
+    }
+    return 1; // keep processing the event
+}
+
+void mkxp_setMouseTraceCallback(mkxp_MouseTraceCallback cb, void *userdata) {
+    s_mouseTraceCb.set(cb, userdata);
+    if (!s_mouseTraceWatcherInstalled) {
+        SDL_AddEventWatch(mouseTraceWatcherFn, NULL);
+        s_mouseTraceWatcherInstalled = true;
     }
 }
 

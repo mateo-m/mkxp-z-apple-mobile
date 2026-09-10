@@ -106,6 +106,14 @@ typedef void (*mkxp_GameRectChangedCallback)(float x, float y, float w, float h,
 // Key event callback (Engine -> UI, fires on background thread)
 typedef void (*mkxp_KeyEventCallback)(int scancode, int pressed, void *userdata);
 
+// Reports every mouse event that reaches the SDL queue, whoever
+// produced it. `type` is the SDL_Event type, `button` is 0 for
+// motion, and `uptime` is seconds on CLOCK_UPTIME_RAW. A host uses
+// it to compare its own input path against the platform's.
+typedef void (*mkxp_MouseTraceCallback)(int type, int x, int y, int button,
+                                        int which, double uptime,
+                                        void *userdata);
+
 // Text-input mode callback (Engine -> UI). See the text-input bridge
 // section below.
 typedef void (*mkxp_TextInputModeCallback)(int active, void *userdata);
@@ -170,6 +178,16 @@ typedef enum {
     MKXP_RUBY_31    = 31,
 } MKXPRubyVersion;
 
+// Phase of a host-injected pointer event. Pointer injection lets a
+// host drive game mouse input from its own views instead of the SDL
+// view. A host that never injects keeps the platform behaviour.
+typedef enum {
+    MKXP_POINTER_DOWN   = 0,
+    MKXP_POINTER_MOVE   = 1,
+    MKXP_POINTER_UP     = 2,
+    MKXP_POINTER_CANCEL = 3,
+} MKXPPointerPhase;
+
 typedef struct {
     const char *managedConfigDir;
     const char *userDataDirectory;
@@ -231,6 +249,16 @@ void        mkxp_setGameRectChangedCallback(mkxp_GameRectChangedCallback cb, voi
 void        mkxp_injectKeyEvent(int scancode, int pressed);
 
 void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata);
+
+void        mkxp_setMouseTraceCallback(mkxp_MouseTraceCallback cb, void *userdata);
+
+// Pushes one left-button pointer event in top-left window points.
+//
+// The host owns the policy: which finger owns the pointer, and how
+// coordinates are clamped. This call pushes what it is given. The
+// events carry `SDL_TOUCH_MOUSEID`, so `mkxp_setTouchMouseEnabled`
+// still gates whether the game sees them.
+void        mkxp_injectPointerEvent(int x, int y, MKXPPointerPhase phase);
 
 // Managed-config directory (UI -> Engine).
 //
@@ -643,7 +671,9 @@ static inline void        mkxp_setEngineTerminatedCallback(mkxp_EngineTerminated
 static inline void        mkxp_setGameRectChangedCallback(mkxp_GameRectChangedCallback cb, void *userdata) { (void)cb; (void)userdata; }
 
 static inline void        mkxp_injectKeyEvent(int scancode, int pressed) { (void)scancode; (void)pressed; }
+static inline void        mkxp_injectPointerEvent(int x, int y, MKXPPointerPhase phase) { (void)x; (void)y; (void)phase; }
 static inline void        mkxp_setKeyEventCallback(mkxp_KeyEventCallback cb, void *userdata) { (void)cb; (void)userdata; }
+static inline void        mkxp_setMouseTraceCallback(mkxp_MouseTraceCallback cb, void *userdata) { (void)cb; (void)userdata; }
 
 // NULL managed-config dir == documented "cwd-only behavior, matches
 // desktop builds".
