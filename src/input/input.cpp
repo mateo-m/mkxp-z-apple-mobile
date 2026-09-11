@@ -1561,12 +1561,18 @@ int Input::asyncKeyState(int key)
             return (ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL]) ? 0x8000 : 0;
         case 0x12: // VK_MENU / Alt (either)
             return (ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_RALT]) ? 0x8000 : 0;
+        /* Read the event thread's mouse state, not SDL_GetMouseState().
+         * Both tracked the buttons before, which split mouse state
+         * across two sources: SDL_GetMouseState() sees only input SDL
+         * itself generated, so a host that injects mouse events read
+         * 0 here while Input::MOUSELEFT read the press. One source
+         * keeps the two APIs in agreement. */
         case 0x01: // VK_LBUTTON
-            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(1)) ? 0x8000 : 0;
+            return EventThread::mouseState.buttons[SDL_BUTTON_LEFT] ? 0x8000 : 0;
         case 0x02: // VK_RBUTTON
-            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(3)) ? 0x8000 : 0;
+            return EventThread::mouseState.buttons[SDL_BUTTON_RIGHT] ? 0x8000 : 0;
         case 0x04: // VK_MBUTTON
-            return (SDL_GetMouseState(0, 0) & SDL_BUTTON(2)) ? 0x8000 : 0;
+            return EventThread::mouseState.buttons[SDL_BUTTON_MIDDLE] ? 0x8000 : 0;
         default: {
             auto it = vKeyToScancode.find(key);
             if (it == vKeyToScancode.end())
