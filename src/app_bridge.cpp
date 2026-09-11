@@ -514,7 +514,7 @@ void *mkxp_getSDLUIKitWindow(void) {
 
 // Input bridge
 
-void mkxp_injectKeyEvent(int scancode, int pressed) {
+static Uint32 injectedWindowID() {
     if (s_sdlWindowID.load(std::memory_order_relaxed) == 0) {
         SDL_Window *w = SDL_GetGrabbedWindow();
         if (w) {
@@ -524,17 +524,61 @@ void mkxp_injectKeyEvent(int scancode, int pressed) {
             s_sdlWindowID.store(1, std::memory_order_relaxed);
         }
     }
+    return s_sdlWindowID.load(std::memory_order_relaxed);
+}
 
+void mkxp_injectKeyEvent(int scancode, int pressed) {
     SDL_Event event{};
     event.type              = pressed ? SDL_KEYDOWN : SDL_KEYUP;
     event.key.timestamp     = SDL_GetTicks();
-    event.key.windowID      = s_sdlWindowID.load(std::memory_order_relaxed);
+    event.key.windowID      = injectedWindowID();
     event.key.state         = pressed ? SDL_PRESSED : SDL_RELEASED;
     event.key.repeat        = 0;
     event.key.keysym.scancode = (SDL_Scancode)scancode;
     event.key.keysym.sym    = SDL_GetKeyFromScancode((SDL_Scancode)scancode);
     event.key.keysym.mod    = KMOD_NONE;
     SDL_PushEvent(&event);
+}
+
+/* Mirrors what SDL's own touch-to-mouse synthesis emits
+ * (SDL_touch.c), so an injecting host and the SDL view produce the
+ * same event stream:
+ *   - a press sends motion first, then the button, at one point
+ *   - a release sends the button only
+ * Coordinates arrive in top-left window points. The host decides
+ * which finger owns the pointer and how to clamp. */
+void mkxp_injectPointerEvent(int x, int y, MKXPPointerPhase phase) {
+    const Uint32 windowID = injectedWindowID();
+    const bool pressed    = (phase == MKXP_POINTER_DOWN);
+    const bool released   = (phase == MKXP_POINTER_UP ||
+                             phase == MKXP_POINTER_CANCEL);
+
+    if (pressed || phase == MKXP_POINTER_MOVE) {
+        SDL_Event motion{};
+        motion.type             = SDL_MOUSEMOTION;
+        motion.motion.timestamp = SDL_GetTicks();
+        motion.motion.windowID  = windowID;
+        motion.motion.which     = SDL_TOUCH_MOUSEID;
+        motion.motion.state     = pressed ? 0 : SDL_BUTTON_LMASK;
+        motion.motion.x         = x;
+        motion.motion.y         = y;
+        SDL_PushEvent(&motion);
+    }
+
+    if (pressed || released) {
+        SDL_Event button{};
+        button.type             = pressed ? SDL_MOUSEBUTTONDOWN
+                                          : SDL_MOUSEBUTTONUP;
+        button.button.timestamp = SDL_GetTicks();
+        button.button.windowID  = windowID;
+        button.button.which     = SDL_TOUCH_MOUSEID;
+        button.button.button    = SDL_BUTTON_LEFT;
+        button.button.state     = pressed ? SDL_PRESSED : SDL_RELEASED;
+        button.button.clicks    = 1;
+        button.button.x         = x;
+        button.button.y         = y;
+        SDL_PushEvent(&button);
+    }
 }
 
 static int keyEventWatcherFn(void * /*userdata*/, SDL_Event *event) {
