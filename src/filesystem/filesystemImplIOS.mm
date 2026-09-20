@@ -1,8 +1,33 @@
 #import <Foundation/Foundation.h>
 #import <SDL_filesystem.h>
 
+#include <dlfcn.h>
+
 #import "filesystemImpl.h"
 #import "util/exception.h"
+
+// The engine's own files (Assets.bundle, Ruby/) sit beside the image
+// that holds this code. A launcher that links the engine puts them in
+// the app bundle. A launcher that opens MkxpCore.framework puts them in
+// the framework bundle. dladdr names the file this function came from,
+// which is the only identity available here. A game's own files are a
+// different question: getDefaultGameRoot still reads the main bundle.
+static NSBundle *mkxpOwnBundle() {
+    static NSBundle *bundle;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Dl_info info;
+        if (dladdr((const void *)&mkxpOwnBundle, &info) && info.dli_fname != nullptr) {
+            NSString *image = [NSFileManager.defaultManager
+                stringWithFileSystemRepresentation:info.dli_fname
+                                            length:strlen(info.dli_fname)];
+            bundle = [NSBundle bundleWithPath:image.stringByDeletingLastPathComponent];
+        }
+        if (bundle == nil)
+            bundle = NSBundle.mainBundle;
+    });
+    return bundle;
+}
 
 #define PATHTONS(str) [NSFileManager.defaultManager stringWithFileSystemRepresentation:str length:strlen(str)]
 
@@ -152,7 +177,7 @@ std::string filesystemImpl::getDefaultGameRoot() {
 
 NSString *getPathForAsset_internal(const char *baseName, const char *ext) {
     NSBundle *assetBundle =
-        [NSBundle bundleWithPath:[NSString stringWithFormat:@"%@/%s", NSBundle.mainBundle.resourcePath,
+        [NSBundle bundleWithPath:[NSString stringWithFormat:@"%@/%s", mkxpOwnBundle().resourcePath,
                                                             "Assets.bundle"]];
     if (assetBundle == nil)
         return nil;
@@ -188,7 +213,7 @@ std::string filesystemImpl::contentsOfAssetAsString(const char *baseName, const 
 std::string filesystemImpl::getResourcePath() {
     return mkxpFilesystemInvoke([&] {
         @autoreleasepool {
-            return std::string(NSTOPATH(NSBundle.mainBundle.resourcePath));
+            return std::string(NSTOPATH(mkxpOwnBundle().resourcePath));
         }
     });
 }

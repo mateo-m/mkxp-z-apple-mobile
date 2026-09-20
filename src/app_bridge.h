@@ -204,6 +204,27 @@ typedef struct {
 extern "C" {
 #endif
 
+// Process entry (Launcher -> Engine)
+
+// Runs the engine on the calling thread, which must be the main
+// thread. It returns when the game ends.
+//
+// Do not call it from a block on the main dispatch queue. It holds the
+// thread for the whole session, so the queue would never drain, and the
+// RGSS thread deadlocks on the first mkxp_getScreenScale, which
+// dispatch_syncs to that queue. Use a run loop timer, the way
+// SDLUIKitDelegate reaches SDL_main (SDL_uikitappdelegate.m:467).
+//
+// A launcher that links the engine statically does not need this:
+// libSDL2main.a supplies main(), and SDLUIKitDelegate calls the
+// engine's SDL_main after UIApplicationMain. A launcher that opens
+// the engine with dlopen can use neither. A dynamic image holds no
+// process entry point, and the ObjC runtime cannot find the class
+// named SDLUIKitDelegate before that image loads. This runs what the
+// delegate runs, without the launch screen and the idle-timer hint,
+// which stay with the launcher.
+int         mkxp_run_app(int argc, char **argv);
+
 // Game lifecycle
 
 void        mkxp_setGameReady(void);
@@ -776,6 +797,8 @@ static inline bool        mkxp_isGLContextBroken(void) { return false; }
 static inline void        mkxp_setFastForwardMultiplier(int multiplier) { (void)multiplier; }
 static inline int         mkxp_getFastForwardMultiplier(void) { return 1; }
 static inline void        mkxp_resetSessionState(void) {}
+
+static inline int         mkxp_run_app(int argc, char **argv) { (void)argc; (void)argv; return 0; }
 
 static inline void        mkxp_setDebugLogPath(const char *path) { (void)path; }
 static inline void        mkxp_debugLog(const char *tag, const char *source, const char *message) { (void)tag; (void)source; (void)message; }
