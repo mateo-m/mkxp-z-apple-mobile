@@ -51,7 +51,20 @@
 #define GLES2_HEADER 1
 #endif
 
-/* Render through the ANGLE prebuilt (GLES on Metal). */
+/* Render through the ANGLE prebuilt (GLES on Metal).
+ *
+ * EAGL came first and had to go. Fast rotation on the iOS Simulator
+ * killed the app with SIGSEGV inside libGLImage.dylib, which is
+ * Apple's GLES emulation for the simulator. The crash stayed after we
+ * fixed the one real bug of ours, a cross-thread EAGLContext in
+ * SDL's layoutSubviews, and it stayed with the renderbuffer resize
+ * turned off and with every GL call removed from the resize path. It
+ * never appeared on a device, so this is a simulator-only fault in
+ * Apple's code. ANGLE draws through Metal and never loads
+ * libGLImage.dylib. The EAGL path went away on 2026-04-20.
+ *
+ * src/main.cpp creates the window without SDL_WINDOW_OPENGL, so SDL
+ * never makes a GL context and SDL_uikitopenglview is never built. */
 #ifndef MKXPZ_HAS_ANGLE
 #define MKXPZ_HAS_ANGLE 1
 #endif
