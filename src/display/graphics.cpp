@@ -81,8 +81,6 @@ static inline void graphicsGL_MakeCurrent(SDL_Window * /*win*/, SDL_GLContext ct
 
 #define DEF_FRAMERATE (rgssVer == 1 ? 40 : 60)
 
-#define IOS_CHECK_PAUSE() p->checkPause()
-
 struct PingPong {
     TEXFBO rt[2];
     uint8_t srcInd, dstInd;
@@ -485,6 +483,10 @@ struct GraphicsPrivate {
     
     bool frozen;
     TEXFBO frozenScene;
+    /* A copy of the last frame we put on the screen. `framePresented`
+     * refreshes it after every swap. */
+    TEXFBO lastPresentedFrame;
+    bool hasLastPresentedFrame;
     Quad screenQuad;
     
     float backingScaleFactor;
@@ -587,6 +589,11 @@ struct GraphicsPrivate {
         TEXFBO::init(frozenScene);
         TEXFBO::allocEmpty(frozenScene, scRes.x, scRes.y);
         TEXFBO::linkFBO(frozenScene);
+
+        TEXFBO::init(lastPresentedFrame);
+        TEXFBO::allocEmpty(lastPresentedFrame, scRes.x, scRes.y);
+        TEXFBO::linkFBO(lastPresentedFrame);
+        hasLastPresentedFrame = false;
         
         FloatRect screenRect(0, 0, scRes.x, scRes.y);
         screenQuad.setTexPosRect(screenRect, screenRect);
@@ -596,6 +603,7 @@ struct GraphicsPrivate {
     
     ~GraphicsPrivate() {
         TEXFBO::fini(frozenScene);
+        TEXFBO::fini(lastPresentedFrame);
         TEXFBO::fini(integerScaleBuffer);
         SDL_DestroyMutex(avgFPSLock);
         SDL_DestroyMutex(glResourceLock);
@@ -1152,53 +1160,98 @@ struct GraphicsPrivate {
         GLMeta::blitEnd();
 
         swapGLBuffer();
-        checkPause();
+        framePresented(frozenScene);
     }
 
-    /* Check for a pending pause request.  mkxp_checkPause() handles
-     * audio source pausing and blocks until resumed; we just need
-     * to reset frame timing afterward so the limiter doesn't try
-     * to catch up for the time spent paused.
+    /* Copy the frame we just swapped, so a later pause can still read
+     * it after the next composite has overwritten the source buffer.
+     * `presented` is the buffer the caller blitted to the screen. Each
+     * caller presents a different one: the ping-pong front buffer, the
+     * frozen scene, or the transition buffer.
      *
-     * Before blocking, we capture the engine's front buffer as an
-     * RGBA snapshot.  The SDL window is always fullscreen behind
-     * the SwiftUI layer and can't participate in SwiftUI view
-     * transitions.  The snapshot acts as a static double — a frozen
-     * frame that SwiftUI places at the game viewport's position
-     * (gameRect) during the hero zoom animation, so the transition
-     * appears to zoom into the live game.  Once the animation
-     * finishes, the snapshot is discarded and the real SDL rendering
-     * takes over.  See docs/pause-resume.md for the full picture. */
-    void checkPause() {
+     * This costs one same-size blit per frame. With gl.BlitFramebuffer
+     * present it is a GPU-side copy. Without it, GLMeta falls back to a
+     * textured quad. */
+    void keepPresentedFrame(TEXFBO &presented) {
+        const int w = presented.width;
+        const int h = presented.height;
+        if (w <= 0 || h <= 0)
+            return;
+
+        if (lastPresentedFrame.width != w || lastPresentedFrame.height != h)
+            TEXFBO::allocEmpty(lastPresentedFrame, w, h);
+
+        const IntRect rect(0, 0, w, h);
+        int scaleIsSpecial = GLMeta::blitScaleIsSpecial(lastPresentedFrame, false, rect, presented, rect);
+
+        GLMeta::blitBegin(lastPresentedFrame, false, scaleIsSpecial);
+        GLMeta::blitSource(presented, scaleIsSpecial);
+        GLMeta::blitRectangle(rect, rect);
+        GLMeta::blitEnd();
+
+        hasLastPresentedFrame = true;
+    }
+
+    /* mkxp_checkPause() handles audio source pausing and blocks until
+     * resumed. We only reset frame timing afterward, so the limiter
+     * doesn't try to catch up for the time spent paused.
+     *
+     * Before blocking, we capture an RGBA snapshot. The SDL window is
+     * always fullscreen behind the SwiftUI layer and can't participate
+     * in SwiftUI view transitions. The snapshot is a still copy that
+     * SwiftUI places at the game viewport's position (gameRect) during
+     * the hero zoom animation, so the transition appears to zoom into
+     * the live game. Once the animation finishes, the snapshot is
+     * discarded and the real SDL rendering takes over. See
+     * docs/pause-resume.md for the full picture.
+     *
+     * We snapshot `lastPresentedFrame`, not the frame we just swapped.
+     * The request arrives on the main thread while the player looks at
+     * the previous frame, and the swap that follows is the first point
+     * where the engine can answer. The two frames are 16 ms apart in a
+     * normal update loop, but a scene change runs Ruby with no Graphics
+     * call for as long as the map takes to load, and the frame after
+     * that gap belongs to the new scene. An empty new scene composites
+     * to black, so reading the fresh frame put a black picture in the
+     * pause transition.
+     *
+     * `fallback` covers the first frame of a session, before any frame
+     * is kept.
+     *
+     * We never read FBO 0, because iOS gives undefined content for the
+     * on-screen framebuffer after swapBuffers. */
+    void checkPause(TEXFBO &fallback) {
         if (!mkxp_isPaused() && !mkxp_isPauseRequested())
             return;
 
-        /* Capture the front buffer (the engine's internal render
-         * target, not FBO 0 / the screen — iOS gives undefined
-         * content for the on-screen framebuffer after swapBuffers).
-         * The engine's 2D projection maps Y top-to-bottom, so
-         * glReadPixels on this FBO produces top-down pixel data —
-         * no vertical flip needed. */
-        {
-            TEXFBO &fb = screen.getPP().frontBuffer();
-            int w = fb.width;
-            int h = fb.height;
-            if (w > 0 && h > 0) {
-                FBO::ID prevFBO = FBO::boundFramebufferID;
-                FBO::bind(fb.fbo);
+        TEXFBO &shown = hasLastPresentedFrame ? lastPresentedFrame : fallback;
 
-                std::vector<uint8_t> pixels(w * h * 4);
-                gl.ReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        /* The engine's 2D projection maps Y top-to-bottom, so
+         * glReadPixels on these FBOs produces top-down pixel data.
+         * No vertical flip needed. */
+        int w = shown.width;
+        int h = shown.height;
+        if (w > 0 && h > 0) {
+            FBO::ID prevFBO = FBO::boundFramebufferID;
+            FBO::bind(shown.fbo);
 
-                FBO::bind(prevFBO);
-                mkxp_setSnapshot(pixels.data(), w, h);
-            }
+            std::vector<uint8_t> pixels(w * h * 4);
+            gl.ReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+            FBO::bind(prevFBO);
+            mkxp_setSnapshot(pixels.data(), w, h);
         }
 
         mkxp_checkPause();
 
         /* Reset frame timing so the limiter doesn't try to catch up. */
         fpsLimiter.resetFrameAdjust();
+    }
+
+    /* Call right after every swap. */
+    void framePresented(TEXFBO &presented) {
+        checkPause(presented);
+        keepPresentedFrame(presented);
     }
 };
 
@@ -1331,7 +1384,9 @@ void Graphics::update(bool checkForShutdown) {
             if (!render) {
                 ++p->frameCount;
                 p->threadData->ethread->notifyFrame();
-                IOS_CHECK_PAUSE();
+                /* This branch skips the draw and the swap, so there is
+                 * no new frame to keep. */
+                p->checkPause(p->screen.getPP().frontBuffer());
                 return;
             }
         } else {
@@ -1342,7 +1397,7 @@ void Graphics::update(bool checkForShutdown) {
     p->checkResize();
     p->redrawScreen();
 
-    IOS_CHECK_PAUSE();
+    p->framePresented(p->screen.getPP().frontBuffer());
 }
 
 void Graphics::freeze() {
@@ -1459,7 +1514,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
         p->swapGLBuffer();
         /* Call this manually, as redrawScreen() is not called during this loop. */
         p->updateAvgFPS();
-        IOS_CHECK_PAUSE();
+        p->framePresented(transBuffer);
     }
     
     glState.blend.pop();
@@ -1503,7 +1558,7 @@ void Graphics::wait(int duration) {
     for (int i = 0; i < duration; ++i) {
         p->checkShutDownReset();
         p->redrawScreen();
-        IOS_CHECK_PAUSE();
+        p->framePresented(p->screen.getPP().frontBuffer());
     }
 }
 
@@ -1889,7 +1944,13 @@ void Graphics::repaintWait(const AtomicFlag &exitCond, bool checkReset) {
         
         p->threadData->ethread->notifyFrame();
 
-        IOS_CHECK_PAUSE();
+        /* Only the pause check here. The blit scope this loop opened
+         * stays open across every iteration, and keepPresentedFrame
+         * ends a blit scope of its own, which would reset the
+         * dimensions this loop still needs. Nothing to keep anyway:
+         * the loop repaints the frame lastPresentedFrame already
+         * holds. */
+        p->checkPause(lastFrame);
     }
     
     GLMeta::blitEnd();
