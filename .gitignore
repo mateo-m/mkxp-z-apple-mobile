@@ -101,3 +101,8 @@ tests/cpp/build/
 
 # Packed by tests/legacy-methods/pack_scripts.rb.
 /tests/legacy-methods/Data/
+
+# Swift Package Manager output, and the pnpm files a local install writes.
+/.build/
+/pnpm-lock.yaml
+/pnpm-workspace.yaml
