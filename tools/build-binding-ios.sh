@@ -9,7 +9,8 @@
 # -unexported_symbols_list. Hidden Ruby symbols cannot clash across
 # versions, so each merged object exports exactly one global symbol,
 # `_mkxp_get_script_binding_<NN>`, which returns its ScriptBinding
-# vtable. See docs/multi-ruby.md.
+# vtable. See
+# https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-ruby.md.
 #
 # This script is the single source of truth for that recipe. Launcher
 # makefiles call it and supply only SDK paths and the libruby

@@ -7,7 +7,7 @@ The iOS port of mkxp-z keeps SDL, the GL context, OpenAL, and the active Ruby VM
 1. **SDL cannot restart** - the design of `SDL_Init`/`SDL_Quit` and window creation assumes a single process lifetime.
 2. **Ruby cannot restart** - `ruby_init()` and `ruby_cleanup()` are one-shot operations. A call to `ruby_cleanup()` destroys the VM, and a later `ruby_init()` crashes. The cause: Ruby's `Init_*` functions stash VALUEs in file-scope statics that do not reset.
 
-These constraints affect every layer of the architecture. Cross-session play (multiple games in sequence in one process) is behind a feature flag. See the host-side doc [multi-session.md](https://github.com/mateo-m/empo-app/blob/main/docs/multi-session.md). The persistent-resource architecture below still applies: the active Ruby and SDL stay alive even though we no longer swap games.
+These constraints affect every layer of the architecture. Cross-session play (multiple games in sequence in one process) is disabled. Empo plays one game for each process. See the host-side doc [multi-session.md](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-session.md). The persistent-resource architecture below still applies: the active Ruby and SDL stay alive even though we no longer swap games.
 
 ---
 
