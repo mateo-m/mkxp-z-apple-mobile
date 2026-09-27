@@ -13,7 +13,10 @@
 #include "audio.h"
 #include "eventthread.h"
 #include "config.h"
+#include "util/debugwriter.h"
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <condition_variable>
@@ -501,7 +504,7 @@ bool mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
     return true;
 }
 
-void *mkxp_getSDLUIKitWindow(void) {
+void *mkxp_getGameWindow(void) {
     if (!SharedState::instance) return nullptr;
     SDL_Window *win = SharedState::instance->sdlWindow();
     if (!win) return nullptr;
@@ -979,12 +982,60 @@ void mkxp_applySessionConfig(const MKXPSessionConfig *config) {
         mkxp_setUserDataDirectory(config->userDataDirectory);
     if (config->sharedFontsDirectory)
         mkxp_setSharedFontsDirectory(config->sharedFontsDirectory);
-    mkxp_setActiveRubyVersion(config->rubyVersion);
-    mkxp_setSyntaxTransformMode(config->syntaxTransformMode);
-    mkxp_applyPerGameSettings(config->verticalAlignment, config->postloadEnabled);
-    mkxp_setUseInGameKeyboard(config->useInGameKeyboard);
-    mkxp_setJoiplayCompat(config->joiplayCompat);
-    mkxp_setNetworkEnabled(config->networkEnabled);
+    mkxp_applyPerGameSettings(config->verticalAlignment, mkxp_getPostloadEnabled());
+}
+
+void mkxp_setSetting(const char *key, const char *value) {
+    if (!key || !value) return;
+    const std::string k(key);
+    const std::string v(value);
+    const bool on = v == "1";
+    if (k == "rubyVersion") {
+        MKXPRubyVersion version = MKXP_RUBY_UNSET;
+        if (v == "18") version = MKXP_RUBY_18;
+        else if (v == "19") version = MKXP_RUBY_19;
+        else if (v == "30") version = MKXP_RUBY_30;
+        else if (v == "31") version = MKXP_RUBY_31;
+        mkxp_setActiveRubyVersion(version);
+    } else if (k == "syntaxTransform") {
+        MKXPSyntaxTransformMode mode = MKXP_SYNTAX_TRANSFORM_UNSET;
+        if (v == "legacy") mode = MKXP_SYNTAX_TRANSFORM_LEGACY;
+        else if (v == "modern") mode = MKXP_SYNTAX_TRANSFORM_DISABLED;
+        mkxp_setSyntaxTransformMode(mode);
+    } else if (k == "postloadScripts") {
+        s_postloadEnabled.store(on, std::memory_order_relaxed);
+    } else if (k == "inGameKeyboard") {
+        mkxp_setUseInGameKeyboard(on);
+    } else if (k == "joiplayCompat") {
+        mkxp_setJoiplayCompat(on);
+    } else if (k == "networkEnabled") {
+        mkxp_setNetworkEnabled(on);
+    } else {
+        Debug() << "mkxp_setSetting: unknown key" << k;
+    }
+}
+
+const char *mkxp_getDetails(void) {
+    static std::string details;
+    details.clear();
+    const int rgss = mkxp_getRGSSVersion();
+    if (rgss > 0) details += "RGSS" + std::to_string(rgss) + "\n";
+    const std::string ruby = mkxp_getRubyVersion();
+    details += "Ruby " + ruby + "\n";
+    // Only the patched Ruby 3.1 parser applies the syntax transform.
+    if (ruby.rfind("3.1", 0) == 0) {
+        switch (mkxp_getSyntaxTransformMode()) {
+            case MKXP_SYNTAX_TRANSFORM_LEGACY: details += "Compatibility: legacy\n"; break;
+            case MKXP_SYNTAX_TRANSFORM_DISABLED: details += "Compatibility: modern\n"; break;
+            case MKXP_SYNTAX_TRANSFORM_CUSTOM: details += "Compatibility: custom\n"; break;
+            default: break;
+        }
+    }
+    const std::string angle = mkxp_getANGLEVersion();
+    details += angle == "unknown" ? "ANGLE (Metal)" : "ANGLE " + angle + " (Metal)";
+    const std::string device = mkxp_getMetalDeviceName();
+    if (device != "unknown") details += "\n" + device;
+    return details.c_str();
 }
 
 void mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment,
@@ -1123,6 +1174,13 @@ void mkxp_setFastForwardMultiplier(int multiplier) {
 
 int mkxp_getFastForwardMultiplier(void) {
     return s_fastForwardMultiplier.load(std::memory_order_acquire);
+}
+
+// A Ruby VM cannot be torn down and started again in one process, so
+// this core cannot kill a game. Empo never calls this for it.
+void mkxp_killSession(void) {
+    fprintf(stderr, "[mkxp] killSession: this core cannot kill a game\n");
+    abort();
 }
 
 // Per-session bridge state reset. Each entry maps to one of the
