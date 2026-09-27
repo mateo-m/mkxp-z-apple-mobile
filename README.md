@@ -30,7 +30,7 @@ This fork answers each of those. It also handles the usual Apple-platform proble
 
 ## Highlights
 
-- **Three Ruby versions in one binary.** Ruby 1.8, 1.9, and 3.1 ship as merged `.o` files, one per version, with their symbols hidden so the copies cannot clash. The host picks one per game with `mkxp_setActiveRubyVersion()`. Old RGSS1 games run on real Ruby 1.8. Newer mkxp-z games run on 3.1, which also covers games built for Ruby 3.0.
+- **Three Ruby versions in one binary.** Ruby 1.8, 1.9, and 3.1 ship as merged `.o` files, one per version, with their symbols hidden so the copies cannot clash. The host picks one per game with `mkxp_setSetting("rubyVersion", ...)`. Old RGSS1 games run on real Ruby 1.8. Newer mkxp-z games run on 3.1, which also covers games built for Ruby 3.0.
 - **Engine state stays alive.** SDL, the ANGLE EGL context, OpenAL, and the running Ruby VM last for the whole process. Every session reuses the same set of resources.
 - **ANGLE drawing.** OpenGL ES on top of Metal. The old EAGL path is gone.
 - **Syntax patches on Ruby 3.1.** The [PR #304](https://github.com/mkxp-z/mkxp-z/pull/304) patches let Pokemon Essentials games that mix 1.8 syntax with newer methods parse on Ruby 3.1. The host turns them on per game with `mkxp_setSyntaxTransformMode()`.

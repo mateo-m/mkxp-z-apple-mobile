@@ -184,13 +184,7 @@ typedef struct {
     const char *managedConfigDir;
     const char *userDataDirectory;
     const char *sharedFontsDirectory;
-    MKXPRubyVersion rubyVersion;
-    MKXPSyntaxTransformMode syntaxTransformMode;
     MKXPVerticalAlignment verticalAlignment;
-    bool postloadEnabled;
-    bool useInGameKeyboard;
-    bool joiplayCompat;
-    bool networkEnabled;
 } MKXPSessionConfig;
 
 #if MKXPZ_MOBILE
@@ -450,10 +444,10 @@ bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
-// SDL's UIKit UIWindow*, or NULL before the engine creates its window.
-// Owned by SDL. Do not retain. For embedding host controls in the
-// same window stack as the game view on iOS.
-void       *mkxp_getSDLUIKitWindow(void);
+// The UIWindow* the game draws in, or NULL before the engine creates
+// it. Owned by the engine. Do not retain. For embedding host controls
+// in the same window stack as the game view on iOS.
+void       *mkxp_getGameWindow(void);
 
 // Per-game settings (UI -> Engine), set by the host before engine
 // boot and read by the engine during the run.
@@ -476,12 +470,27 @@ MKXPRubyVersion  mkxp_getActiveRubyVersion(void);
 
 void        mkxp_applySessionConfig(const MKXPSessionConfig *config);
 
-// Adding a new per-boot setting:
-//   1. Add a field to MKXPSessionConfig
-//   2. Apply it inside mkxp_applySessionConfig() in app_bridge.cpp
-//   3. Wire the host's session-configuration path
-//   4. Add a matching no-op stub default in the !MKXPZ_MOBILE
-//      section at the bottom of this header
+// A per-game setting that only this core knows (UI -> Engine). The
+// host sends each one as text before it calls mkxp_applySessionConfig.
+// The keys and their values:
+//
+//   rubyVersion      "18", "19", "30" or "31". Any other value unsets it.
+//   syntaxTransform  "legacy" or "modern". Any other value unsets it.
+//   postloadScripts  "1" or "0"
+//   inGameKeyboard   "1" or "0"
+//   joiplayCompat    "1" or "0"
+//   networkEnabled   "1" or "0"
+//
+// An unknown key writes a warning to the log and changes nothing.
+void        mkxp_setSetting(const char *key, const char *value);
+
+// Lines about the running engine for the host's debug overlay, one per
+// line, such as the RGSS version, the Ruby version and the renderer.
+// Call it on the main thread. The text stays valid until the next call.
+const char *mkxp_getDetails(void);
+
+// Adding a new per-boot setting: give it a key in mkxp_setSetting.
+// Add a field to MKXPSessionConfig only when every core needs it.
 
 // Force the Pokemon Essentials in-game keyboard scene, overriding
 // the iOS soft keyboard. Default false (soft keyboard). Flip on for
@@ -631,6 +640,9 @@ int         mkxp_getFastForwardMultiplier(void);
 // touched.
 void        mkxp_resetSessionState(void);
 
+// Stops the process. A Ruby VM cannot be torn down in place.
+void        mkxp_killSession(void);
+
 // Debug logging
 
 // Set log file path for this session (NULL/"" to disable).
@@ -724,7 +736,7 @@ static inline void        mkxp_setHostViewportRegion(float x, float y, float w, 
 static inline void        mkxp_clearHostViewportRegion(void) {}
 static inline bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h, bool *isPortrait) { (void)x; (void)y; (void)w; (void)h; (void)isPortrait; return false; }
 static inline float       mkxp_getScreenScale(void) { return 1.0f; }
-static inline void       *mkxp_getSDLUIKitWindow(void) { return NULL; }
+static inline void       *mkxp_getGameWindow(void) { return NULL; }
 
 static inline void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment, bool postloadEnabled) { (void)verticalAlignment; (void)postloadEnabled; }
 // CENTER, not the mobile TOP_CENTER default: stock desktop mkxp-z
