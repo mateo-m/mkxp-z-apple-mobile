@@ -72,11 +72,29 @@ jobs:
             echo "$FILES" | xargs bun x markdownlint -c .markdownlint.json
           fi
 
+  host-code:
+    name: No launcher code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      # Only hmode7. The dependency sources under deps/sources are
+      # upstream code and hold no launcher names.
+      - name: Checkout hmode7
+        run: |
+          git -c url."https://github.com/".insteadOf="git@github.com:" \
+              submodule update --init --depth 1 hmode7
+
+      - name: check
+        run: tools/check-no-host-code.sh
+
   # Aggregate gate whose check-run name matches the ruleset's required
   # "Lint" context exactly.
   summary:
     name: Lint
-    needs: [ruby, cpp, markdown]
+    needs: [ruby, cpp, markdown, host-code]
     if: always()
     runs-on: ubuntu-latest
     steps:

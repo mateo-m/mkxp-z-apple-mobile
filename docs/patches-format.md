@@ -1,6 +1,6 @@
 # Script patches: patches.json
 
-Empo can rewrite a game's RGSS scripts in memory as they load. JoiPlay-compatible
+The engine can rewrite a game's RGSS scripts in memory as they load. JoiPlay-compatible
 `patches.json` files drive the rewrite. A broken line in a fangame gets a targeted text
 replacement. The patch does not change the game's own files and does not need an app rebuild.
 The engine implementation is a port of JoiPlay's Patcher
@@ -33,9 +33,7 @@ Rules the parser applies (`Patcher::load` in `patcher.cpp`):
   [worked example](#worked-example).
 
 The engine parses patch files with json5pp (full JSON5: `//` and `/* */` comments, trailing
-commas). See the host repo's
-[config-format.md](https://github.com/mateo-m/empo-app/blob/main/docs/config-format.md) for
-the parsing rules that Empo applies to config files.
+commas).
 
 ## Matching semantics
 
@@ -90,19 +88,12 @@ The engine constructs `Patcher` once per session from `Config::scriptPatches`
    addition. Upstream mkxp-z ignores it (see `src/config.h`). Do not confuse it with
    upstream's `patches` key, which mounts filesystem overlays.
 2. **`<managed config dir>/patches.json`**: the per-game state directory that a host app can
-   set via `mkxp_setManagedConfigDir` (`src/app_bridge.h`). Empo leaves this unset because
-   the in-memory config overlay replaced the managed dir. So this tier never fires under
-   Empo.
+   set via `mkxp_setManagedConfigDir` (`src/app_bridge.h`). When the host does not set it, this tier never fires.
 3. **`<game folder>/patches.json`**: the working directory, JoiPlay's historical location.
    Users can drop a patch file next to `Game.ini` without a config change.
 
 The engine checks tiers 2 and 3 in order, and only the first file found loads. The tiers
 never combine.
-
-> **History.** In the past, Empo bundled a curated patch set (`PatcherDistribution` merged
-> per-game rules into `EmpoState/patches.json`). Empo dropped it in July 2026. The config
-> overlay change disconnected the delivery path, and the one curated rule (an Insurgence
-> `getRegion` rewrite) had no player-visible effect. The engine Patcher above is unaffected.
 
 ## Failure behavior
 
@@ -164,5 +155,3 @@ Points to copy:
 - `src/config.h`, `src/config.cpp`: the `scriptPatches` key
 - `binding/binding-mri.cpp`: apply site, `System.apply_overrides`
 - `scripts/preload/mkxp_wrap.rb`: the `MKXP.apply_overrides` shim
-- [config-format.md](https://github.com/mateo-m/empo-app/blob/main/docs/config-format.md) in
-  the host repo: the parsing rules for config files
