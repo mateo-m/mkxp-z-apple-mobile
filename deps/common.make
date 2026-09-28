@@ -457,6 +457,7 @@ $(SOURCES)/freetype/builds/unix/configure: $(SOURCES)/freetype/autogen.sh
 ruby: init_dirs openssl $(LIBDIR)/libruby.3.1-static.a $(LIBDIR)/libruby.3.1-ext.a
 
 $(LIBDIR)/libruby.3.1-static.a: $(SOURCES)/ruby/.configured-$(SDK_TAG)
+	set -e; \
 	cd $(SOURCES)/ruby; \
 	$(CONFIGURE_ENV) make -j$(NPROC) libruby.3.1-static.a; \
 	cp libruby.3.1-static.a $(LIBDIR)/; \
@@ -756,6 +757,7 @@ SOCKET19_DEFS = -DINET6 -DENABLE_IPV6 -DHAVE_PROTOTYPES \
 	-DHAVE_UNISTD_H
 
 $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
+	set -e; \
 	cd $(SOURCES)/ruby19; \
 	$(CONFIGURE_ENV) make -j$(NPROC) libruby-static.a; \
 	cp libruby-static.a $(LIBDIR)/libruby19-static.a; \
