@@ -30,6 +30,12 @@ SDK_TAG := $(SDK)-$(ARCH)
 #
 # Keep the `=` assignment: `$@` must expand when the recipe runs.
 MARK_SDK_CONFIGURED = rm -f $(dir $@).configured-* && touch $@
+# `make distclean` can fail in silence, or rerun the last SDK's
+# configure through `config.status --recheck` and keep its objects. The
+# 2026-09-28 release then shipped an iphoneos SDL_ttf.o in the simulator
+# libSDL2_ttf.a. Delete every object after it, so none can carry over.
+CLEAN_SDK_TREE = { $(MAKE) distclean >/dev/null 2>&1 || true; } && \
+	find . \( -name '*.o' -o -name '*.lo' -o -name '*.la' -o -name '*.a' \) -type f -delete
 CMAKE_BUILDDIR := cmakebuild-$(SDK_TAG)
 DOWNLOADS := ${PWD}/downloads/$(HOST)
 SOURCES := ${PWD}/sources
@@ -129,7 +135,7 @@ $(LIBDIR)/libtheora.a: $(LIBDIR)/libogg.a $(DOWNLOADS)/theora/Makefile
 	make -j$(NPROC); make install
 
 $(DOWNLOADS)/theora/.configured-$(SDK_TAG): $(DOWNLOADS)/theora/configure
-	cd $(DOWNLOADS)/theora; $(MAKE) distclean 2>/dev/null || true
+	cd $(DOWNLOADS)/theora; $(CLEAN_SDK_TREE)
 	cd $(DOWNLOADS)/theora; \
 	$(CONFIGURE) --with-ogg=$(BUILD_PREFIX) --enable-shared=false --enable-static=true --disable-examples
 	$(MARK_SDK_CONFIGURED)
@@ -172,7 +178,7 @@ $(LIBDIR)/libogg.a: $(DOWNLOADS)/ogg/Makefile
 $(DOWNLOADS)/ogg/Makefile: $(DOWNLOADS)/ogg/.configured-$(SDK_TAG)
 
 $(DOWNLOADS)/ogg/.configured-$(SDK_TAG): $(DOWNLOADS)/ogg/configure
-	cd $(DOWNLOADS)/ogg; $(MAKE) distclean 2>/dev/null || true
+	cd $(DOWNLOADS)/ogg; $(CLEAN_SDK_TREE)
 	cd $(DOWNLOADS)/ogg; \
 	$(CONFIGURE) --enable-static=true --enable-shared=false
 	$(MARK_SDK_CONFIGURED)
@@ -208,7 +214,7 @@ $(LIBDIR)/libpixman-1.a: $(DOWNLOADS)/pixman/Makefile
 	make -C $(DOWNLOADS)/pixman install
 
 $(DOWNLOADS)/pixman/.configured-$(SDK_TAG): $(DOWNLOADS)/pixman/autogen.sh
-	cd $(DOWNLOADS)/pixman; $(MAKE) distclean 2>/dev/null || true
+	cd $(DOWNLOADS)/pixman; $(CLEAN_SDK_TREE)
 	cd $(DOWNLOADS)/pixman; \
 	$(AUTOGEN) --enable-static=yes --enable-shared=no \
 	--disable-arm-a64-neon
@@ -243,7 +249,7 @@ $(LIBDIR)/libpng.a: $(DOWNLOADS)/libpng/Makefile
 	make -j$(NPROC); make install
 
 $(DOWNLOADS)/libpng/.configured-$(SDK_TAG): $(DOWNLOADS)/libpng/configure
-	cd $(DOWNLOADS)/libpng; $(MAKE) distclean 2>/dev/null || true
+	cd $(DOWNLOADS)/libpng; $(CLEAN_SDK_TREE)
 	cd $(DOWNLOADS)/libpng; \
 	$(CONFIGURE) \
 	--enable-shared=no --enable-static=yes
@@ -329,12 +335,12 @@ sdl2ttf: init_dirs sdl2 freetype $(LIBDIR)/libSDL2_ttf.a
 # files were generated with (`missing automake-1.16`). We always build
 # from the checked-in generated files, so the refresh must never run.
 $(LIBDIR)/libSDL2_ttf.a: $(SOURCES)/sdl2_ttf/.configured-$(SDK_TAG)
-	cd $(SOURCES)/sdl2_ttf; \
-	make -j$(NPROC) ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=: lib; \
+	cd $(SOURCES)/sdl2_ttf && \
+	make -j$(NPROC) ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=: libSDL2_ttf.la && \
 	make ACLOCAL=: AUTOCONF=: AUTOMAKE=: AUTOHEADER=: install-libLTLIBRARIES install-libSDL2_ttfincludeHEADERS install-pkgconfigDATA
 
 $(SOURCES)/sdl2_ttf/.configured-$(SDK_TAG): $(SOURCES)/sdl2_ttf/configure
-	cd $(SOURCES)/sdl2_ttf; $(MAKE) distclean 2>/dev/null || true
+	cd $(SOURCES)/sdl2_ttf; $(CLEAN_SDK_TREE)
 	cd $(SOURCES)/sdl2_ttf; \
 	$(CONFIGURE) --enable-static=true --enable-shared=false
 	$(MARK_SDK_CONFIGURED)
@@ -444,7 +450,7 @@ $(LIBDIR)/libfreetype.a: $(SOURCES)/freetype/.configured-$(SDK_TAG)
 	make -j$(NPROC); make install
 
 $(SOURCES)/freetype/.configured-$(SDK_TAG): $(SOURCES)/freetype/builds/unix/configure
-	cd $(SOURCES)/freetype; $(MAKE) distclean 2>/dev/null || true
+	cd $(SOURCES)/freetype; $(CLEAN_SDK_TREE)
 	cd $(SOURCES)/freetype; \
 	$(CONFIGURE) --enable-static=true --enable-shared=false
 	$(MARK_SDK_CONFIGURED)
@@ -522,7 +528,7 @@ $(LIBDIR)/libruby.3.1-ext.a: $(LIBDIR)/libruby.3.1-static.a
 	done
 
 $(SOURCES)/ruby/.configured-$(SDK_TAG): $(SOURCES)/ruby/configure $(LIBDIR)/libcrypto.a
-	cd $(SOURCES)/ruby; $(MAKE) distclean 2>/dev/null || true
+	cd $(SOURCES)/ruby; $(CLEAN_SDK_TREE)
 	cd $(SOURCES)/ruby; \
 	export $(CONFIGURE_ENV); \
 	export CFLAGS="-std=gnu99 -DRUBY_FUNCTION_NAME_STRING=__func__ $$CFLAGS"; \
@@ -807,7 +813,7 @@ $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
 	$(RANLIB) $(LIBDIR)/libruby19-static.a
 
 $(SOURCES)/ruby19/.configured-$(SDK_TAG): $(SOURCES)/ruby19/configure
-	cd $(SOURCES)/ruby19; $(MAKE) distclean 2>/dev/null || true
+	cd $(SOURCES)/ruby19; $(CLEAN_SDK_TREE)
 	@# Same TRUE-constant fix as ruby18 above (1.9's copy lives in
 	@# tool/); removed in Ruby 3.2, so modern host rubies choke.
 	sed -i '' 's/=>TRUE/=>true/g' $(SOURCES)/ruby19/tool/mkconfig.rb
@@ -942,7 +948,7 @@ $(LIBDIR)/libruby18-static.a: $(SOURCES)/ruby18/.configured-$(SDK_TAG)
 	$(RANLIB) $(LIBDIR)/libruby18-static.a
 
 $(SOURCES)/ruby18/.configured-$(SDK_TAG): $(SOURCES)/ruby18/configure
-	cd $(SOURCES)/ruby18; $(MAKE) distclean 2>/dev/null || true
+	cd $(SOURCES)/ruby18; $(CLEAN_SDK_TREE)
 	@# 1.8's mkconfig.rb uses the TRUE constant, runs under the HOST
 	@# ruby in cross builds, and TRUE was removed in Ruby 3.2 — so
 	@# the build breaks with a modern host ruby. Normalize to `true`
