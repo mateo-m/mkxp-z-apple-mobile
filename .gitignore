@@ -95,7 +95,7 @@ tests/cpp/build/
 /deps/build-*/
 /deps/ANGLE/
 /deps/downloads/
-/mkxp-ios.tar.gz
+/mkxp-z-ios.tar.gz
 
 # Test host build output
 /build/

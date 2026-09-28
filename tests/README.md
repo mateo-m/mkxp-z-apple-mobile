@@ -79,8 +79,8 @@ bind that name to the interpreter's own debug flag, which makes
 `sprintf` raise for a call that passes a spare argument, so
 `binding/binding-mri.cpp` gives the name storage of its own.
 
-Run `tools/fetch-deps-ios.sh` once first. It downloads the prebuilt
-dependency libraries the engine links against.
+Run `tools/build-deps-ios.sh iphonesimulator` once first. It builds
+the dependency libraries the engine links against.
 
 `mkxp.json` names the suite to run in its `customScript` key. Change
 that key to run another one, or pass `--suite`. The host copies the

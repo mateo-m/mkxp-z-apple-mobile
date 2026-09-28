@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-GPLv2%2B-blue.svg)](#license)
 [![Upstream](https://img.shields.io/badge/upstream-mkxp--z-blue.svg)](https://github.com/mkxp-z/mkxp-z)
 
-This fork powers [Empo](https://github.com/mateo-m/empo-app), the iOS and iPadOS RPG Maker player. Upstream mkxp-z does not target Apple mobile platforms. This fork now differs too much to merge back, but single fixes still go upstream as separate patches.
+A launcher app embeds this engine through `src/app_bridge.h`. Upstream mkxp-z does not target Apple mobile platforms. This fork now differs too much to merge back, but single fixes still go upstream as separate patches.
 
 ## Table of Contents
 
@@ -47,36 +47,54 @@ src/theoraplay/  Vendored ogg and theora decoder (upstream)
 syntax-transform/3.1/   Ruby 3.1 parser patches for older grammar
 scripts/         Ruby scripts that load before and after the game
 hmode7/          H-Mode7 native port (git submodule)
-tools/           Build recipes, dependency fetch, and test runners
+tools/           Build recipes, packaging, and test runners
 tests/           C++ host tests, an in-engine RGSS suite, and its host
-deps/            Prebuilt dependency libraries, fetched by a script
+deps/            Dependency recipes and patches, sources as git submodules
 ```
 
 ## Build
 
-This repository owns both halves of the engine build. Each half is one script, and a host calls it:
+This repository builds the engine and all of its dependencies for the
+iOS device and the iOS simulator. It needs Xcode and a few Homebrew
+tools:
+
+```sh
+brew install automake autoconf libtool cmake pkg-config bison
+git submodule update --init --recursive --depth 1
+tools/build-deps-ios.sh iphonesimulator
+(cd deps && make -f iphonesimulator.make mkxp-merged mkxp-core)
+```
+
+`tools/build-deps-ios.sh` builds SDL, OpenAL, the three Rubies and the
+other libraries from the sources under `deps/sources`, and downloads
+ANGLE. The `make` line then builds the engine with two scripts:
 
 | Script | Builds | Needs |
 | --- | --- | --- |
 | `tools/build-core-ios.sh` | `libmkxpz-core.a`, everything under `src/` | Dependency headers only |
 | `tools/build-binding-ios.sh` | `mkxp<NN>-merged.o`, one per Ruby version | That version's libruby archives |
 
-A host supplies the SDK, the dependency headers, and the libruby archives. It gets back artifacts that came out of these recipes at a public commit.
+Do the same with `iphoneos` for the device. Then
+`tools/package-ios.sh` puts both SDKs into `mkxp-z-ios.tar.gz`. The
+file holds the libraries, the `app_bridge.h` header, the engine
+assets, the Ruby standard library, and a `LINK` file with the linker
+flags. A host links the libraries into its app with those flags.
 
-[empo-app](https://github.com/mateo-m/empo-app) includes this engine as a git submodule, calls both scripts, and links the result into a launcher. That is the only shipping app. See the empo-app README for those steps.
+A push of a `v*` tag runs the release workflow. It builds both SDKs
+and publishes `mkxp-z-ios.tar.gz` as a GitHub release, with its
+sha256 in the release notes.
 
-### Build and test on your own
+### Test on your own
 
 This repository also builds a small app of its own, and that app runs
-the in-engine suite. It needs no launcher:
+the in-engine suite. It needs no launcher. Build the simulator
+dependencies first, as above, then run:
 
 ```sh
-tools/fetch-deps-ios.sh      # prebuilt dependency libraries, once
 tools/run-engine-tests.sh    # builds the test host, then runs the suite
 ```
 
-`tools/fetch-deps-ios.sh` downloads the pinned dependency release named
-in `deps/.version` and checks its hash. `tools/build-test-host-ios.sh`
+`tools/build-test-host-ios.sh`
 links the engine into `EngineTests.app` and puts the suite inside it.
 `tools/run-engine-tests.sh` installs that app on a booted simulator and
 reads the results back. The test host has no interface: it names its
@@ -89,12 +107,12 @@ This fork does not build for macOS, Linux, or Windows. The desktop code, the des
 
 ## Contributing
 
-Issues and PRs are welcome on [GitHub](https://github.com/mateo-m/mkxp-z-apple-mobile/issues). Most engine changes land together with a change in the [empo-app](https://github.com/mateo-m/empo-app) host. If you plan to change `src/app_bridge.h`, or anything else the host calls, open an issue first.
+Issues and PRs are welcome on [GitHub](https://github.com/mateo-m/mkxp-z-apple-mobile/issues). If you plan to change `src/app_bridge.h`, or anything else the host calls, open an issue first.
 
 When you open a PR:
 
 - Run `bun install` once so LeftHook installs the local hooks.
-- Get a green build through the empo-app build pipeline.
+- Get green engine tests (`tools/run-engine-tests.sh`).
 - Match the code style around you. No formatter runs on this repo.
 - Reference any related issue.
 

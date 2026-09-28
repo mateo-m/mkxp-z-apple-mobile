@@ -1,8 +1,8 @@
 #!/bin/sh
-# Package the engine for a host: mkxp-ios.tar.gz.
+# Package the engine for a host: mkxp-z-ios.tar.gz.
 #
-# Run it after `make -f iphoneos.make` and `make -f iphonesimulator.make`
-# in deps/. The archive holds:
+# Run it after tools/build-deps-ios.sh and `make mkxp-merged mkxp-core`
+# in deps/, for both SDKs. The archive holds:
 #
 #   MANIFEST             tag, commit, ANGLE release, RGSS version mask
 #   LINK                 the libraries and frameworks a host links
@@ -24,7 +24,7 @@ set -eu
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 DEPS="$ENGINE/deps"
 TAG="$(git -C "$ENGINE" describe --tags --always --dirty)"
-OUT="$ENGINE/mkxp-ios.tar.gz"
+OUT="$ENGINE/mkxp-z-ios.tar.gz"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -39,7 +39,7 @@ libSDL2.a libSDL2_image.a libSDL2_sound.a libSDL2_ttf.a libfreetype.a
 libpixman-1.a libogg.a libvorbis.a libvorbisfile.a libtheora.a
 libtheoradec.a libphysfs.a libuchardet.a libopenal.a libssl.a libcrypto.a"
 
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxp-ios.XXXXXX")"
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxp-z-ios.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 
 for sdk in iphoneos iphonesimulator; do
@@ -47,7 +47,7 @@ for sdk in iphoneos iphonesimulator; do
     mkdir -p "$STAGE/$sdk/lib"
     for lib in $LIBS; do
         if [ ! -f "$tree/lib/$lib" ]; then
-            echo "package-ios: $tree/lib/$lib missing. Run: cd deps && make -f $sdk.make" >&2
+            echo "package-ios: $tree/lib/$lib missing. Build $sdk first, see README.md" >&2
             exit 1
         fi
         cp "$tree/lib/$lib" "$STAGE/$sdk/lib/"

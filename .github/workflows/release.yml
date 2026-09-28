@@ -1,0 +1,71 @@
+# Builds the engine and its dependencies for the device and the
+# simulator, and publishes mkxp-z-ios.tar.gz when a tag v* is pushed.
+# A run from the Actions tab builds the same file and keeps it as a
+# workflow artifact.
+#
+# The release notes give the sha256, which a host pins next to the tag.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish
+    runs-on: macos-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Select the newest Xcode
+        run: |
+          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          echo "Using $XCODE"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
+
+      - name: Install the build tools
+        run: brew install automake autoconf libtool pkg-config bison
+
+      - name: Check for launcher code
+        run: tools/check-no-host-code.sh
+
+      - name: Build
+        run: |
+          for sdk in iphoneos iphonesimulator; do
+            tools/build-deps-ios.sh "$sdk"
+            (cd deps && make -f "$sdk.make" mkxp-merged mkxp-core)
+          done
+
+      - name: Package
+        id: package
+        run: |
+          set -eu
+          tools/package-ios.sh --tag "$GITHUB_REF_NAME"
+          SHA256="$(shasum -a 256 mkxp-z-ios.tar.gz | awk '{print $1}')"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          printf 'Built from `%s`.\n\nsha256: `%s`\n' "$GITHUB_SHA" "$SHA256" > notes.md
+          gh release create "$GITHUB_REF_NAME" mkxp-z-ios.tar.gz --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+      - name: Keep the build
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: mkxp-z-ios
+          path: mkxp-z-ios.tar.gz
