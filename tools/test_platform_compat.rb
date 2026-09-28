@@ -49,6 +49,11 @@ module Input
   end
 end
 
+# The app sets TMPDIR to its own temp folder, with a trailing slash.
+ENV['TMPDIR'] = "#{USERDATA}/tmp/"
+ENV.delete('TEMP')
+ENV.delete('TMP')
+
 prev_verbose = $VERBOSE
 $VERBOSE = nil
 begin
@@ -62,4 +67,6 @@ assert_eq(System.mouse_in_window, true, 'System.mouse_in_window answers true lik
 Input.in_window = false
 assert_eq(System.mouse_in_window, false, 'System.mouse_in_window follows Input.mouse_in_window')
 
-test_passed('test_platform_compat', 3)
+assert_eq(ENV['TEMP'], "#{USERDATA}/tmp", 'ENV TEMP is the app temp folder from TMPDIR')
+
+test_passed('test_platform_compat', 4)
