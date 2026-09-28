@@ -159,12 +159,8 @@ end
 # scripts constructing paths from ENV don't return nil and crash.
 # Values point into the iOS sandbox (or are blank strings) so File.exist?
 # returns false rather than reading unrelated system dirs.
-tmp = '/tmp'
-begin
-  tmp = Dir.tmpdir
-rescue StandardError
-  # Dir.tmpdir can raise on locked-down sandboxes. Fall back to /tmp.
-end
+# iOS puts the app's own temp folder in TMPDIR. /tmp is outside the sandbox.
+tmp = (ENV['TMPDIR'] || '/tmp').chomp('/')
 
 # SDL_GetPrefPath contract: directory paths used for string-concat
 # save joins must end with '/'. iOS normalize strips trailing slashes.
