@@ -7,7 +7,7 @@ The iOS port of mkxp-z keeps SDL, the GL context, OpenAL, and the active Ruby VM
 1. **SDL cannot restart** - the design of `SDL_Init`/`SDL_Quit` and window creation assumes a single process lifetime.
 2. **Ruby cannot restart** - `ruby_init()` and `ruby_cleanup()` are one-shot operations. A call to `ruby_cleanup()` destroys the VM, and a later `ruby_init()` crashes. The cause: Ruby's `Init_*` functions stash VALUEs in file-scope statics that do not reset.
 
-These constraints affect every layer of the architecture. Cross-session play (multiple games in sequence in one process) is disabled. Empo plays one game for each process. See the host-side doc [multi-session.md](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-session.md). The persistent-resource architecture below still applies: the active Ruby and SDL stay alive even though we no longer swap games.
+These constraints affect every layer of the architecture. Cross-session play (multiple games in sequence in one process) is disabled. A host plays one game for each process. The persistent-resource architecture below still applies: the active Ruby and SDL stay alive even though we no longer swap games.
 
 ---
 
@@ -75,7 +75,7 @@ Between sessions, the engine:
 - `InitOnce` - `ruby_init`, `topSelf` registration, runs once per process.
 - `PerSession` - `mriBindingInit`, script execution, runs every session to reinstall C methods on top of game-script redefinitions.
 
-With multi-Ruby ([multi-ruby.md](https://github.com/mateo-m/empo-app/blob/main/docs/multi-ruby.md) in the host repo), the binary contains three Ruby builds, but only one is active per process: the one that detection picked for the first selected game. A switch to a different Ruby version mid-process is not supported because the chosen version's `ruby_init` already ran.
+With multi-Ruby, the binary contains three Ruby builds, but only one is active per process: the one that detection picked for the first selected game. A switch to a different Ruby version mid-process is not supported because the chosen version's `ruby_init` already ran.
 
 The historical `resetBetweenSessions()` cleanup (constant-baseline diffing, singleton-method scrubbing, the `$mouse` shim, RGSS disposable detachment) is dormant because cross-session play is disabled. Same-session reset hooks (`$__mkxp_reset_hooks`, a GC cycle, etc.) still fire if a game raises `Reset` mid-play, because the user stays in the same game.
 
@@ -151,7 +151,7 @@ def self.delta_s
 end
 ```
 
-Empo's engine-side timing uses seconds internally (`SharedState::runTime()`, frame pacing, transition timers). An earlier binding exposed that same seconds value directly to Ruby. That made `Graphics.delta_s` collapse to ~0. Vanguard's battle intro transition timer never advanced, and `Graphics.transition` spun forever.
+The engine-side timing uses seconds internally (`SharedState::runTime()`, frame pacing, transition timers). An earlier binding exposed that same seconds value directly to Ruby. That made `Graphics.delta_s` collapse to ~0. Vanguard's battle intro transition timer never advanced, and `Graphics.transition` spun forever.
 
 **Solution (`src/display/graphics.cpp`):** Keep the engine's internal timing in seconds. Convert the Ruby-visible `Graphics.delta` value back to mkxp-compatible microseconds at the binding boundary. This keeps the engine's pacing semantics and matches what legacy Pokemon compatibility layers expect.
 

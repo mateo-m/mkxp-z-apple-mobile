@@ -40,8 +40,8 @@
  * NOT the upstream MKXPZ_SSL flag: upstream couples that flag to the
  * xBRZ shader paths, which this fork does not build. Without this
  * flag the client is http-only, and every https request raises
- * "'https' scheme is not supported" (shipped broken in Empo
- * 0.4.0/0.4.1 when this flag fell out of the core recipe). */
+ * "'https' scheme is not supported". Two releases shipped broken
+ * when this flag fell out of the core recipe. */
 #ifndef MKXPZ_NET_TLS
 #define MKXPZ_NET_TLS 1
 #endif

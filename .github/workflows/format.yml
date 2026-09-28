@@ -37,7 +37,7 @@ jobs:
           fi
 
   # Aggregate gate whose check-run name matches the ruleset's required
-  # "Format" context exactly (same pattern as empo-app's workflows).
+  # "Format" context exactly.
   summary:
     name: Format
     needs: [ruby]

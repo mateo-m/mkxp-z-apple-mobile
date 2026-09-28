@@ -16,7 +16,7 @@
 #   tools/build-test-host-ios.sh [--sdk iphonesimulator]
 #                                [--game <dir>] [--out <dir>]
 #
-# Prerequisite: tools/fetch-deps-ios.sh
+# Prerequisite: tools/build-deps-ios.sh iphonesimulator
 set -eu
 
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,7 +52,7 @@ ANGLE="$DEPS/ANGLE/$SDK"
 
 if [ ! -d "$TREE/lib" ] || [ ! -d "$ANGLE/lib" ]; then
     echo "build-test-host-ios: dependency libraries missing." >&2
-    echo "Run tools/fetch-deps-ios.sh first." >&2
+    echo "Run tools/build-deps-ios.sh iphonesimulator first." >&2
     exit 1
 fi
 

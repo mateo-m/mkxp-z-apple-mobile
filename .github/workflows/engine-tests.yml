@@ -34,7 +34,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # hmode7 is a submodule and the core build compiles it.
+          # hmode7 is a submodule and the core build compiles it. The
+          # dependency sources under deps/sources are submodules too.
           submodules: recursive
 
       - uses: ruby/setup-ruby@v1
@@ -93,11 +94,30 @@ jobs:
             ruby "$test"
           done
 
-      # No cache here on purpose. The tarballs hold both SDKs, so a
-      # cache that stored one of them would miss every time, and
-      # restoring both costs more than the download.
-      - name: Fetch the dependencies
-        run: tools/fetch-deps-ios.sh --sdk iphonesimulator
+      # A dependency build takes most of an hour. The key changes only
+      # when a recipe, a patch, a pinned source, or Xcode changes.
+      - name: Key the dependency cache
+        id: deps-key
+        run: |
+          {
+            git submodule status deps/sources
+            xcodebuild -version
+          } | shasum -a 256 | cut -d' ' -f1 | sed 's/^/sources=/' >> "$GITHUB_OUTPUT"
+
+      - name: Restore the dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/build-iphonesimulator-arm64
+            deps/ANGLE
+          key: deps-iphonesimulator-${{ steps.deps-key.outputs.sources }}-${{ hashFiles('deps/*.make', 'deps/*.sh', 'deps/*.lst', 'deps/*/*.patch', 'deps/*/*.rb', 'tools/build-deps-ios.sh') }}
+
+      - name: Build the dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          brew install automake autoconf libtool pkg-config bison
+          tools/build-deps-ios.sh iphonesimulator
 
       # This step builds the host. The two after it pick their suite
       # and their interpreter at launch, so they reuse the build.

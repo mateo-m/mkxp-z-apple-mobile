@@ -10,7 +10,7 @@
 // `mriBindingExecute`, `bitmapBindingInit`, etc.) is demoted to
 // private-extern by the `ld -r -unexported_symbols_list` step.
 // That lets multiple merged .o files (one per Ruby version) coexist
-// in the final Empo binary without symbol collisions.
+// in one binary without symbol collisions.
 //
 // The host (mkxp-z's `EngineHost::runSessions` in main.cpp) calls
 // `mkxp_get_script_binding_<NN>()` based on the active game's

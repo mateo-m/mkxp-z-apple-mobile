@@ -16,7 +16,7 @@
 # pass. On a mega surface it reports PEND until the engine implements
 # that operation.
 #
-# Run it with tools/run-engine-tests.sh in the Empo repository, or
+# Run it with tools/run-engine-tests.sh, or
 # point any mkxp-z build at this directory (see README.md).
 
 # The engine runs the scripts named by "preloadScript" only for games

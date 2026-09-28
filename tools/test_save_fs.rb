@@ -7,6 +7,9 @@
 
 require_relative 'save_fs_harness'
 
+# The launcher identity marks host files (MKXPSaveFS.host_artifact?).
+$userAgent = 'host'
+
 reset_workspace!
 load_windows_fs!
 
@@ -105,7 +108,7 @@ end
 # --- Portable-save sweep: a file access under "Save Data/" that
 # misses literally while the flattened counterpart sits at the root
 # recovers everything. Rejuvenation goes portable on the launcher
-# identity alone (RTP.isPortable -> mobile? -> $empo) - no marker,
+# identity alone (RTP.isPortable -> mobile? -> $host) - no marker,
 # no $joiplay - so no boot-time gate could see it. ---
 reset_workspace!
 File.write(File.join(USERDATA, 'Game.rxdata'), 'active root save')
@@ -115,8 +118,8 @@ File.write(File.join(USERDATA, 'Settings.dat'), 'options')
 File.write(File.join(USERDATA, 'updater.log'), 'patch history')
 File.write(File.join(USERDATA, '.portable'), '')
 File.write(File.join(USERDATA, 'keybindings.mkxp3'), '')
-File.write(File.join(USERDATA, 'Game.rxdata.empo-displaced.bak'), 'host artifact')
-File.write(File.join(USERDATA, '.empo-origin.json'), '{}')
+File.write(File.join(USERDATA, 'Game.rxdata.host-displaced.bak'), 'host artifact')
+File.write(File.join(USERDATA, '.host-origin.json'), '{}')
 FileUtils.mkdir_p(File.join(USERDATA, 'Battle Logs'))
 File.write(File.join(USERDATA, 'Battle Logs', 'log1.txt'), 'battle log')
 Dir.chdir(GAME) { load_windows_fs!(false) }
@@ -144,8 +147,8 @@ leftover = raw_entries(USERDATA)
 assert_false(leftover.include?('Game.rxdata'), 'root save gone after the sweep')
 assert_false(leftover.include?('Battle Logs'), 'root subdirectory gone after the sweep')
 assert_true(leftover.include?('keybindings.mkxp3'), 'engine file stays at the root')
-assert_true(leftover.include?('Game.rxdata.empo-displaced.bak'), 'host backup stays at the root')
-assert_true(leftover.include?('.empo-origin.json'), 'host marker stays at the root')
+assert_true(leftover.include?('Game.rxdata.host-displaced.bak'), 'host backup stays at the root')
+assert_true(leftover.include?('.host-origin.json'), 'host marker stays at the root')
 
 # One sweep per boot. The next boot converges later stragglers.
 File.write(File.join(USERDATA, 'Save03.rvdata2'), 'later straggler')
