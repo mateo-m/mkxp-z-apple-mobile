@@ -17,7 +17,7 @@ index 0000000000..260248db1a
 +# host (e.g. system ruby 2.6) tries to load its own rbconfig after
 +# fake.rb has already redefined the constant to 1.8.8.
 +__saved_load_path = $LOAD_PATH.dup
-+$LOAD_PATH.reject! { |p| p == '.' || p == '' || File.expand_path(p) == File.expand_path('.') }
++$LOAD_PATH.reject! { |p| p == '.' || p == '' || (File.realpath(p) rescue p) == File.realpath('.') }
 +require 'rbconfig'
 +require 'fileutils'
 +$LOAD_PATH.replace(__saved_load_path)

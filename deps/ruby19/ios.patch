@@ -43,7 +43,7 @@ index 7bfa0aef01..5e6f393277 100755
 +# resolves to the host's stdlib copy, not the 1.9.3 source tree's
 +# rbconfig.rb (which itself has the strict version assertion).
 +__saved_load_path = $LOAD_PATH.dup
-+$LOAD_PATH.reject! { |p| p == '.' || p == '' || File.expand_path(p) == File.expand_path('.') }
++$LOAD_PATH.reject! { |p| p == '.' || p == '' || (File.realpath(p) rescue p) == File.realpath('.') }
 +require 'rbconfig'
 +require 'fileutils'
 +$LOAD_PATH.replace(__saved_load_path)
