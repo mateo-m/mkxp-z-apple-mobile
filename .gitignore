@@ -91,10 +91,11 @@ tools/test_save_fs_workspace/
 # Built by tools/run-cpp-tests.sh --keep.
 tests/cpp/build/
 
-# Prebuilt dependency libraries, fetched by tools/fetch-deps-ios.sh
+# The iOS build (deps/common.make)
 /deps/build-*/
 /deps/ANGLE/
-/deps/.fetched-*
+/deps/downloads/
+/mkxp-ios.tar.gz
 
 # Test host build output
 /build/

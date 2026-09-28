@@ -9,13 +9,10 @@
 # -unexported_symbols_list. Hidden Ruby symbols cannot clash across
 # versions, so each merged object exports exactly one global symbol,
 # `_mkxp_get_script_binding_<NN>`, which returns its ScriptBinding
-# vtable. See
-# https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-ruby.md.
+# vtable.
 #
-# This script is the single source of truth for that recipe. Launcher
-# makefiles call it and supply only SDK paths and the libruby
-# archives, so the merged objects a launcher links are the product of
-# this recipe at a public commit.
+# deps/common.make calls it and supplies only the SDK paths and the
+# libruby archives.
 #
 # Usage:
 #   tools/build-binding-ios.sh --ruby 18|19|31 \

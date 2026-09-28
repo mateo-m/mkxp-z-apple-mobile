@@ -2,14 +2,12 @@
 # Build libmkxpz-core.a - the engine-core static library (everything
 # under src/: renderer, audio, event loop, filesystem, host bridge) -
 # for one Apple SDK. The Ruby binding half (binding/ + hmode7/) is NOT
-# included. It links against a specific libruby and is built separately
-# by its consumer (e.g. the Empo launcher's mkxp*-merged.o targets).
+# included. It links against a specific libruby, and
+# tools/build-binding-ios.sh builds it.
 #
-# This script is the single source of truth for compiling the engine
-# core: launcher makefiles and this repo's CI both call it, so a
-# published artifact is byte-for-byte the product of this recipe at a
-# public commit. Compile-only: it needs dependency *headers* (SDL2,
-# pixman, OpenAL, physfs, ANGLE, ...) but no dependency libraries.
+# deps/common.make and the test host both call this script.
+# Compile-only: it needs dependency *headers* (SDL2, pixman, OpenAL,
+# physfs, ANGLE, ...) but no dependency libraries.
 #
 # Usage:
 #   tools/build-core-ios.sh --sdk iphoneos|iphonesimulator \

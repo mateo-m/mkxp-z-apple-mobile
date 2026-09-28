@@ -1177,7 +1177,7 @@ int mkxp_getFastForwardMultiplier(void) {
 }
 
 // A Ruby VM cannot be torn down and started again in one process, so
-// this core cannot kill a game. Empo never calls this for it.
+// this core cannot kill a game. A host must not call this.
 void mkxp_killSession(void) {
     fprintf(stderr, "[mkxp] killSession: this core cannot kill a game\n");
     abort();

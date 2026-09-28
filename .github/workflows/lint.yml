@@ -73,7 +73,7 @@ jobs:
           fi
 
   # Aggregate gate whose check-run name matches the ruleset's required
-  # "Lint" context exactly (same pattern as empo-app's workflows).
+  # "Lint" context exactly.
   summary:
     name: Lint
     needs: [ruby, cpp, markdown]

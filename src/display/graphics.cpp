@@ -1202,9 +1202,7 @@ struct GraphicsPrivate {
      * SwiftUI places at the game viewport's position (gameRect) during
      * the hero zoom animation, so the transition appears to zoom into
      * the live game. Once the animation finishes, the snapshot is
-     * discarded and the real SDL rendering takes over. See
-     * https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/pause-resume.md
-     * for the full picture.
+     * discarded and the real SDL rendering takes over.
      *
      * We snapshot `lastPresentedFrame`, not the frame we just swapped.
      * The request arrives on the main thread while the player looks at

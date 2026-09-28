@@ -114,7 +114,7 @@ unless defined?(MKXPSaveFS)
     end
 
     def save_filename?(name)
-      return false if empo_artifact?(name)
+      return false if host_artifact?(name)
       return false if pre_literal_artifact?(name)
 
       lower = name.downcase
@@ -125,12 +125,20 @@ unless defined?(MKXPSaveFS)
       false
     end
 
-    # Host bookkeeping files carry an ".empo-" name segment
-    # (drain collision backups "*.empo-displaced*.bak", rescue
-    # markers ".empo-origin.json"). They belong to the host, not to
-    # the game. No recovery may move them.
-    def empo_artifact?(name)
-      name.include?('.empo-')
+    # Host bookkeeping files carry a ".<identity>-" name segment,
+    # where <identity> is the launcher identity the host declared
+    # ($userAgent), for example "*.<identity>-displaced.bak". They
+    # belong to the host, not to the game. No recovery may move them.
+    def host_artifact?(name)
+      mark = host_artifact_mark
+      !mark.nil? && name.include?(mark)
+    end
+
+    def host_artifact_mark
+      return @host_artifact_mark if defined?(@host_artifact_mark)
+
+      identity = defined?($userAgent) && $userAgent ? $userAgent.to_s : ''
+      @host_artifact_mark = identity.empty? ? nil : ".#{identity}-"
     end
 
     # Collision backups this migration wrote itself
@@ -627,7 +635,7 @@ unless defined?(MKXPSaveFS)
     # The sweep is access-driven. No boot-time gate can know whether
     # a game resolves saves through the portable dir. Rejuvenation-
     # lineage builds go portable on the launcher identity alone
-    # (RTP.isPortable -> mobile? -> $empo/$kirin), with no marker
+    # (RTP.isPortable -> mobile? -> the launcher global, such as $kirin), with no marker
     # file and no JoiPlay toggle. And a $joiplay-keyed boot sweep
     # would move root saves for games that never read the portable
     # dir. So the wrappers watch for the game itself to touch
@@ -643,7 +651,7 @@ unless defined?(MKXPSaveFS)
     #
     # The sweep moves every stranded entry, subdirectories included
     # (the alias flattened "Save Data/Battle Logs/..." the same
-    # way). Engine bookkeeping entries and host ".empo-" artifacts
+    # way). Engine bookkeeping entries and host ".<identity>-" artifacts
     # stay at the root. On a name collision the newer mtime wins
     # the canonical name (ties go to the root copy, which the alias
     # preferred for both reads and writes). The loser is kept
@@ -736,7 +744,7 @@ unless defined?(MKXPSaveFS)
       return true if name == '.DS_Store'
       return true if engine_internal_entry?(name)
 
-      empo_artifact?(name)
+      host_artifact?(name)
     end
 
     def migrate_save_entry(src, dst)
@@ -1287,7 +1295,7 @@ end
 # touch portable "Save Data" content, and the first qualifying
 # access runs one sweep per boot through the _mkxp_orig_* aliases.
 # No boot-time gate: launcher-identity portable modes
-# (Rejuvenation's RTP.isPortable -> mobile? -> $empo) are invisible
+# (Rejuvenation's RTP.isPortable -> mobile? -> the launcher global) are invisible
 # before game scripts run, and a $joiplay-keyed boot sweep would
 # move root saves for games that never read the portable dir.
 MKXPSaveFS.capture_game_root!

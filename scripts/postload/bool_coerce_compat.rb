@@ -13,7 +13,7 @@
 #
 # Postload scripts re-run on every F12 soft reset (the script loop
 # in binding-mri.cpp restarts from the top), so each wrapper is
-# guarded by the presence of its `empo_bool_orig_*` alias:
+# guarded by the presence of its `mkxp_bool_orig_*` alias:
 # re-aliasing on reset would point the saved original at the
 # wrapper and recurse forever.
 #
@@ -31,7 +31,7 @@
   klass = Object.const_get(klass_name)
   props.each do |prop|
     setter = "#{prop}="
-    orig = "empo_bool_orig_#{prop}="
+    orig = "mkxp_bool_orig_#{prop}="
     next unless klass.method_defined?(setter)
     next if klass.method_defined?(orig)
 
