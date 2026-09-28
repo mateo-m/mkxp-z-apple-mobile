@@ -44,10 +44,18 @@ trap 'rm -rf "$STAGE"' EXIT INT TERM
 
 for sdk in iphoneos iphonesimulator; do
     tree="$DEPS/build-$sdk-arm64"
+    if [ "$sdk" = iphoneos ]; then platform=2; else platform=7; fi
     mkdir -p "$STAGE/$sdk/lib"
     for lib in $LIBS; do
         if [ ! -f "$tree/lib/$lib" ]; then
             echo "package-ios: $tree/lib/$lib missing. Build $sdk first, see README.md" >&2
+            exit 1
+        fi
+        # LC_BUILD_VERSION platform 2 is iOS, 7 is the iOS simulator.
+        wrong="$(otool -l "$tree/lib/$lib" | awk -v want="$platform" \
+            '$1 == "platform" && $2 != want { n++ } END { print n + 0 }')"
+        if [ "$wrong" -gt 0 ]; then
+            echo "package-ios: $tree/lib/$lib holds $wrong objects for another platform than $sdk" >&2
             exit 1
         fi
         cp "$tree/lib/$lib" "$STAGE/$sdk/lib/"
