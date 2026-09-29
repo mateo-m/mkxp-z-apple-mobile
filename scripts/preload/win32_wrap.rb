@@ -974,15 +974,19 @@ module Win32API_Impl
         verb = args[1].is_a?(String) && !args[1].empty? ? args[1].upcase : 'GET'
         return 0 unless %w[GET HEAD POST].include?(verb)
 
+        path = args[2].is_a?(String) ? args[2] : ''
+        Requests.add(:method => verb, :headers => {}, :url => url(connection, path, args[6].to_i))
+      end
+
+      private
+
+      def url(connection, path, flags)
         port = connection[:port]
-        secure = port == INTERNET_DEFAULT_HTTPS_PORT ||
-                 (args[6].to_i & INTERNET_FLAG_SECURE) != 0
+        secure = port == INTERNET_DEFAULT_HTTPS_PORT || (flags & INTERNET_FLAG_SECURE) != 0
         host = connection[:server]
         host = "#{host}:#{port}" unless port.zero? || port == (secure ? 443 : 80)
-        path = args[2].is_a?(String) ? args[2] : ''
         path = "/#{path}" unless path[0, 1] == '/'
-        Requests.add(:method => verb, :headers => {},
-                     :url => "#{secure ? 'https' : 'http'}://#{host}#{path}")
+        "#{secure ? 'https' : 'http'}://#{host}#{path}"
       end
     end
     HttpOpenRequest = HttpOpenRequestA
@@ -1015,22 +1019,10 @@ module Win32API_Impl
         request = Requests.lookup(args[0])
         return 0 unless defined?(HTTPLite) && request && request[:url]
 
-        headers = request[:headers]
-        Wininet.merge_headers(headers, args[1], args[2].to_i)
+        Wininet.merge_headers(request[:headers], args[1], args[2].to_i)
         body = args[3].is_a?(String) ? args[3][0, args[4].to_i] : ''
         response = begin
-          # Windows follows redirects here too, so a script that
-          # still connects to port 80 reaches a host that now 301s
-          # every request to https.
-          if request[:method] != 'POST'
-            HTTPLite.get(request[:url], headers, true)
-          elsif body.empty?
-            HTTPLite.post(request[:url], {}, headers, true)
-          else
-            type = headers.keys.find { |name| name.downcase == 'content-type' }
-            ctype = type ? headers.delete(type) : 'application/x-www-form-urlencoded'
-            HTTPLite.post_body(request[:url], body, ctype, headers)
-          end
+          fetch(request, body)
         rescue StandardError
           nil
         end
@@ -1038,6 +1030,22 @@ module Win32API_Impl
 
         Requests.buffer(request, response)
         1
+      end
+
+      private
+
+      # Windows follows redirects here too, so a script that still
+      # connects to port 80 reaches a host that now 301s every
+      # request to https.
+      def fetch(request, body)
+        url = request[:url]
+        headers = request[:headers]
+        return HTTPLite.get(url, headers, true) if request[:method] != 'POST'
+        return HTTPLite.post(url, {}, headers, true) if body.empty?
+
+        type = headers.keys.find { |name| name.downcase == 'content-type' }
+        ctype = type ? headers.delete(type) : 'application/x-www-form-urlencoded'
+        HTTPLite.post_body(url, body, ctype, headers)
       end
     end
     HttpSendRequest = HttpSendRequestA
@@ -1115,7 +1123,7 @@ module Win32API_Impl
       def raw_headers(request)
         lines = ["HTTP/1.1 #{request[:status]}"]
         request[:response_headers].each { |name, value| lines << "#{name}: #{value}" }
-        lines.join("\r\n") + "\r\n\r\n"
+        "#{lines.join("\r\n")}\r\n\r\n"
       end
     end
     HttpQueryInfoA = HttpQueryInfo
