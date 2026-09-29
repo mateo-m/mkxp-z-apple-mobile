@@ -873,16 +873,28 @@ module Win32API_Impl
       @@handles = {}
       @@next_handle = 0x100
 
-      def self.open(body, status)
-        body = body.dup
+      def self.open(response)
+        add(buffer({}, response))
+      end
+
+      def self.add(state)
+        handle = @@next_handle
+        @@next_handle += 1
+        @@handles[handle] = state
+        handle
+      end
+
+      def self.buffer(state, response)
+        body = response[:body].to_s.dup
         # Reads slice and count BYTES. On 1.9+ VMs the body may
         # arrive tagged UTF-8, where [] and length work in
         # characters. Retag as binary so both are byte-based.
         body.force_encoding('ASCII-8BIT') if body.respond_to?(:force_encoding)
-        handle = @@next_handle
-        @@next_handle += 1
-        @@handles[handle] = { :body => body, :pos => 0, :status => status }
-        handle
+        state[:body] = body
+        state[:pos] = 0
+        state[:status] = response[:status].to_i
+        state[:response_headers] = response[:headers].is_a?(Hash) ? response[:headers] : {}
+        state
       end
 
       def self.lookup(handle)
@@ -926,11 +938,109 @@ module Win32API_Impl
 
         # HTTP error statuses still return a handle, like Windows:
         # the caller reads the error body and can query the status.
-        Requests.open(response[:body].to_s, status)
+        Requests.open(response)
       end
     end
     InternetOpenUrlA = InternetOpenUrl
     InternetOpenUrlW = InternetOpenUrl
+
+    # The request API of Essentials BES and its forks:
+    #
+    #   hConnect = ICA.call(hInternet, 'host', 80, nil, nil, 3, 0, 0)
+    #   hRequest = HORA.call(hConnect, 'GET', 'path', nil, nil, nil, 0, 0)
+    #   HARHA.call(hRequest, "User-Agent: RPG Maker XP", -1, flags)
+    #   HSRA.call(hRequest, nil, 0, body, body.bytesize)
+    #
+    # then HttpQueryInfo and InternetReadFile on hRequest. The W
+    # spellings take UTF-16 strings, so they stay on the fallback.
+    INTERNET_DEFAULT_HTTPS_PORT = 443
+    INTERNET_FLAG_SECURE = 0x00800000
+
+    class InternetConnectA
+      def call(args)
+        server = args[1]
+        return 0 unless server.is_a?(String) && !server.empty?
+
+        Requests.add(:server => server, :port => args[2].to_i)
+      end
+    end
+    InternetConnect = InternetConnectA
+
+    class HttpOpenRequestA
+      def call(args)
+        connection = Requests.lookup(args[0])
+        return 0 unless connection && connection[:server]
+
+        verb = args[1].is_a?(String) && !args[1].empty? ? args[1].upcase : 'GET'
+        return 0 unless %w[GET HEAD POST].include?(verb)
+
+        port = connection[:port]
+        secure = port == INTERNET_DEFAULT_HTTPS_PORT ||
+                 (args[6].to_i & INTERNET_FLAG_SECURE) != 0
+        host = connection[:server]
+        host = "#{host}:#{port}" unless port.zero? || port == (secure ? 443 : 80)
+        path = args[2].is_a?(String) ? args[2] : ''
+        path = "/#{path}" unless path[0, 1] == '/'
+        Requests.add(:method => verb, :headers => {},
+                     :url => "#{secure ? 'https' : 'http'}://#{host}#{path}")
+      end
+    end
+    HttpOpenRequest = HttpOpenRequestA
+
+    # Reads "Name: value" lines. A length of -1 means the text ends
+    # at its first NUL.
+    def self.merge_headers(headers, text, length)
+      return unless text.is_a?(String)
+
+      text = length > 0 ? text[0, length] : text.split("\0", 2)[0].to_s
+      text.split(/\r?\n/).each do |line|
+        name, value = line.split(':', 2)
+        headers[name.strip] = value.strip if value
+      end
+    end
+
+    class HttpAddRequestHeadersA
+      def call(args)
+        request = Requests.lookup(args[0])
+        return 0 unless request && request[:headers]
+
+        Wininet.merge_headers(request[:headers], args[1], args[2].to_i)
+        1
+      end
+    end
+    HttpAddRequestHeaders = HttpAddRequestHeadersA
+
+    class HttpSendRequestA
+      def call(args)
+        request = Requests.lookup(args[0])
+        return 0 unless defined?(HTTPLite) && request && request[:url]
+
+        headers = request[:headers]
+        Wininet.merge_headers(headers, args[1], args[2].to_i)
+        body = args[3].is_a?(String) ? args[3][0, args[4].to_i] : ''
+        response = begin
+          # Windows follows redirects here too, so a script that
+          # still connects to port 80 reaches a host that now 301s
+          # every request to https.
+          if request[:method] != 'POST'
+            HTTPLite.get(request[:url], headers, true)
+          elsif body.empty?
+            HTTPLite.post(request[:url], {}, headers, true)
+          else
+            type = headers.keys.find { |name| name.downcase == 'content-type' }
+            ctype = type ? headers.delete(type) : 'application/x-www-form-urlencoded'
+            HTTPLite.post_body(request[:url], body, ctype, headers)
+          end
+        rescue StandardError
+          nil
+        end
+        return 0 unless response.is_a?(Hash) && response[:status].to_i != 0
+
+        Requests.buffer(request, response)
+        1
+      end
+    end
+    HttpSendRequest = HttpSendRequestA
 
     class InternetReadFile
       def call(args)
@@ -965,19 +1075,23 @@ module Win32API_Impl
     class HttpQueryInfo
       HTTP_QUERY_CONTENT_LENGTH = 5
       HTTP_QUERY_STATUS_CODE = 19
+      HTTP_QUERY_RAW_HEADERS_CRLF = 22
       HTTP_QUERY_FLAG_NUMBER = 0x20000000
 
       def call(args)
         request = Requests.lookup(args[0])
         buf = args[2]
-        return 0 unless request && buf.is_a?(String)
+        return 0 unless request && request[:body] && buf.is_a?(String)
 
         info = args[1].to_i
         value = case info & 0xFFFF
                 when HTTP_QUERY_CONTENT_LENGTH then request[:body].length
                 when HTTP_QUERY_STATUS_CODE then request[:status]
+                when HTTP_QUERY_RAW_HEADERS_CRLF then raw_headers(request)
                 else return 0
                 end
+        return 0 if value.is_a?(String) && (info & HTTP_QUERY_FLAG_NUMBER) != 0
+
         payload = if (info & HTTP_QUERY_FLAG_NUMBER).zero?
                     # Headers are text on Windows unless FLAG_NUMBER
                     # asks for a binary DWORD.
@@ -992,6 +1106,16 @@ module Win32API_Impl
 
         memcpy_string(buf, payload)
         1
+      end
+
+      private
+
+      # HTTPLite does not keep the reason phrase, so the status line
+      # has only the code.
+      def raw_headers(request)
+        lines = ["HTTP/1.1 #{request[:status]}"]
+        request[:response_headers].each { |name, value| lines << "#{name}: #{value}" }
+        lines.join("\r\n") + "\r\n\r\n"
       end
     end
     HttpQueryInfoA = HttpQueryInfo
