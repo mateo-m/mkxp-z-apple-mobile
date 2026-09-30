@@ -40,7 +40,6 @@
 #include "ios_fatal_report.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <EGL/egl.h>
-#include <SDL_syswm.h>
 
 #include "binding.h"
 #include "sharedstate.h"
