@@ -761,6 +761,10 @@ static bool initANGLE(SDL_Window *win) {
     showInitError("ANGLE: eglCreateWindowSurface failed");
     return false;
   }
+  // ANGLE copies the parent layer's frame into its CAMetalLayer once, and
+  // on iOS it then syncs only the bounds. If UIKit has not placed the root
+  // view yet, the picture stays off screen for the whole session.
+  mkxp_refreshANGLENativeLayerSize(win, nullptr, nullptr);
 
   EGLint contextAttribs[] = {
     EGL_CONTEXT_CLIENT_VERSION, 2,
