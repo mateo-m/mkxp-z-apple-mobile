@@ -23,7 +23,7 @@ require 'rbconfig'
 ROOT = File.expand_path('..', __dir__)
 PATCH = File.join(ROOT, 'scripts', 'postload', 'pokemon_tilemap_fix.rb')
 
-SCENARIOS = %w[immediate deferred no_helper legacy small_gpu
+SCENARIOS = %w[immediate deferred no_helper legacy legacy_wide_map small_gpu
                 watcher_stops_legacy watcher_stops_plain real_max_size].freeze
 
 require_relative 'assertion_count'
@@ -200,6 +200,12 @@ module Graphics
   def update
     FRAMES << :drawn
   end
+
+  def frame_reset; end
+end
+
+class Color
+  def initialize(*_args); end
 end
 
 module MKXP
@@ -951,6 +957,58 @@ def scenario_legacy
   end
 end
 
+# 120x40x3 map data with an animated autotile (id 48) in every ground cell.
+class WideMap
+  def xsize
+    120
+  end
+
+  def ysize
+    40
+  end
+
+  def zsize
+    3
+  end
+
+  def [](_x, _y, z)
+    z.zero? ? 48 : 0
+  end
+end
+
+def scenario_legacy_wide_map
+  # Essentials skips its list of animated autotile cells on a map wider
+  # or taller than 100 tiles, and scans the visible area each frame.
+  # That scan clears each animated cell and must draw it again (GS
+  # Vitro, Route 27 at 120x40: water and shores showed the panorama).
+  define_legacy!
+  load_patch
+
+  tilemap = CustomTilemap.new
+  layer = Sprite.new
+  layer.bitmap = Bitmap.new(64, 64)
+  {
+    :@layer0 => layer, :@map_data => WideMap.new, :@priorities => Hash.new(0),
+    :@framecount => [4] * 7, :@autotileInfo => [], :@prioautotiles => [],
+    :@fullyrefreshedautos => false, :@ox => 0, :@oy => 0,
+    :@oxLayer0 => 0, :@oyLayer0 => 0
+  }.each { |name, value| tilemap.instance_variable_set(name, value) }
+  def tilemap.shown?
+    true
+  end
+
+  def tilemap.autotileFrame(_id)
+    0
+  end
+
+  def tilemap.bltAutotile(*_args); end
+
+  assert_quiet('wide map: refreshing autotiles') { tilemap.refreshLayer0(true) }
+  drawn = layer.bitmap.blits.map { |blit| [blit[:x], blit[:y]] }
+  cells = (0..3).flat_map { |x| (0..3).map { |y| [x * 32, y * 32] } }
+  assert_eq(drawn.sort, cells.sort, 'wide map: every animated cell is drawn again')
+end
+
 def scenario_small_gpu
   # A device that only allows 1024px textures. The old fold ceiling
   # was 4096px of tileset here. Paging has no ceiling.
@@ -1109,6 +1167,7 @@ when 'immediate' then scenario_immediate
 when 'deferred'  then scenario_deferred
 when 'no_helper' then scenario_no_helper
 when 'legacy'    then scenario_legacy
+when 'legacy_wide_map' then scenario_legacy_wide_map
 when 'small_gpu' then scenario_small_gpu
 when 'watcher_stops_legacy' then scenario_watcher_stops_legacy
 when 'watcher_stops_plain'  then scenario_watcher_stops_plain
