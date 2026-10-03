@@ -1,0 +1,380 @@
+diff --git a/gc.c b/gc.c
+index b7fc7b150c..5c16d9c747 100644
+--- a/gc.c
++++ b/gc.c
+@@ -436,6 +436,54 @@ add_heap()
+ }
+ #define RANY(o) ((RVALUE*)(o))
+ 
++/* Lazy sweep. garbage_collect() only marks. The sweep then runs in
++ * small steps from rb_newobj(), so one collection does not stop the
++ * game for the whole sweep. Heaps [0, sweep_heaps_end) existed at the
++ * mark. Slots before sweep_p in heap sweep_heap, and the slots of the
++ * heaps before it, are swept. While a sweep is pending, only swept
++ * slots and the slots of heaps added after the mark can be on the
++ * freelist. An unswept slot with flags 0 is free, and the sweep puts
++ * it on the freelist. */
++static int sweep_heap = -1;
++static int sweep_heaps_end;
++static RVALUE *sweep_p;
++static int sweep_n;
++static RVALUE *sweep_final_list, *sweep_final_tail;
++static int sweep_freed;
++static unsigned long sweep_live;
++static unsigned long sweep_free_min;
++static unsigned long sweep_malloc_increase;
++
++#define SWEEP_STEP_FREE  2048
++#define SWEEP_STEP_SLOTS 32768
++
++static int
++is_swept(p)
++    RVALUE *p;
++{
++    int i;
++
++    if (sweep_heap < 0) return Qtrue;
++    for (i = 0; i < sweep_heaps_end; i++) {
++	if (heaps[i].slot <= p && p < heaps[i].slot + heaps[i].limit) {
++	    if (i < sweep_heap) return Qtrue;
++	    if (i > sweep_heap) return Qfalse;
++	    return p < sweep_p;
++	}
++    }
++    return Qtrue;
++}
++
++static void gc_sweep_step _((int));
++
++static void
++gc_sweep_rest()
++{
++    while (sweep_heap >= 0) {
++	gc_sweep_step(0);
++    }
++}
++
+ int
+ rb_during_gc()
+ {
+@@ -450,6 +498,7 @@ rb_newobj()
+     if (during_gc)
+ 	rb_bug("object allocation during garbage collection phase");
+ 
++    if (!freelist && sweep_heap >= 0) gc_sweep_step(SWEEP_STEP_FREE);
+     if (ruby_gc_stress || !freelist) garbage_collect();
+ 
+     obj = (VALUE)freelist;
+@@ -1113,6 +1162,19 @@ add_freelist(p)
+     freelist = p;
+ }
+ 
++/* An unswept slot is not put on the freelist. Its sweep does that. */
++static inline void
++free_slot(p)
++    RVALUE *p;
++{
++    if (is_swept(p)) {
++	add_freelist(p);
++    }
++    else {
++	p->as.free.flags = 0;
++    }
++}
++
+ static void
+ finalize_list(p)
+     RVALUE *p;
+@@ -1121,7 +1183,7 @@ finalize_list(p)
+ 	RVALUE *tmp = p->as.free.next;
+ 	run_final((VALUE)p);
+ 	if (!FL_TEST(p, FL_SINGLETON)) { /* not freeing page */
+-	    add_freelist(p);
++	    free_slot(p);
+ 	}
+ 	p = tmp;
+     }
+@@ -1132,6 +1194,8 @@ free_unused_heaps()
+ {
+     int i, j;
+ 
++    /* The sweep keeps heap indexes. */
++    if (sweep_heap >= 0) return;
+     for (i = j = 1; j < heaps_used; i++) {
+ 	if (heaps[i].limit == 0) {
+ 	    free(heaps[i].membase);
+@@ -1149,50 +1213,62 @@ free_unused_heaps()
+ void rb_gc_abort_threads(void);
+ 
+ static void
+-gc_sweep()
++gc_sweep_finish()
+ {
+-    RVALUE *p, *pend, *final_list;
+-    int freed = 0;
+-    int i;
+-    unsigned long live = 0;
+-    unsigned long free_min = 0;
++    RVALUE *final_list = sweep_final_list;
+ 
+-    for (i = 0; i < heaps_used; i++) {
+-        free_min += heaps[i].limit;
++    sweep_heap = -1;
++    sweep_final_list = 0;
++    if (sweep_malloc_increase > malloc_limit) {
++	malloc_limit += (sweep_malloc_increase - malloc_limit) * (double)sweep_live / (sweep_live + sweep_freed);
++	if (malloc_limit < GC_MALLOC_LIMIT) malloc_limit = GC_MALLOC_LIMIT;
++    }
++    if (sweep_freed < sweep_free_min) {
++	add_heap();
+     }
+-    free_min = free_min * 0.2;
+-    if (free_min < FREE_MIN)
+-        free_min = FREE_MIN;
+ 
+-    if (ruby_in_compile && ruby_parser_stack_on_heap()) {
+-	/* should not reclaim nodes during compilation
+-           if yacc's semantic stack is not allocated on machine stack */
+-	for (i = 0; i < heaps_used; i++) {
+-	    p = heaps[i].slot; pend = p + heaps[i].limit;
+-	    while (p < pend) {
+-		if (!(p->as.basic.flags&FL_MARK) && BUILTIN_TYPE(p) == T_NODE)
+-		    gc_mark((VALUE)p, 0);
+-		p++;
+-	    }
++    /* clear finalization list */
++    if (final_list) {
++	sweep_final_tail->as.free.next = deferred_final_list;
++	deferred_final_list = final_list;
++	if (!freelist && !rb_thread_critical) {
++	    rb_gc_finalize_deferred();
++	}
++	else {
++	    rb_thread_pending = 1;
+ 	}
++	if (!freelist) {
++	    add_heap();
++	}
++	return;
+     }
++    free_unused_heaps();
++}
+ 
+-    mark_source_filename(ruby_sourcefile);
+-    if (source_filenames) {
+-        st_foreach(source_filenames, sweep_source_filename, 0);
+-    }
++/* Sweeps until it put `goal` slots on the freelist and the freelist is
++ * not empty, or until it swept SWEEP_STEP_SLOTS slots. A goal of 0
++ * sweeps to the end. */
++static void
++gc_sweep_step(goal)
++    int goal;
++{
++    RVALUE *p, *pend;
++    int added = 0, seen = 0;
++    int deferred;
+ 
+-    freelist = 0;
+-    final_list = deferred_final_list;
+-    deferred_final_list = 0;
+-    for (i = 0; i < heaps_used; i++) {
+-	int n = 0;
++    during_gc++;
++    while (sweep_heap < sweep_heaps_end) {
++	int i = sweep_heap;
++	/* A heap swept in one step with all slots free can go back to
++	 * the system. Its slots are then the newest on the freelist. */
++	int whole = sweep_p == heaps[i].slot;
+ 	RVALUE *free = freelist;
+-	RVALUE *final = final_list;
+-	int deferred;
++	RVALUE *final = sweep_final_list;
+ 
+-	p = heaps[i].slot; pend = p + heaps[i].limit;
++	p = sweep_p; pend = heaps[i].slot + heaps[i].limit;
+ 	while (p < pend) {
++	    if (goal && (added >= goal || seen >= SWEEP_STEP_SLOTS) && freelist) break;
++	    seen++;
+ 	    if (!(p->as.basic.flags & FL_MARK)) {
+ 		if (p->as.basic.flags &&
+ 		    ((deferred = obj_free((VALUE)p)) ||
+@@ -1202,13 +1278,15 @@ gc_sweep()
+ 			RDATA(p)->dfree = 0;
+ 		    }
+ 		    p->as.free.flags |= FL_MARK;
+-		    p->as.free.next = final_list;
+-		    final_list = p;
++		    if (!sweep_final_list) sweep_final_tail = p;
++		    p->as.free.next = sweep_final_list;
++		    sweep_final_list = p;
+ 		}
+ 		else {
+ 		    add_freelist(p);
++		    added++;
+ 		}
+-		n++;
++		sweep_n++;
+ 	    }
+ 	    else if (BUILTIN_TYPE(p) == T_ZOMBIE) {
+ 		/* objects to be finalized */
+@@ -1216,55 +1294,93 @@ gc_sweep()
+ 	    }
+ 	    else {
+ 		RBASIC(p)->flags &= ~FL_MARK;
+-		live++;
++		sweep_live++;
+ 	    }
+ 	    p++;
+ 	}
+-	if (n == heaps[i].limit && freed > free_min) {
++	sweep_p = p;
++	if (p < pend) break;
++
++	if (whole && sweep_n == heaps[i].limit && sweep_freed > sweep_free_min) {
+ 	    RVALUE *pp;
+ 
+ 	    heaps[i].limit = 0;
+-	    for (pp = final_list; pp != final; pp = pp->as.free.next) {
++	    for (pp = sweep_final_list; pp != final; pp = pp->as.free.next) {
+ 		pp->as.free.flags |= FL_SINGLETON; /* freeing page mark */
+ 	    }
+ 	    freelist = free;	/* cancel this page from freelist */
++	    added -= sweep_n;
+ 	}
+ 	else {
+-	    freed += n;
++	    sweep_freed += sweep_n;
+ 	}
++	sweep_n = 0;
++	sweep_heap++;
++	if (sweep_heap < sweep_heaps_end) sweep_p = heaps[sweep_heap].slot;
+     }
+-    if (malloc_increase > malloc_limit) {
+-	malloc_limit += (malloc_increase - malloc_limit) * (double)live / (live + freed);
+-	if (malloc_limit < GC_MALLOC_LIMIT) malloc_limit = GC_MALLOC_LIMIT;
++    during_gc--;
++    if (sweep_heap >= sweep_heaps_end) {
++	gc_sweep_finish();
+     }
+-    malloc_increase = 0;
+-    if (freed < free_min) {
+-	add_heap();
++}
++
++static void
++gc_sweep()
++{
++    RVALUE *p, *pend;
++    int i;
++    unsigned long free_min = 0;
++
++    for (i = 0; i < heaps_used; i++) {
++        free_min += heaps[i].limit;
+     }
+-    during_gc = 0;
++    free_min = free_min * 0.2;
++    if (free_min < FREE_MIN)
++        free_min = FREE_MIN;
+ 
+-    /* clear finalization list */
+-    if (final_list) {
+-	deferred_final_list = final_list;
+-	if (!freelist && !rb_thread_critical) {
+-	    rb_gc_finalize_deferred();
+-	}
+-	else {
+-	    rb_thread_pending = 1;
+-	}
+-	if (!freelist) {
+-	    add_heap();
++    if (ruby_in_compile && ruby_parser_stack_on_heap()) {
++	/* should not reclaim nodes during compilation
++           if yacc's semantic stack is not allocated on machine stack */
++	for (i = 0; i < heaps_used; i++) {
++	    p = heaps[i].slot; pend = p + heaps[i].limit;
++	    while (p < pend) {
++		if (!(p->as.basic.flags&FL_MARK) && BUILTIN_TYPE(p) == T_NODE)
++		    gc_mark((VALUE)p, 0);
++		p++;
++	    }
+ 	}
+-	return;
+     }
+-    free_unused_heaps();
++
++    mark_source_filename(ruby_sourcefile);
++    if (source_filenames) {
++        st_foreach(source_filenames, sweep_source_filename, 0);
++    }
++
++    freelist = 0;
++    /* deferred_final_list stays out of the sweep, so its finalizers
++     * can run while the sweep is pending. A sweep can stay pending
++     * until the next collection. */
++    sweep_final_list = 0;
++    sweep_heaps_end = heaps_used;
++    sweep_heap = 0;
++    sweep_p = heaps[0].slot;
++    sweep_n = 0;
++    sweep_freed = 0;
++    sweep_live = 0;
++    sweep_free_min = free_min;
++    sweep_malloc_increase = malloc_increase;
++    malloc_increase = 0;
++    during_gc = 0;
++
++    /* The caller of garbage_collect() needs a free slot. */
++    gc_sweep_step(SWEEP_STEP_FREE);
+ }
+ 
+ void
+ rb_gc_force_recycle(p)
+     VALUE p;
+ {
+-    add_freelist(RANY(p));
++    free_slot(RANY(p));
+ }
+ 
+ static inline void
+@@ -1474,6 +1590,8 @@ garbage_collect()
+ 	return;
+     }
+     if (during_gc) return;
++    /* The mark needs the mark bits of the last collection cleared. */
++    gc_sweep_rest();
+     during_gc++;
+ 
+     init_mark_stack();
+@@ -1557,6 +1675,7 @@ void
+ rb_gc()
+ {
+     garbage_collect();
++    gc_sweep_rest();
+     rb_gc_finalize_deferred();
+ }
+ 
+@@ -1695,6 +1814,7 @@ os_obj_of(of)
+     int n = 0;
+     volatile VALUE v;
+ 
++    gc_sweep_rest();
+     for (i = 0; i < heaps_used; i++) {
+ 	RVALUE *p, *pend;
+ 
+@@ -1981,6 +2101,7 @@ rb_gc_call_finalizer_at_exit()
+     RVALUE *final_list = 0;
+     int i;
+ 
++    gc_sweep_rest();
+     /* run finalizers */
+     if (need_call_final) {
+ 	finalize_deferred();
+@@ -2061,6 +2182,7 @@ id2ref(obj, objid)
+     if (ptr == Qnil) return Qnil;
+     if (FIXNUM_P(ptr)) return (VALUE)ptr;
+     ptr = objid ^ FIXNUM_FLAG;	/* unset FIXNUM_FLAG */
++    gc_sweep_rest();
+ 
+     if ((ptr % sizeof(RVALUE)) == (4 << 2)) {
+         ID symid = ptr / sizeof(RVALUE);
