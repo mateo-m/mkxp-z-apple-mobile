@@ -116,12 +116,14 @@ module HTTPLite
     response || { :status => 0, :body => '', :headers => {} }
   end
 
-  def self.post(_url, _data, _headers = nil, _redirect = nil)
-    { :status => 0, :body => '', :headers => {} }
+  def self.post(url, data, headers = nil, redirect = nil)
+    CALLS << [:post, url, data, headers, redirect]
+    RESPONSES[url] || { :status => 0, :body => '', :headers => {} }
   end
 
-  def self.post_body(_url, _body, _ctype, _headers = nil, _redirect = nil)
-    { :status => 0, :body => '', :headers => {} }
+  def self.post_body(url, body, ctype, headers = nil)
+    CALLS << [:post_body, url, body, ctype, headers]
+    RESPONSES[url] || { :status => 0, :body => '', :headers => {} }
   end
 end
 
@@ -173,7 +175,7 @@ assert_nonzero(
 
 # Functions outside the bridge stay on the tolerant fallback: log + 0.
 assert_eq(
-  Win32API.new('wininet', 'InternetConnectA', 'lplpplll', 'l').call(1, 'files.test', 80, '', '', 3, 0, 0),
+  Win32API.new('wininet', 'InternetConnectW', 'lplpplll', 'l').call(1, 'files.test', 80, '', '', 3, 0, 0),
   0,
   'unimplemented wininet functions still return 0'
 )
@@ -451,4 +453,78 @@ assert_true(net_err.is_a?(Class) && net_err.ancestors.include?(StandardError),
             'error-suffixed Net constant becomes a StandardError subclass')
 assert_eq(Net::SomePlainThing, IOS::NullStub, 'plain Net constant resolves to NullStub')
 
-test_passed('test_win32_stubs', 65)
+# --- Request API, driven the way Essentials BES's Net::HTTP does ---
+ICA = Win32API.new('wininet', 'InternetConnectA', 'lplpplll', 'l')
+HORA = Win32API.new('wininet', 'HttpOpenRequestA', 'lpppppll', 'l')
+HARHA = Win32API.new('wininet', 'HttpAddRequestHeadersA', 'lpll', 'l')
+HSRA = Win32API.new('wininet', 'HttpSendRequestA', 'lplpl', 'i')
+HQIA = Win32API.new('wininet', 'HttpQueryInfoA', 'llppp', 'i')
+IRFA = Win32API.new('wininet', 'InternetReadFile', 'lpip', 'l')
+
+GIFT_URL = 'http://gifts.test/mysterygift/Online.txt'
+GIFT_BODY = "gifts.push(1)\n" * 200
+HTTPLite::RESPONSES[GIFT_URL] = {
+  :status => 200, :body => GIFT_BODY.dup, :headers => { 'Content-Type' => 'text/plain' }
+}
+
+connection = ICA.call(1, 'gifts.test', 80, nil, nil, 3, 0, 0)
+assert_nonzero(connection, 'InternetConnectA returns a connection handle')
+assert_eq(ICA.call(1, '', 80, nil, nil, 3, 0, 0), 0, 'InternetConnectA without a server fails')
+
+request = HORA.call(connection, 'GET', 'mysterygift/Online.txt', nil, nil, nil, 0, 0)
+assert_nonzero(request, 'HttpOpenRequestA returns a request handle')
+assert_eq(HQIA.call(request, 19, "\0" * 16, [15].pack('l'), nil), 0, 'no status before the request is sent')
+assert_eq(HARHA.call(request, 'User-Agent: RPG Maker XP', -1, 0x80000000), 1, 'HttpAddRequestHeadersA succeeds')
+assert_eq(HSRA.call(request, nil, 0, '', 0), 1, 'HttpSendRequestA succeeds')
+assert_eq(HTTPLite::CALLS.last, [GIFT_URL, { 'User-Agent' => 'RPG Maker XP' }, true],
+          'the send is a GET of the joined URL, with the added header, that follows redirects')
+
+k = "\0" * 1024
+assert_eq(HQIA.call(request, 19, k, [k.size - 1].pack('l'), nil), 1, 'status query succeeds after the send')
+assert_eq(k.delete("\0"), '200', 'status arrives as header text')
+k = "\0" * 1024
+assert_eq(HQIA.call(request, 22, k, [k.size - 1].pack('l'), nil), 1, 'raw header query succeeds')
+assert_eq(k.delete("\0"), "HTTP/1.1 200\r\nContent-Type: text/plain\r\n\r\n", 'raw headers list the response headers')
+assert_eq(HQIA.call(request, 22 | 0x20000000, "\0" * 4, [4].pack('l'), nil), 0, 'raw headers have no number form')
+
+content = ''
+loop do
+  chunk = ' ' * 1024
+  o = [0].pack('i!')
+  r = IRFA.call(request, chunk, 1024, o)
+  n = o.unpack('i!')[0]
+  break if r && n.zero?
+
+  content << chunk[0, n]
+end
+assert_eq(content, GIFT_BODY, 'the read loop returns the whole body')
+
+secure = HORA.call(ICA.call(1, 'gifts.test', 443, nil, nil, 3, 0, 0), 'GET', '/a.txt', nil, nil, nil, 0, 0)
+HSRA.call(secure, nil, 0, '', 0)
+assert_eq(HTTPLite::CALLS.last[0], 'https://gifts.test/a.txt', 'port 443 uses https')
+flagged = HORA.call(ICA.call(1, 'gifts.test', 0, nil, nil, 3, 0, 0), 'GET', '/b.txt', nil, nil, nil, 0x00800000, 0)
+HSRA.call(flagged, nil, 0, '', 0)
+assert_eq(HTTPLite::CALLS.last[0], 'https://gifts.test/b.txt', 'INTERNET_FLAG_SECURE on the default port uses https')
+custom = HORA.call(ICA.call(1, 'gifts.test', 8080, nil, nil, 3, 0, 0), 'GET', '/c.txt', nil, nil, nil, 0, 0)
+HSRA.call(custom, nil, 0, '', 0)
+assert_eq(HTTPLite::CALLS.last[0], 'http://gifts.test:8080/c.txt', 'another port stays in the URL')
+
+post = HORA.call(connection, 'POST', 'submit', nil, nil, nil, 0, 0)
+HARHA.call(post, "Content-Type: application/text\r\nX-Game: Vitro", -1, 0)
+HSRA.call(post, nil, 0, 'name=Red', 8)
+assert_eq(HTTPLite::CALLS.last,
+          [:post_body, 'http://gifts.test/submit', 'name=Red', 'application/text', { 'X-Game' => 'Vitro' }],
+          'a POST with a body sends it with its content type')
+empty_post = HORA.call(connection, 'POST', 'ping', nil, nil, nil, 0, 0)
+HSRA.call(empty_post, nil, 0, '', 0)
+assert_eq(HTTPLite::CALLS.last, [:post, 'http://gifts.test/ping', {}, {}, true], 'a POST without a body posts an empty form')
+
+assert_eq(HORA.call(connection, 'PUT', 'x', nil, nil, nil, 0, 0), 0, 'an unsupported verb fails')
+assert_eq(HORA.call(0, 'GET', 'x', nil, nil, nil, 0, 0), 0, 'a request without a connection fails')
+HTTPLite::RESPONSES['http://gifts.test/refused'] = :raise
+refused = HORA.call(connection, 'GET', 'refused', nil, nil, nil, 0, 0)
+assert_eq(HSRA.call(refused, nil, 0, '', 0), 0, 'a refused transfer fails the send')
+assert_eq(HSRA.call(HORA.call(connection, 'GET', 'missing', nil, nil, nil, 0, 0), nil, 0, '', 0), 0,
+          'a transport failure fails the send')
+
+test_passed('test_win32_stubs', 87)
