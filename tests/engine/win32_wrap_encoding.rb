@@ -45,7 +45,8 @@ EngineTest.test('WideCharToMultiByte writes UTF-8') do
   out = "\0" * 8
   count = KERNEL32::WideCharToMultiByte.new.call([65_001, 0, utf16("h\u00E9\0"), -1, out, 8])
   EngineTest.assert_equal(3, count, 'bytes written')
-  EngineTest.assert_equal("h\xC3\xA9".force_encoding('ASCII-8BIT'), out.byteslice(0, 3).force_encoding('ASCII-8BIT'), 'bytes')
+  EngineTest.assert_equal("h\xC3\xA9".force_encoding('ASCII-8BIT'),
+                          out.byteslice(0, 3).force_encoding('ASCII-8BIT'), 'bytes')
 end
 
 EngineTest.test('MultiByteToWideChar reads Shift_JIS') do
