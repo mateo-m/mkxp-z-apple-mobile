@@ -267,6 +267,7 @@ void loadEnginePostloadsBeforeMain() {
         "pokemon_delta_compat",
         "nilclass_safe_stubs",
         "pokemon_windowskin_fix",
+        "pokemon_multi_save_paths",
         "hmode7_shim",
         nullptr
     };
