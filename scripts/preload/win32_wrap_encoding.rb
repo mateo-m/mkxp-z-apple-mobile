@@ -56,13 +56,15 @@ module Win32API_Impl
       return '' unless buf.is_a?(String)
 
       if cch == -1
-        # Null-terminated: scan for first 16-bit zero unit.
+        # Null-terminated: scan for first 16-bit zero unit. Win32
+        # converts the terminator and counts it.
         idx = 0
         while idx + 1 < buf.bytesize
           break if buf.getbyte(idx).zero? && buf.getbyte(idx + 1).zero?
 
           idx += 2
         end
+        idx += 2 if idx + 1 < buf.bytesize
         buf.byteslice(0, idx)
       else
         cap = [cch * 2, buf.bytesize].min
@@ -78,8 +80,8 @@ module Win32API_Impl
       return '' unless buf.is_a?(String)
 
       if cb == -1
-        idx = buf.index("\0".b)
-        idx ? buf.byteslice(0, idx) : buf.dup
+        idx = buf.index("\0")
+        idx ? buf.byteslice(0, idx + 1) : buf.dup
       else
         cap = [cb, buf.bytesize].min
         cap = 0 if cap < 0
@@ -109,7 +111,7 @@ module Win32API_Impl
               .encode(target, :invalid => :replace, :undef => :replace)
               .force_encoding(Encoding::ASCII_8BIT)
         rescue StandardError
-          ''.b
+          ''
         end
 
         # Length query: caller passes nil/0 for dst to ask
@@ -129,9 +131,6 @@ module Win32API_Impl
     # implementing it round-trips Zeus::Encode correctly so any
     # script that depends on it works.
     class MultiByteToWideChar
-      # rubocop:disable Metrics/AbcSize -- mirrors Win32
-      # MultiByteToWideChar's signature. The per-arg validation +
-      # encode round-trip is inherent to the API.
       def call(args)
         codepage = args[0].to_i
         _flags   = args[1]
@@ -147,7 +146,7 @@ module Win32API_Impl
                 .encode(Encoding::UTF_16LE, :invalid => :replace, :undef => :replace)
                 .force_encoding(Encoding::ASCII_8BIT)
         rescue StandardError
-          ''.b
+          ''
         end
 
         if dst_buf.nil? || !dst_buf.is_a?(String) || dst_cch <= 0
@@ -160,7 +159,6 @@ module Win32API_Impl
         wide_bytes.times { |i| dst_buf.setbyte(i, converted.getbyte(i)) }
         wide_bytes / 2
       end
-      # rubocop:enable Metrics/AbcSize
     end
     MultiByteToWideCharA = MultiByteToWideChar
 

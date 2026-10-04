@@ -41,8 +41,12 @@ void Init_fcntl(void);
 void Init_pathname(void);
 void Init_socket(void);
 
+void mkxp_ruby19_init_encodings(void);
+
 void Init_ext(void)
 {
+    mkxp_ruby19_init_encodings();
+
     ruby_init_ext("zlib.so", Init_zlib);
     ruby_init_ext("stringio.so", Init_stringio);
     ruby_init_ext("strscan.so", Init_strscan);

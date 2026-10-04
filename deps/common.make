@@ -783,7 +783,8 @@ $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
 	$(RANLIB) $(LIBDIR)/libruby19-static.a
 	@# Build extensions (mirrors the Ruby 1.8 pattern; see
 	@# libruby18-static.a recipe). Adds our hand-rolled extinit.c
-	@# which provides the real Init_ext() calling each Init_X.
+	@# which provides the real Init_ext() calling each Init_X, and
+	@# the encodings and transcoders that encinit.c starts.
 	@EXTCFLAGS="$(RUBY19_CFLAGS) -I$(SOURCES)/ruby19 -I$(SOURCES)/ruby19/include -I$(SOURCES)/ruby19/.ext/include/aarch64-darwin -I$(INCLUDEDIR)/ruby19"; \
 	OBJ_FILES=""; \
 	for ext in $(RUBY19_EXTS); do \
@@ -801,10 +802,27 @@ $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
 		$(CC) $$EXTCFLAGS $(SOCKET19_DEFS) -I$$SOCKDIR -c $$src -o $$obj; \
 		OBJ_FILES="$$OBJ_FILES $$obj"; \
 	done; \
-	$(CC) $$EXTCFLAGS \
-		-c ${PWD}/ruby19/extinit.c \
-		-o $(SOURCES)/ruby19/extinit.o; \
-	OBJ_FILES="$(SOURCES)/ruby19/extinit.o $$OBJ_FILES"; \
+	(cd $(SOURCES)/ruby19 && make encdb.h transdb.h) >/dev/null || exit 1; \
+	for src in $(SOURCES)/ruby19/enc/*.c; do \
+		case $${src##*/} in ascii.c|us_ascii.c|unicode.c|utf_8.c) continue;; esac; \
+		obj=$${src%.c}.o; \
+		$(CC) $$EXTCFLAGS -DONIG_ENC_REGISTER=rb_enc_register -c $$src -o $$obj || exit 1; \
+		OBJ_FILES="$$OBJ_FILES $$obj"; \
+	done; \
+	for src in $(SOURCES)/ruby19/enc/trans/*.c; do \
+		name=$$(basename $$src .c); \
+		rename=-DInit_$$name=Init_trans_$$name; \
+		[ $$name = transdb ] && rename=; \
+		obj=$${src%.c}.o; \
+		$(CC) $$EXTCFLAGS $$rename -c $$src -o $$obj || exit 1; \
+		OBJ_FILES="$$OBJ_FILES $$obj"; \
+	done; \
+	for name in extinit encinit; do \
+		$(CC) $$EXTCFLAGS \
+			-c ${PWD}/ruby19/$$name.c \
+			-o $(SOURCES)/ruby19/$$name.o || exit 1; \
+		OBJ_FILES="$(SOURCES)/ruby19/$$name.o $$OBJ_FILES"; \
+	done; \
 	$(AR) rcs $(LIBDIR)/libruby19-ext.a $$OBJ_FILES; \
 	$(RANLIB) $(LIBDIR)/libruby19-ext.a
 	@# Strip dmyext.o from libruby19-static.a so libruby19-ext.a's

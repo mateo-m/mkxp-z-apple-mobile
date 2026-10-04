@@ -55,6 +55,14 @@ that Ruby 1.9 needs on iOS:
    engine calls it once and reuses the VM across game sessions for
    the lifetime of the app.
 
+3. **Encodings and transcoders**: Ruby 1.9 loads each encoding and
+   transcoder from `enc/*.so` and `enc/trans/*.so`, and 1.9.3 cannot
+   link them statically. The build compiles them into
+   `libruby19-ext.a`, and `encinit.c` starts all of them from
+   `Init_ext`. Without them, the VM knows only ASCII-8BIT, UTF-8 and
+   US-ASCII, and `String#encode` cannot convert to UTF-16 or
+   Shift_JIS.
+
 ## iOS build instructions
 
 ```bash
@@ -70,7 +78,8 @@ The makefile:
 3. Cross-compiles with the iOS toolchain
 4. Builds the core library (`libruby19-static.a`)
 5. Builds bundled extensions (zlib, stringio, strscan, thread, digest,
-   fcntl) into `libruby19-ext.a`
+   fcntl) into `libruby19-ext.a`, together with the encodings and
+   transcoders that `encinit.c` starts (see below)
 6. Installs libs to `$(LIBDIR)` and headers to `$(INCLUDEDIR)/ruby19/`
 
 ### Output
@@ -78,7 +87,7 @@ The makefile:
 | Artifact             | Description                                              |
 | -------------------- | -------------------------------------------------------- |
 | `libruby19-static.a` | Core Ruby 1.9.3 interpreter (VM, parser, GC, core)       |
-| `libruby19-ext.a`    | Bundled C extensions                                     |
+| `libruby19-ext.a`    | Bundled C extensions, encodings and transcoders          |
 | `include/ruby19/*.h` | Public headers (ruby.h, intern.h, etc.)                  |
 
 ### Linking

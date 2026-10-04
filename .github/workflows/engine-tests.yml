@@ -47,7 +47,7 @@ jobs:
         # DEVELOPER_DIR instead of xcode-select: no sudo, so the same
         # step works on a hosted runner and on a self-hosted Mac.
         run: |
-          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          XCODE="$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -n 1)"
           echo "Using $XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
@@ -95,7 +95,8 @@ jobs:
           done
 
       # A dependency build takes most of an hour. The key changes only
-      # when a recipe, a patch, a pinned source, or Xcode changes.
+      # when a recipe, a patch, a source file of ours, a pinned source,
+      # or Xcode changes.
       - name: Key the dependency cache
         id: deps-key
         run: |
@@ -111,7 +112,7 @@ jobs:
           path: |
             deps/build-iphonesimulator-arm64
             deps/ANGLE
-          key: deps-iphonesimulator-${{ steps.deps-key.outputs.sources }}-${{ hashFiles('deps/*.make', 'deps/*.sh', 'deps/*.lst', 'deps/*/*.patch', 'deps/*/*.rb', 'tools/build-deps-ios.sh') }}
+          key: deps-iphonesimulator-${{ steps.deps-key.outputs.sources }}-${{ hashFiles('deps/*.make', 'deps/*.sh', 'deps/*.lst', 'deps/*/*.patch', 'deps/*/*.rb', 'deps/*/*.c', 'deps/*/*.S', 'tools/build-deps-ios.sh') }}
 
       - name: Build the dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
@@ -130,6 +131,14 @@ jobs:
         run: |
           for v in 18 19 31; do
             tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" \
+              --no-build --timeout 300
+          done
+
+      # The win32 text stand-ins load only on Ruby 1.9 and later.
+      - name: Run the win32 text conversion suite
+        run: |
+          for v in 19 31; do
+            tools/run-engine-tests.sh --suite win32_wrap_encoding.rb --ruby "$v" \
               --no-build --timeout 300
           done
 
