@@ -56,13 +56,15 @@ module Win32API_Impl
       return '' unless buf.is_a?(String)
 
       if cch == -1
-        # Null-terminated: scan for first 16-bit zero unit.
+        # Null-terminated: scan for first 16-bit zero unit. Win32
+        # converts the terminator and counts it.
         idx = 0
         while idx + 1 < buf.bytesize
           break if buf.getbyte(idx).zero? && buf.getbyte(idx + 1).zero?
 
           idx += 2
         end
+        idx += 2 if idx + 1 < buf.bytesize
         buf.byteslice(0, idx)
       else
         cap = [cch * 2, buf.bytesize].min
@@ -79,7 +81,7 @@ module Win32API_Impl
 
       if cb == -1
         idx = buf.index("\0")
-        idx ? buf.byteslice(0, idx) : buf.dup
+        idx ? buf.byteslice(0, idx + 1) : buf.dup
       else
         cap = [cb, buf.bytesize].min
         cap = 0 if cap < 0

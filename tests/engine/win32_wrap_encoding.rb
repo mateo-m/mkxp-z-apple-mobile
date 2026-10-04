@@ -31,7 +31,7 @@ end
 
 EngineTest.test('MultiByteToWideChar measures a null-terminated string') do
   count = KERNEL32::MultiByteToWideChar.new.call([65_001, 0, "abc\0xyz", -1, nil, 0])
-  EngineTest.assert_equal(3, count, 'UTF-16 code units before the null')
+  EngineTest.assert_equal(4, count, 'UTF-16 code units with the null')
 end
 
 EngineTest.test('MultiByteToWideChar writes UTF-16') do
@@ -44,9 +44,9 @@ end
 EngineTest.test('WideCharToMultiByte writes UTF-8') do
   out = "\0" * 8
   count = KERNEL32::WideCharToMultiByte.new.call([65_001, 0, utf16("h\u00E9\0"), -1, out, 8])
-  EngineTest.assert_equal(3, count, 'bytes written')
-  EngineTest.assert_equal("h\xC3\xA9".force_encoding('ASCII-8BIT'),
-                          out.byteslice(0, 3).force_encoding('ASCII-8BIT'), 'bytes')
+  EngineTest.assert_equal(4, count, 'bytes written with the null')
+  EngineTest.assert_equal("h\xC3\xA9\0".force_encoding('ASCII-8BIT'),
+                          out.byteslice(0, 4).force_encoding('ASCII-8BIT'), 'bytes')
 end
 
 EngineTest.test('MultiByteToWideChar reads Shift_JIS') do
