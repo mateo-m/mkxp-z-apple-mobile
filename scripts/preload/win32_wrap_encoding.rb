@@ -78,7 +78,7 @@ module Win32API_Impl
       return '' unless buf.is_a?(String)
 
       if cb == -1
-        idx = buf.index("\0".b)
+        idx = buf.index("\0")
         idx ? buf.byteslice(0, idx) : buf.dup
       else
         cap = [cb, buf.bytesize].min
@@ -109,7 +109,7 @@ module Win32API_Impl
               .encode(target, :invalid => :replace, :undef => :replace)
               .force_encoding(Encoding::ASCII_8BIT)
         rescue StandardError
-          ''.b
+          String.new
         end
 
         # Length query: caller passes nil/0 for dst to ask
@@ -147,7 +147,7 @@ module Win32API_Impl
                 .encode(Encoding::UTF_16LE, :invalid => :replace, :undef => :replace)
                 .force_encoding(Encoding::ASCII_8BIT)
         rescue StandardError
-          ''.b
+          String.new
         end
 
         if dst_buf.nil? || !dst_buf.is_a?(String) || dst_cch <= 0
