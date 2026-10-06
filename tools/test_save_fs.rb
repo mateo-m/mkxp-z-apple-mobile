@@ -547,4 +547,20 @@ Dir.chdir(GAME) do
   assert_dir_lifecycle_consistent('PlainMatrix', 'plain dir')
 end
 
-test_passed('test_save_fs', 311)
+# Windows refuses to open a folder. Games rescue EACCES, not EISDIR.
+Dir.chdir(GAME) do
+  Dir.mkdir('Characters')
+  [['File.open', -> { File.open('Characters/', 'rb') { |f| f.read(1) } }],
+   ['File.new', -> { File.new('Characters', 'rb') }]].each do |name, call|
+    raised = begin
+      call.call
+      nil
+    rescue SystemCallError => e
+      e.class
+    end
+    assert_eq(raised, Errno::EACCES, "#{name} on a folder raises EACCES")
+  end
+  Dir.rmdir('Characters')
+end
+
+test_passed('test_save_fs', 313)
