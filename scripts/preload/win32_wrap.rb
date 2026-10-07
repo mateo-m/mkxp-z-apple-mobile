@@ -664,6 +664,16 @@ module Win32API_Impl
     end
   end
 
+  # Nuri Yuri's RGSS Linker script raises LoadError unless this call
+  # returns 1. Fusion Generation II stops at launch on it.
+  module RGSSLinker
+    class RGSSLinker_Initialize
+      def call(_args)
+        1
+      end
+    end
+  end
+
   # Cross-call state for the MCI/AVI playback shim. Vinemon Sauce
   # Edition's title screen opens an AVI via Windows' MCI subsystem
   # (`mciSendString "open ... type AVIVideo alias X"` followed by
