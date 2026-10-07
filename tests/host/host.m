@@ -35,8 +35,17 @@
 #include <string.h>
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 #import "app_bridge.h"
+
+// An app built with the iOS 27 SDK stops at launch unless Info.plist
+// names a scene delegate class.
+@interface EngineTestSceneDelegate : UIResponder <UIWindowSceneDelegate>
+@end
+
+@implementation EngineTestSceneDelegate
+@end
 
 // Copy the suite out of the read only bundle. Returns the writable
 // copy, or the bundle folder if the copy fails.
