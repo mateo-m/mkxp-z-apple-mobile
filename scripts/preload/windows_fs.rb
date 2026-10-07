@@ -595,9 +595,7 @@ unless defined?(MKXPSaveFS)
     # TGOM probes "Graphics/Characters/" for an empty sprite name).
     def open_target(path, mode)
       target = path_for(path)
-      if target.is_a?(String) && File.directory?(target)
-        raise Errno::EACCES, target
-      end
+      raise Errno::EACCES, target if target.is_a?(String) && File.directory?(target)
       return target unless write_mode?(mode)
 
       MKXPWindowsFonts.ensure_dir(self, target)
