@@ -15,7 +15,7 @@ One custom commit on top of upstream:
 
 The build applies one more patch from this folder:
 
-2. **`wav-24bit.patch`**: upstream commits `64b06cb` and `c653676`
+1. **`wav-24bit.patch`**: upstream commits `64b06cb` and `c653676`
    - Adds 24-bit integer PCM to the WAV decoder. Without it, the decoder
      rejects the file ("Sound format unsupported"), and the music does
      not play. The title music of Sweeter Yesterday is a 24-bit WAV.
