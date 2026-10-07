@@ -318,7 +318,13 @@ $(LIBDIR)/libSDL2_sound.a: $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile
 	cd $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR); \
 	make -j$(NPROC); make install
 
-$(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl_sound/CMakeLists.txt
+$(SOURCES)/sdl_sound/.patched-$(SDK_TAG): $(PATCHES)/sdl_sound/wav-24bit.patch
+	cd $(SOURCES)/sdl_sound; \
+	git checkout -- . 2>/dev/null; \
+	git apply $(PATCHES)/sdl_sound/wav-24bit.patch; \
+	touch $@
+
+$(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl_sound/CMakeLists.txt $(SOURCES)/sdl_sound/.patched-$(SDK_TAG)
 	cd $(SOURCES)/sdl_sound; mkdir -p $(CMAKE_BUILDDIR); cd $(CMAKE_BUILDDIR); \
 	$(CMAKE) \
 	-DSDLSOUND_BUILD_SHARED=false \
