@@ -28,6 +28,42 @@ static int SDL_RWopsCloseNoop(SDL_RWops *ops) {
 	return 0;
 }
 
+Sound_Sample *newPlayableSample(SDL_RWops &srcOps, SDL_RWops &ops, const char *extension, uint32_t bufferSize)
+{
+	/* A copy of srcOps with a no-op close function,
+	 * so we can reuse the ops if we need to change the format. */
+	ops = srcOps;
+	ops.close = SDL_RWopsCloseNoop;
+
+	Sound_Sample *sample = Sound_NewSample(&ops, extension, 0, bufferSize);
+
+	if (!sample)
+		return 0;
+
+	switch (sample->actual.format)
+	{
+		// OpenAL Soft doesn't support S32 formats.
+		// https://github.com/kcat/openal-soft/issues/934
+		case AUDIO_S32LSB :
+		case AUDIO_S32MSB :
+			break;
+		default :
+			return sample;
+	}
+
+	// Unfortunately there's no way to change the desired format of a sample.
+	// https://github.com/icculus/SDL_sound/issues/91
+	// So we just have to close the sample and retry with a new desired format.
+	Sound_FreeSample(sample);
+	SDL_RWseek(&ops, 0, RW_SEEK_SET);
+
+	Sound_AudioInfo desired;
+	SDL_memset(&desired, '\0', sizeof (Sound_AudioInfo));
+	desired.format = AUDIO_F32SYS;
+
+	return Sound_NewSample(&ops, extension, &desired, bufferSize);
+}
+
 struct SDLSoundSource : ALDataSource
 {
 	Sound_Sample *sample;
@@ -44,52 +80,14 @@ struct SDLSoundSource : ALDataSource
 	               uint32_t maxBufSize,
 	               bool looped)
 	    : srcOps(ops),
-	      unclosableOps(ops),
 	      looped(looped)
 	{
-		/* A copy of srcOps with a no-op close function,
-		 * so we can reuse the ops if we need to change the format. */
-		unclosableOps.close = SDL_RWopsCloseNoop;
-		
-		sample = Sound_NewSample(&unclosableOps, extension, 0, maxBufSize);
-		
+		sample = newPlayableSample(srcOps, unclosableOps, extension, maxBufSize);
+
 		if (!sample)
 		{
 			SDL_RWclose(&srcOps);
 			throw Exception(Exception::SDLError, "SDL_sound: %s", Sound_GetError());
-		}
-
-		bool validFormat = true;
-		
-		switch (sample->actual.format)
-		{
-			// OpenAL Soft doesn't support S32 formats.
-			// https://github.com/kcat/openal-soft/issues/934
-			case AUDIO_S32LSB :
-			case AUDIO_S32MSB :
-				validFormat = false;
-		}
-
-		if (!validFormat)
-		{
-			// Unfortunately there's no way to change the desired format of a sample.
-			// https://github.com/icculus/SDL_sound/issues/91
-			// So we just have to close the sample (which closes the file too),
-			// and retry with a new desired format.
-			Sound_FreeSample(sample);
-			SDL_RWseek(&unclosableOps, 0, RW_SEEK_SET);
-			
-			Sound_AudioInfo desired;
-			SDL_memset(&desired, '\0', sizeof (Sound_AudioInfo));
-			desired.format = AUDIO_F32SYS;
-
-			sample = Sound_NewSample(&unclosableOps, extension, &desired, maxBufSize);
-
-			if (!sample)
-			{
-				SDL_RWclose(&srcOps);
-				throw Exception(Exception::SDLError, "SDL_sound: %s", Sound_GetError());
-			}
 		}
 
 		sampleSize = formatSampleSize(sample->actual.format);
