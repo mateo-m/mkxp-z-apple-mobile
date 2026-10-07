@@ -1,12 +1,12 @@
 --- a/src/SDL_sound_wav.c
 +++ b/src/SDL_sound_wav.c
-@@ -211,8 +211,20 @@
+@@ -211,7 +211,19 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
      Sound_SampleInternal *internal = (Sound_SampleInternal *) sample->opaque;
      wav_t *w = (wav_t *) internal->decoder_private;
      Uint32 max = (internal->buffer_size < (Uint32) w->bytesLeft) ?
 -                    internal->buffer_size : (Uint32) w->bytesLeft;
 +                  internal->buffer_size : (Uint32) w->bytesLeft;
- 
++
 +    /* We need to convert 24-bit PCM to an SDL-friendly AUDIO_S32SYS ... */
 +    if (w->fmt->wBitsPerSample == 24) {
 +        const Uint32 num_samples = max / 3;
@@ -18,12 +18,15 @@
 +            return 0;
 +        }
 +    }
-+
+ 
      SDL_assert(max > 0);
  
-         /*
-@@ -234,6 +246,19 @@
-     else if (retval < internal->buffer_size)
+@@ -231,9 +243,22 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
+         sample->flags |= SOUND_SAMPLEFLAG_ERROR;
+ 
+         /* (next call this EAGAIN may turn into an EOF or error.) */
+-    else if (retval < internal->buffer_size)
++    else if (retval < max)
          sample->flags |= SOUND_SAMPLEFLAG_EAGAIN;
  
 +    /* deal with 24-bit PCM. */
@@ -42,7 +45,7 @@
      return retval;
  } /* read_sample_fmt_normal */
  
-@@ -662,19 +687,17 @@
+@@ -662,19 +687,17 @@ static int WAV_open_internal(Sound_Sample *sample, const char *ext, fmt_t *fmt)
      } /* if */
      else
      {
