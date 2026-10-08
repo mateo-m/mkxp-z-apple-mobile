@@ -314,7 +314,7 @@ $(SOURCES)/sdl2_image/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl2_image/CMakeLis
 # SDL_sound (submodule: sources/sdl_sound)
 sdlsound: init_dirs sdl2 libogg libvorbis $(LIBDIR)/libSDL2_sound.a
 
-$(LIBDIR)/libSDL2_sound.a: $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile
+$(LIBDIR)/libSDL2_sound.a: $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile $(SOURCES)/sdl_sound/.patched-$(SDK_TAG)
 	cd $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR); \
 	make -j$(NPROC); make install
 
