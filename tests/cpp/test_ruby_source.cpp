@@ -31,6 +31,7 @@ TEST(ruby_source_with_only_comments_has_no_code)
 {
     CHECK(!hasCode("# end of scripts\n"));
     CHECK(!hasCode("# encoding: utf-8\n  # indented\n"));
+    CHECK(!hasCode("\xEF\xBB\xBF# end of scripts\n"));
 }
 
 TEST(ruby_source_in_a_block_comment_has_no_code)
@@ -55,6 +56,7 @@ TEST(ruby_source_after_an_end_marker_has_no_code)
 TEST(ruby_source_with_a_statement_has_code)
 {
     CHECK(hasCode("rgss_main { $scene.main }"));
+    CHECK(hasCode("\xEF\xBB\xBFmain\n"));
     CHECK(hasCode("# Main\n  begin\n"));
     CHECK(hasCode("=begin\n=end\nmain\n"));
 }

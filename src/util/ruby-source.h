@@ -23,6 +23,9 @@ inline bool rubySourceHasCode(const char *src, size_t len)
     const char *end = src + len;
     bool inBlockComment = false;
 
+    if (len >= 3 && memcmp(src, "\xEF\xBB\xBF", 3) == 0)
+        src += 3;
+
     for (const char *line = src; line < end;) {
         const char *next = static_cast<const char *>(memchr(line, '\n', end - line));
         const char *lineEnd = next ? next : end;
