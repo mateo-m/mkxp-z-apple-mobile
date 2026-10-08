@@ -551,7 +551,9 @@ end
 Dir.chdir(GAME) do
   Dir.mkdir('Characters')
   [['File.open', -> { File.open('Characters/', 'rb') { |f| f.read(1) } }],
-   ['File.new', -> { File.new('Characters', 'rb') }]].each do |name, call|
+   ['File.new', -> { File.new('Characters', 'rb') }],
+   ['File.open with a stray CR', -> { File.open("Characters/\r", 'rb') { |f| f.read(1) } }],
+   ['File.new with a stray CR', -> { File.new("Characters\r", 'rb').read(1) }]].each do |name, call|
     raised = begin
       call.call
       nil
@@ -563,4 +565,4 @@ Dir.chdir(GAME) do
   Dir.rmdir('Characters')
 end
 
-test_passed('test_save_fs', 313)
+test_passed('test_save_fs', 315)
