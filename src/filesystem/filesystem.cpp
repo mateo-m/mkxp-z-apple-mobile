@@ -37,6 +37,7 @@
 #include <stack>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <vector>
 
@@ -711,7 +712,7 @@ static void openReadInOrder(OpenReadEnumData &data, const char *dir,
       names.push_back(fileList[i].c_str());
 
   std::sort(names.begin(), names.end(),
-            [](const char *a, const char *b) { return strcmp(a, b) < 0; });
+            [](const char *a, const char *b) { return strcasecmp(a, b) < 0; });
 
   for (size_t i = 0; i < names.size() && !data.stopSearching; ++i)
     openReadEnumCB(&data, dir, names[i]);
