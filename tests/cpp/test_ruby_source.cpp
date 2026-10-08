@@ -39,6 +39,19 @@ TEST(ruby_source_in_a_block_comment_has_no_code)
     CHECK(!hasCode("=begin\nmain\n"));
 }
 
+TEST(ruby_source_closes_a_block_comment_only_at_a_whole_end_marker)
+{
+    CHECK(!hasCode("=begin\n=endless\nmain\n=end\n"));
+    CHECK(!hasCode("=begin notes\nmain\n=end\tdone\n"));
+}
+
+TEST(ruby_source_after_an_end_marker_has_no_code)
+{
+    CHECK(!hasCode("# data below\n__END__\nmain\n"));
+    CHECK(!hasCode("__END__\r\nmain\n"));
+    CHECK(hasCode("__END__ \nmain\n"));
+}
+
 TEST(ruby_source_with_a_statement_has_code)
 {
     CHECK(hasCode("rgss_main { $scene.main }"));
