@@ -120,7 +120,7 @@ jobs:
           brew install automake autoconf libtool pkg-config bison
           tools/build-deps-ios.sh iphonesimulator
 
-      # This step builds the host. The two after it pick their suite
+      # This step builds the host. The steps after it pick their suite
       # and their interpreter at launch, so they reuse the build.
       - name: Run the in-engine suite
         run: tools/run-engine-tests.sh --timeout 300
@@ -141,6 +141,11 @@ jobs:
             tools/run-engine-tests.sh --suite win32_wrap_encoding.rb --ruby "$v" \
               --no-build --timeout 300
           done
+
+      - name: Run the file lookup order suite
+        run: |
+          tools/run-engine-tests.sh --suite file_lookup_order.rb \
+            --no-build --timeout 300
 
       # The other side of the legacy-method check: with the transform
       # off, no script can call a legacy method, so the engine must

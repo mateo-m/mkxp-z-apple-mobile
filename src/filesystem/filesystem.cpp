@@ -37,6 +37,7 @@
 #include <stack>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <vector>
 
@@ -699,6 +700,30 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
   return PHYSFS_ENUM_OK;
 }
 
+/* Windows lists a folder in name order, so a game that asks for "x"
+ * always got "x.png" before "x.xcf". readdir order on iOS is arbitrary,
+ * and SDL_image also decodes XCF (as an empty image, for Pokemon Silver
+ * Chronicle's tileset), so try the candidates in name order too. */
+static void openReadInOrder(OpenReadEnumData &data, const char *dir,
+                            const std::vector<std::string> &fileList) {
+  std::vector<const char *> names;
+  for (size_t i = 0; i < fileList.size(); ++i)
+    if (strncmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
+      names.push_back(fileList[i].c_str());
+
+  std::sort(names.begin(), names.end(),
+            [](const char *a, const char *b) { return strcasecmp(a, b) < 0; });
+
+  for (size_t i = 0; i < names.size() && !data.stopSearching; ++i)
+    openReadEnumCB(&data, dir, names[i]);
+}
+
+static PHYSFS_EnumerateCallbackResult
+listEnumCB(void *d, const char *, const char *filename) {
+  static_cast<std::vector<std::string> *>(d)->push_back(filename);
+  return PHYSFS_ENUM_OK;
+}
+
 void FileSystem::openRead(OpenHandler &handler, const char *filename) {
   std::string filename_nm = normalize(filename, false, false);
   char buffer[512];
@@ -741,12 +766,11 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
   if (p->havePathCache) {
     /* Get the list of files contained in this directory
      * and manually iterate over them */
-    const std::vector<std::string> &fileList = p->fileLists[dir];
-
-    for (size_t i = 0; i < fileList.size(); ++i)
-      openReadEnumCB(&data, dir, fileList[i].c_str());
+    openReadInOrder(data, dir, p->fileLists[dir]);
   } else {
-    PHYSFS_enumerate(dir, openReadEnumCB, &data);
+    std::vector<std::string> fileList;
+    PHYSFS_enumerate(dir, listEnumCB, &fileList);
+    openReadInOrder(data, dir, fileList);
   }
 
   if (data.physfsError)
@@ -790,8 +814,7 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
     if (PHYSFS_enumerate(odir, dirRefreshEnumCB, &refresh)) {
       p->fileLists[dir] = fresh;
 
-      for (size_t i = 0; i < fresh.size(); ++i)
-        openReadEnumCB(&data, dir, fresh[i].c_str());
+      openReadInOrder(data, dir, fresh);
 
       if (data.physfsError)
         throw Exception(Exception::PHYSFSError, "PhysFS: %s", data.physfsError);

@@ -590,12 +590,21 @@ unless defined?(MKXPSaveFS)
 
     # Shared File.open / File.new front: legacy-save recovery first,
     # then the write-mode case resolution.
+    # Windows refuses to open a folder with EACCES. POSIX opens it and
+    # the first read raises EISDIR, which games do not rescue (Pokémon
+    # TGOM probes "Graphics/Characters/" for an empty sprite name).
     def open_target(path, mode)
-      target = path_for(path)
+      target = refuse_directory(path_for(path))
       return target unless write_mode?(mode)
 
       MKXPWindowsFonts.ensure_dir(self, target)
       change_spelling(target)
+    end
+
+    def refuse_directory(target)
+      raise Errno::EACCES, target if target.is_a?(String) && File.directory?(target)
+
+      target
     end
 
     # Errno::ENOENT retry target for the open wrappers. The same
@@ -913,7 +922,7 @@ class << File
     fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_open(fixed, *args, &block)
+    _mkxp_orig_open(MKXPSaveFS.refuse_directory(fixed), *args, &block)
   end
 
   def new(path, *args)
@@ -923,7 +932,7 @@ class << File
     fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_new(fixed, *args)
+    _mkxp_orig_new(MKXPSaveFS.refuse_directory(fixed), *args)
   end
 
   def delete(*paths)

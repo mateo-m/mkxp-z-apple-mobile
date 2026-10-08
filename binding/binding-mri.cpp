@@ -31,6 +31,7 @@
 #include "util/boost-hash.h"
 #include "util/exception.h"
 #include "util/encoding.h"
+#include "util/ruby-source.h"
 
 #include "config.h"
 
@@ -1737,6 +1738,21 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
     
     
+    // Some games end with empty sections after Main (Hello Charlotte EP1).
+    // Main never returns, so postloads must run before the last section
+    // that has code, not only comments.
+    long mainIndex = scriptCount - 1;
+    while (mainIndex > 0) {
+        VALUE script = rb_ary_entry(scriptArray, mainIndex);
+        if (RB_TYPE_P(script, RUBY_T_ARRAY)) {
+            VALUE code = rb_ary_entry(script, 3);
+            if (RB_TYPE_P(code, RUBY_T_STRING) &&
+                rubySourceHasCode(RSTRING_PTR(code), RSTRING_LEN(code)))
+                break;
+        }
+        --mainIndex;
+    }
+
     mkxp::ScriptBootstrap::loadEnginePreloads();
     mkxp::ScriptBootstrap::loadConfigPreloadScripts(conf);
     
@@ -1749,7 +1765,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             if (shState->rtData().rqTerm)
                 break;
             
-            if (i == scriptCount - 1) {
+            if (i == mainIndex) {
                 mkxp::ScriptBootstrap::loadEnginePostloadsBeforeMain();
                 mkxp::ScriptBootstrap::loadCheatPostloadAndPoller();
             }
