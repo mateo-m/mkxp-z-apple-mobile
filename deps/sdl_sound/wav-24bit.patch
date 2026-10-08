@@ -1,6 +1,6 @@
 --- a/src/SDL_sound_wav.c
 +++ b/src/SDL_sound_wav.c
-@@ -211,7 +211,19 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
+@@ -211,7 +211,20 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
      Sound_SampleInternal *internal = (Sound_SampleInternal *) sample->opaque;
      wav_t *w = (wav_t *) internal->decoder_private;
      Uint32 max = (internal->buffer_size < (Uint32) w->bytesLeft) ?
@@ -9,10 +9,11 @@
 +
 +    /* We need to convert 24-bit PCM to an SDL-friendly AUDIO_S32SYS ... */
 +    if (w->fmt->wBitsPerSample == 24) {
-+        const Uint32 num_samples = max / 3;
-+
-+        /* we're going to expand by 25%...3 bytes to 4. Make sure the buffer has room to expand. */
-+        max = (num_samples - (num_samples / 4)) * 3;
++        /* Read only whole frames that still fit the buffer after each sample grows from 3 bytes to 4. */
++        const Uint32 frame_size = 3 * w->fmt->wChannels;
++        const Uint32 room = (internal->buffer_size / (4 * w->fmt->wChannels)) * frame_size;
++        const Uint32 left = ((Uint32) w->bytesLeft / frame_size) * frame_size;
++        max = (room < left) ? room : left;
 +        if (max == 0) {
 +            sample->flags |= SOUND_SAMPLEFLAG_EOF;
 +            return 0;
@@ -21,7 +22,7 @@
  
      SDL_assert(max > 0);
  
-@@ -231,9 +243,22 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
+@@ -231,9 +244,22 @@ static Uint32 read_sample_fmt_normal(Sound_Sample *sample)
          sample->flags |= SOUND_SAMPLEFLAG_ERROR;
  
          /* (next call this EAGAIN may turn into an EOF or error.) */
@@ -45,7 +46,7 @@
      return retval;
  } /* read_sample_fmt_normal */
  
-@@ -662,19 +687,17 @@ static int WAV_open_internal(Sound_Sample *sample, const char *ext, fmt_t *fmt)
+@@ -662,19 +688,17 @@ static int WAV_open_internal(Sound_Sample *sample, const char *ext, fmt_t *fmt)
      } /* if */
      else
      {

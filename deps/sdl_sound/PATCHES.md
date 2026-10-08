@@ -23,6 +23,9 @@ The build applies one more patch from this folder:
      it returns fewer bytes than it asked for. Upstream compares with the
      buffer size, so each 24-bit read sets `EAGAIN`, and the engine stops
      the music after two of them.
+   - Another change: each read takes whole frames only. Upstream can read a
+     part of a stereo frame at the end of a file, and OpenAL then drops the
+     end of the sound.
 
 ## iOS build instructions
 
