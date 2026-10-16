@@ -127,6 +127,10 @@ static void engineTestHostStart(void) {
         if (ruby != MKXP_RUBY_UNSET)
             mkxp_setActiveRubyVersion(ruby);
 
+        const char *fastForward = getenv("MKXP_TEST_FAST_FORWARD");
+        if (fastForward)
+            mkxp_setFastForwardMultiplier(atoi(fastForward));
+
         mkxp_setLauncherIdentity("mkxp-z engine tests");
         mkxp_setUserDataDirectory(documents.fileSystemRepresentation);
         mkxp_setSharedFontsDirectory(
