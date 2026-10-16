@@ -61,7 +61,9 @@ public:
         /* Pokemon Rejuvenation's engine adds these, with the same
            codes. Its scripts read D to run, E to toggle turbo and F
            to mute, and check `defined?(Input::E)` first. */
-        D = 50, E = 51, F = 52
+        D = 50, E = 51, F = 52,
+
+        ButtonCodeCount
 	};
     
     void recalcRepeat(unsigned int fps);

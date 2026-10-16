@@ -38,8 +38,6 @@
 #include <string.h>
 #include <assert.h>
 
-#define BUTTON_CODE_COUNT 30
-
 #define m(vk,sc) { vk, SDL_SCANCODE_##sc }
 std::unordered_map<int, int> vKeyToScancode{
     // 0x01 LEFT MOUSE
@@ -623,27 +621,6 @@ static const KbBindingData staticKbBindings[] =
 
 static elementsN(staticKbBindings);
 
-/* Maps ButtonCode enum values to indices
- * in the button state array */
-static const int mapToIndex[] =
-{
-    0, 0,
-    1, 0, 2, 0, 3, 0, 4, 0,
-    0,
-    5, 6, 7, 8, 9, 10, 11, 12,
-    0, 0,
-    13, 14, 15,
-    0,
-    16, 17, 18, 19, 20,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    21, 22, 23, 24, 25,
-    26,
-    0, 0, 0, 0, 0, 0,
-    27, 28, 29
-};
-
-static elementsN(mapToIndex);
-
 static const Input::ButtonCode dirs[] =
 { Input::Down, Input::Left, Input::Right, Input::Up };
 
@@ -686,7 +663,7 @@ struct InputPrivate
     /* Collective binding array */
     std::vector<Binding*> bindings;
     
-    ButtonState stateArray[BUTTON_CODE_COUNT*2];
+    ButtonState stateArray[Input::ButtonCodeCount*2];
     
     ButtonState *states;
     ButtonState *statesOld;
@@ -769,7 +746,7 @@ struct InputPrivate
         recalcRepeatTime(fps);
         
         states    = stateArray;
-        statesOld = stateArray + BUTTON_CODE_COUNT;
+        statesOld = stateArray + Input::ButtonCodeCount;
         
         rawStates = rawStateArray;
         rawStatesOld = rawStateArray + SDL_NUM_SCANCODES;
@@ -795,24 +772,20 @@ struct InputPrivate
     
     inline ButtonState &getStateCheck(int code)
     {
-        int index;
+        if (code < 0 || code >= Input::ButtonCodeCount)
+            code = Input::None;
         
-        if (code < 0 || (size_t) code > mapToIndexN-1)
-            index = 0;
-        else
-            index = mapToIndex[code];
-        
-        return states[index];
+        return states[code];
     }
     
     inline ButtonState &getState(Input::ButtonCode code)
     {
-        return states[mapToIndex[code]];
+        return states[code];
     }
     
     inline ButtonState &getOldState(Input::ButtonCode code)
     {
-        return statesOld[mapToIndex[code]];
+        return statesOld[code];
     }
     
     ButtonState getStateRaw(int code, bool useVKey)
@@ -897,7 +870,7 @@ struct InputPrivate
     
     void clearBuffer()
     {
-        const size_t size = sizeof(ButtonState) * BUTTON_CODE_COUNT;
+        const size_t size = sizeof(ButtonState) * Input::ButtonCodeCount;
         memset(states, 0, size);
         
         memset(rawStates, 0, SDL_NUM_SCANCODES);
