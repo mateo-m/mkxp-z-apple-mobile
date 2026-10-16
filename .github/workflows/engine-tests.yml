@@ -36,7 +36,7 @@ jobs:
         with:
           # hmode7 is a submodule and the core build compiles it. The
           # dependency sources under deps/sources are submodules too.
-          submodules: recursive
+          submodules: true
 
       - uses: ruby/setup-ruby@v1
         with:

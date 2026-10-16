@@ -34,6 +34,6 @@ Key flags:
 - Static build with vendored sub-dependencies (libjpeg, etc.)
 - Apple ImageIO backend disabled: the build uses vendored decoders instead
 - JPEG XL support disabled
-- After the clone step, `./external/download.sh` runs to fetch the vendored sources
+- The configure step checks out the vendored jpeg, libpng and zlib sources, and no other
 
 Depends on: SDL2
