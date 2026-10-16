@@ -45,8 +45,12 @@ NPROC := $(shell sysctl -n hw.ncpu)
 CFLAGS := -I$(INCLUDEDIR) -I$(INCLUDEDIR)/freetype2 $(TARGETFLAGS) -O3
 CXXFLAGS := $(CFLAGS)
 LDFLAGS := -L$(LIBDIR) $(TARGETFLAGS)
-CC      := $(shell xcrun --sdk $(SDK) -f clang) -arch $(ARCH)
-CXX     := $(shell xcrun --sdk $(SDK) -f clang++) -arch $(ARCH)
+CLANG   := $(shell xcrun --sdk $(SDK) -f clang) -arch $(ARCH)
+CLANGXX := $(shell xcrun --sdk $(SDK) -f clang++) -arch $(ARCH)
+# Empty when the machine has no ccache.
+CCACHE  := $(shell command -v ccache)
+CC      := $(CCACHE) $(CLANG)
+CXX     := $(CCACHE) $(CLANGXX)
 AR      := $(shell xcrun --sdk $(SDK) -f ar)
 RANLIB  := $(shell xcrun --sdk $(SDK) -f ranlib)
 PKG_CONFIG_LIBDIR := $(BUILD_PREFIX)/lib/pkgconfig
@@ -98,7 +102,11 @@ RUBY_CONFIGURE_ARGS := \
 
 CONFIGURE := $(CONFIGURE_ENV) ./configure $(CONFIGURE_ARGS)
 AUTOGEN   := $(CONFIGURE_ENV) ./autogen.sh $(CONFIGURE_ARGS)
-CMAKE     := $(CONFIGURE_ENV) cmake .. $(CMAKE_ARGS)
+# CMake takes the first word of CC as the compiler, so ccache goes in
+# as its launcher instead.
+CMAKE     := $(CONFIGURE_ENV) CC="$(CLANG)" CXX="$(CLANGXX)" cmake .. $(CMAKE_ARGS) \
+	$(if $(CCACHE),-DCMAKE_C_COMPILER_LAUNCHER=$(CCACHE) -DCMAKE_CXX_COMPILER_LAUNCHER=$(CCACHE) \
+	-DCMAKE_OBJC_COMPILER_LAUNCHER=$(CCACHE))
 
 default: all
 
