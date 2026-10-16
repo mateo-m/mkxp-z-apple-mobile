@@ -512,7 +512,9 @@ unless Object.respond_to?(:_mkxp_casefold_orig_method_added, true)
               resolved
             end
           else
-            System.puts("[pokemon_compat] pbTryString normalized: #{x} -> #{resolved}") if defined?(System)
+            if defined?(System) && resolved != x
+              System.puts("[pokemon_compat] pbTryString normalized: #{x} -> #{resolved}")
+            end
             resolved
           end
         end

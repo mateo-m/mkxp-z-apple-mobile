@@ -49,6 +49,7 @@ extern "C" bool mkxp_getTouchMouseEnabled(void);
 
 #include "al-util.h"
 #include "debugwriter.h"
+#include "input/keybindings.h"
 
 #include <TargetConditionals.h>
 #include "app_bridge.h"
@@ -91,6 +92,7 @@ EventThread::ControllerState EventThread::controllerState;
 EventThread::MouseState EventThread::mouseState;
 EventThread::TouchState EventThread::touchState;
 SDL_atomic_t EventThread::verticalScrollDistance;
+SDL_atomic_t EventThread::lastInputDevice;
 
 /* User event codes */
 enum
@@ -340,6 +342,7 @@ void EventThread::process(RGSSThreadData &rtData)
                 break;
                 
             case SDL_KEYDOWN :
+                SDL_AtomicSet(&lastInputDevice, InputDeviceKBM);
                 if (event.key.keysym.scancode == SDL_SCANCODE_RETURN &&
                     (event.key.keysym.mod & toggleFSMod))
                 {
@@ -435,6 +438,7 @@ void EventThread::process(RGSSThreadData &rtData)
                 if (!mkxp_getGameControllerCaptureEnabled())
                     continue;
                 controllerState.buttons[event.cbutton.button] = true;
+                SDL_AtomicSet(&lastInputDevice, InputDeviceGamepad);
                 break;
                 
             case SDL_CONTROLLERBUTTONUP:
@@ -447,6 +451,8 @@ void EventThread::process(RGSSThreadData &rtData)
                 if (!mkxp_getGameControllerCaptureEnabled())
                     continue;
                 controllerState.axes[event.caxis.axis] = event.caxis.value;
+                if (abs(event.caxis.value) > JAXIS_THRESHOLD)
+                    SDL_AtomicSet(&lastInputDevice, InputDeviceGamepad);
                 break;
                 
             case SDL_CONTROLLERDEVICEADDED:
@@ -467,6 +473,7 @@ void EventThread::process(RGSSThreadData &rtData)
                 
             case SDL_MOUSEBUTTONDOWN :
                 mouseState.buttons[event.button.button] = true;
+                SDL_AtomicSet(&lastInputDevice, InputDeviceKBM);
                 if (event.button.which == SDL_TOUCH_MOUSEID)
                     mouseState.inWindow = true;
                 break;
@@ -717,6 +724,7 @@ void EventThread::resetAllInputStates()
 	memset(&mouseState, 0, sizeof(mouseState));
 	memset(&touchState, 0, sizeof(touchState));
 	SDL_AtomicSet(&verticalScrollDistance, 0);
+	SDL_AtomicSet(&lastInputDevice, InputDeviceUnknown);
 }
 
 void EventThread::setFullscreen(SDL_Window *win, bool mode)

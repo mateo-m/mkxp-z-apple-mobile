@@ -300,6 +300,18 @@ RB_METHOD(inputMouseInWindow) {
     return rb_bool_new(shState->input().mouseInWindow());
 }
 
+RB_METHOD(inputLastDevice) {
+    RB_UNUSED_PARAM;
+    
+    switch (SDL_AtomicGet(&EventThread::lastInputDevice)) {
+        case EventThread::InputDeviceKBM:
+            return ID2SYM(rb_intern("KBM"));
+        case EventThread::InputDeviceGamepad:
+            return ID2SYM(rb_intern("GAMEPAD"));
+    }
+    return ID2SYM(rb_intern("unknown"));
+}
+
 RB_METHOD(inputRawKeyStates) {
     RB_UNUSED_PARAM;
     
@@ -570,9 +582,9 @@ struct {
     {"F8", Input::F8},
     {"F9", Input::F9},
     {"HOME", Input::HOME},
-    {"F7", Input::F7},
-    {"F8", Input::F8},
-    {"F9", Input::F9},
+    {"D", Input::D},
+    {"E", Input::E},
+    {"F", Input::F},
     
     {"MOUSELEFT", Input::MouseLeft},
     {"MOUSEMIDDLE", Input::MouseMiddle},
@@ -608,6 +620,7 @@ void inputBindingInit() {
     _rb_define_module_function(module, "scroll_v", inputScrollV);
     _rb_define_module_function(module, "mouse_in_window", inputMouseInWindow);
     _rb_define_module_function(module, "mouse_in_window?", inputMouseInWindow);
+    _rb_define_module_function(module, "last_device", inputLastDevice);
     
     _rb_define_module_function(module, "raw_key_states", inputRawKeyStates);
     _rb_define_module_function(module, "asyncKeyState", inputAsyncKeyState);

@@ -9,6 +9,7 @@
 # Usage:
 #   tools/run-engine-tests.sh [--device <name or udid>] [--game <dir>]
 #                             [--suite <file>] [--ruby 18|19|31]
+#                             [--fast-forward <n>]
 #                             [--timeout <seconds>] [--keep] [--no-build]
 #
 # --suite names another file in the game folder to run in place of
@@ -19,6 +20,8 @@
 #
 # --ruby picks the interpreter the suite runs on. Without it the
 # engine keeps its own default.
+#
+# --fast-forward sets the engine's fast-forward multiplier.
 #
 # Exit status:
 #   0  every test passed
@@ -33,6 +36,7 @@ GAME="$ENGINE/tests/engine"
 TIMEOUT=180
 SUITE=""
 RUBY=""
+FAST_FORWARD=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
@@ -50,6 +54,7 @@ do
                 *) echo "run-engine-tests: --ruby takes 18, 19 or 31, not $2" >&2; exit 2 ;;
             esac
             RUBY="$2"; shift 2 ;;
+        --fast-forward) FAST_FORWARD="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
@@ -123,6 +128,9 @@ if [ -n "$RUBY" ]; then
 fi
 if [ -n "$SUITE" ]; then
     export SIMCTL_CHILD_MKXP_TEST_SUITE="$SUITE"
+fi
+if [ -n "$FAST_FORWARD" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_FAST_FORWARD="$FAST_FORWARD"
 fi
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!

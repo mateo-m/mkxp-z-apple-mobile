@@ -110,8 +110,8 @@ all: angle deps-core ruby ruby18 ruby19 mkxp-merged mkxp-core ruby-stdlib
 # ANGLE (prebuilt). The engine draws with GLES through ANGLE, which
 # draws with Metal. The core needs the headers only. A host links the
 # static libraries of the same release.
-ANGLE_VERSION := angle-2026-05-04
-ANGLE_SHA256 := 0cd2b87b132b2c1344fe356ebcb57fa6ec63675d33d6fa11deb8a16bd57d3b9c
+ANGLE_VERSION := angle-2026-10-01
+ANGLE_SHA256 := 9a084762c29f24aaec0d3e4c5b674a321ba63fccfed80b4660240f202df0b245
 ANGLE_STAMP := ${PWD}/ANGLE/.$(ANGLE_VERSION)
 
 angle: $(ANGLE_STAMP)
@@ -314,11 +314,17 @@ $(SOURCES)/sdl2_image/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl2_image/CMakeLis
 # SDL_sound (submodule: sources/sdl_sound)
 sdlsound: init_dirs sdl2 libogg libvorbis $(LIBDIR)/libSDL2_sound.a
 
-$(LIBDIR)/libSDL2_sound.a: $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile
+$(LIBDIR)/libSDL2_sound.a: $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile $(SOURCES)/sdl_sound/.patched-$(SDK_TAG)
 	cd $(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR); \
 	make -j$(NPROC); make install
 
-$(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl_sound/CMakeLists.txt
+$(SOURCES)/sdl_sound/.patched-$(SDK_TAG): $(PATCHES)/sdl_sound/wav-24bit.patch
+	cd $(SOURCES)/sdl_sound; \
+	git checkout -- . 2>/dev/null; \
+	git apply $(PATCHES)/sdl_sound/wav-24bit.patch && \
+	touch $@
+
+$(SOURCES)/sdl_sound/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl_sound/CMakeLists.txt $(SOURCES)/sdl_sound/.patched-$(SDK_TAG)
 	cd $(SOURCES)/sdl_sound; mkdir -p $(CMAKE_BUILDDIR); cd $(CMAKE_BUILDDIR); \
 	$(CMAKE) \
 	-DSDLSOUND_BUILD_SHARED=false \
@@ -783,7 +789,8 @@ $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
 	$(RANLIB) $(LIBDIR)/libruby19-static.a
 	@# Build extensions (mirrors the Ruby 1.8 pattern; see
 	@# libruby18-static.a recipe). Adds our hand-rolled extinit.c
-	@# which provides the real Init_ext() calling each Init_X.
+	@# which provides the real Init_ext() calling each Init_X, and
+	@# the encodings and transcoders that encinit.c starts.
 	@EXTCFLAGS="$(RUBY19_CFLAGS) -I$(SOURCES)/ruby19 -I$(SOURCES)/ruby19/include -I$(SOURCES)/ruby19/.ext/include/aarch64-darwin -I$(INCLUDEDIR)/ruby19"; \
 	OBJ_FILES=""; \
 	for ext in $(RUBY19_EXTS); do \
@@ -801,10 +808,27 @@ $(LIBDIR)/libruby19-static.a: $(SOURCES)/ruby19/.configured-$(SDK_TAG)
 		$(CC) $$EXTCFLAGS $(SOCKET19_DEFS) -I$$SOCKDIR -c $$src -o $$obj; \
 		OBJ_FILES="$$OBJ_FILES $$obj"; \
 	done; \
-	$(CC) $$EXTCFLAGS \
-		-c ${PWD}/ruby19/extinit.c \
-		-o $(SOURCES)/ruby19/extinit.o; \
-	OBJ_FILES="$(SOURCES)/ruby19/extinit.o $$OBJ_FILES"; \
+	(cd $(SOURCES)/ruby19 && make encdb.h transdb.h) >/dev/null || exit 1; \
+	for src in $(SOURCES)/ruby19/enc/*.c; do \
+		case $${src##*/} in ascii.c|us_ascii.c|unicode.c|utf_8.c) continue;; esac; \
+		obj=$${src%.c}.o; \
+		$(CC) $$EXTCFLAGS -DONIG_ENC_REGISTER=rb_enc_register -c $$src -o $$obj || exit 1; \
+		OBJ_FILES="$$OBJ_FILES $$obj"; \
+	done; \
+	for src in $(SOURCES)/ruby19/enc/trans/*.c; do \
+		name=$$(basename $$src .c); \
+		rename=-DInit_$$name=Init_trans_$$name; \
+		[ $$name = transdb ] && rename=; \
+		obj=$${src%.c}.o; \
+		$(CC) $$EXTCFLAGS $$rename -c $$src -o $$obj || exit 1; \
+		OBJ_FILES="$$OBJ_FILES $$obj"; \
+	done; \
+	for name in extinit encinit; do \
+		$(CC) $$EXTCFLAGS \
+			-c ${PWD}/ruby19/$$name.c \
+			-o $(SOURCES)/ruby19/$$name.o || exit 1; \
+		OBJ_FILES="$(SOURCES)/ruby19/$$name.o $$OBJ_FILES"; \
+	done; \
 	$(AR) rcs $(LIBDIR)/libruby19-ext.a $$OBJ_FILES; \
 	$(RANLIB) $(LIBDIR)/libruby19-ext.a
 	@# Strip dmyext.o from libruby19-static.a so libruby19-ext.a's

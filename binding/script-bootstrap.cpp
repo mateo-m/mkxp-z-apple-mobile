@@ -265,6 +265,7 @@ void loadEnginePostloadsBeforeMain() {
         "pokemon_tilemap_fix",
         "pokemon_graphics_compat",
         "pokemon_delta_compat",
+        "essentials_using_compat",
         "nilclass_safe_stubs",
         "pokemon_windowskin_fix",
         "hmode7_shim",
