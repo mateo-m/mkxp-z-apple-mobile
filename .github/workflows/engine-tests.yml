@@ -27,8 +27,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A job that `if:` skips still reports, and the summary job counts a
+  # skip as a pass. A workflow that `paths-ignore` skips never reports,
+  # so the required check would wait forever.
+  changes:
+    name: Detect docs-only changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - name: Classify the changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # An empty list, also from a failed call, runs the tests.
+          FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename')" || FILES=""
+          printf 'changed files:\n%s\n' "$FILES"
+          if [ -n "$FILES" ] && ! printf '%s\n' "$FILES" | grep -qv '\.md$'; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
   simulator:
     name: Engine tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.runner == 'self') && fromJSON('["self-hosted", "macOS"]') || 'macos-latest' }}
     timeout-minutes: 120
     steps:
@@ -182,7 +216,7 @@ jobs:
   # Aggregate gate, so the ruleset has one context to require.
   summary:
     name: Engine tests summary
-    needs: [simulator]
+    needs: [changes, simulator]
     if: always()
     runs-on: ubuntu-latest
     steps:
