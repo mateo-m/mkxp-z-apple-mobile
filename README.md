@@ -60,7 +60,7 @@ tools:
 
 ```sh
 brew install automake autoconf libtool cmake pkg-config bison
-git submodule update --init --recursive --depth 1
+git submodule update --init --depth 1
 tools/build-deps-ios.sh iphonesimulator
 (cd deps && make -f iphonesimulator.make mkxp-merged mkxp-core)
 ```
