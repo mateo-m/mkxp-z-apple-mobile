@@ -24,6 +24,8 @@
 
 #include "al-util.h"
 
+#include <SDL_sound.h>
+
 struct ALDataSource
 {
 	enum Status
@@ -52,6 +54,13 @@ struct ALDataSource
 	/* Returns false if not supported */
 	virtual bool setPitch(float value) = 0;
 };
+
+/* Decodes S32 as F32, which OpenAL plays. The sample reads through
+ * ops, a copy of srcOps that does not close it. */
+Sound_Sample *newPlayableSample(SDL_RWops &srcOps,
+                                SDL_RWops &ops,
+                                const char *extension,
+                                uint32_t bufferSize);
 
 ALDataSource *createSDLSource(SDL_RWops &ops,
                               const char *extension,

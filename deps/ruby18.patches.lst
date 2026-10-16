@@ -2,3 +2,4 @@
 ruby18/ios.patch
 ruby18/cross-host.patch
 ruby18/rgss-superclass-override.patch
+ruby18/lazy-sweep.patch

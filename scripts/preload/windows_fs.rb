@@ -488,11 +488,10 @@ unless defined?(MKXPSaveFS)
     def live_component_spelling(dir, part)
       return part if part.empty? || part == '.' || part == '..'
 
-      names = walk_entries(dir)
-      return part if names.include?(part)
+      names, lowered = walk_entries(dir)
+      return part if names.key?(part)
 
-      lower = part.downcase
-      names.find { |name| name.downcase == lower } || part
+      lowered[part.downcase] || part
     rescue StandardError
       part
     end
@@ -505,14 +504,26 @@ unless defined?(MKXPSaveFS)
     # the cache stays off during that resolution, so a listing never
     # outlives the disk state it described.
     def walk_entries(dir)
-      return engine_fs.dir_entries(dir) if @walk_cache_off
+      return entry_index(engine_fs.dir_entries(dir)) if @walk_cache_off
 
       cache = (@walk_cache ||= {})
       unless cache[:generation] == fs_generation
         cache.clear
         cache[:generation] = fs_generation
       end
-      cache[dir] ||= engine_fs.dir_entries(dir)
+      cache[dir] ||= entry_index(engine_fs.dir_entries(dir))
+    end
+
+    # A miss in a folder with thousands of files lowercased every name,
+    # and the garbage made Ruby 1.8 collect about twice a second.
+    def entry_index(entries)
+      names = {}
+      lowered = {}
+      entries.each do |name|
+        names[name] = true
+        lowered[name.downcase] ||= name
+      end
+      [names, lowered]
     end
 
     def fs_generation
@@ -579,12 +590,21 @@ unless defined?(MKXPSaveFS)
 
     # Shared File.open / File.new front: legacy-save recovery first,
     # then the write-mode case resolution.
+    # Windows refuses to open a folder with EACCES. POSIX opens it and
+    # the first read raises EISDIR, which games do not rescue (Pokémon
+    # TGOM probes "Graphics/Characters/" for an empty sprite name).
     def open_target(path, mode)
-      target = path_for(path)
+      target = refuse_directory(path_for(path))
       return target unless write_mode?(mode)
 
       MKXPWindowsFonts.ensure_dir(self, target)
       change_spelling(target)
+    end
+
+    def refuse_directory(target)
+      raise Errno::EACCES, target if target.is_a?(String) && File.directory?(target)
+
+      target
     end
 
     # Errno::ENOENT retry target for the open wrappers. The same
@@ -902,7 +922,7 @@ class << File
     fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_open(fixed, *args, &block)
+    _mkxp_orig_open(MKXPSaveFS.refuse_directory(fixed), *args, &block)
   end
 
   def new(path, *args)
@@ -912,7 +932,7 @@ class << File
     fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_new(fixed, *args)
+    _mkxp_orig_new(MKXPSaveFS.refuse_directory(fixed), *args)
   end
 
   def delete(*paths)

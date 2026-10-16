@@ -963,14 +963,18 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
                 fcount = @framecount[(id / 48) - 1]
                 next if !fcount || fcount < 2
 
-                unless haveautotile
-                  haveautotile = true
-                  overallcount += 1
-                  xpos = (x * twidth) - @oxLayer0
-                  ypos = (y * theight) - @oyLayer0
-                  bitmap.fill_rect(xpos, ypos, twidth, theight, trans) if overallcount <= 2000
-                  break
-                end
+                next if haveautotile
+
+                haveautotile = true
+                overallcount += 1
+                xpos = (x * twidth) - @oxLayer0
+                ypos = (y * theight) - @oyLayer0
+                bitmap.fill_rect(xpos, ypos, twidth, theight, trans) if overallcount <= 2000
+                break
+              end
+              # rubocop:disable Style/CombinableLoops -- the loop above breaks
+              # after it clears the cell, so a merged loop never redraws it.
+              zrange.each do |z|
                 id = mapdata[x, y, z]
                 next if !id || id < 48
 
@@ -1005,6 +1009,7 @@ if $MKXP == true && defined?(CustomTilemap) == 'constant' && !game_wraps_own_til
                   bitmap.blt(xpos, ypos, tilebitmap, tilerect)
                 end
               end
+              # rubocop:enable Style/CombinableLoops
             end
           end
           Graphics.frame_reset

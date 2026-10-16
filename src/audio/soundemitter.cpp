@@ -21,6 +21,7 @@
 
 #include "soundemitter.h"
 
+#include "aldatasource.h"
 #include "sharedstate.h"
 #include "filesystem.h"
 #include "exception.h"
@@ -195,7 +196,8 @@ struct SoundOpenHandler : FileSystem::OpenHandler
 
 	bool tryRead(SDL_RWops &ops, const char *ext)
 	{
-		Sound_Sample *sample = Sound_NewSample(&ops, ext, 0, STREAM_BUF_SIZE);
+		SDL_RWops sampleOps;
+		Sound_Sample *sample = newPlayableSample(ops, sampleOps, ext, STREAM_BUF_SIZE);
 
 		if (!sample)
 		{
@@ -218,6 +220,7 @@ struct SoundOpenHandler : FileSystem::OpenHandler
 							   buffer->bytes, sample->actual.rate);
 
 		Sound_FreeSample(sample);
+		SDL_RWclose(&ops);
 
 		return true;
 	}

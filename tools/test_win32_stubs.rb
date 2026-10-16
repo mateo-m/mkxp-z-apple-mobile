@@ -171,6 +171,13 @@ assert_nonzero(
   'wininet.dll spelling routes to the same stub'
 )
 
+# Nuri Yuri's RGSS Linker script raises LoadError unless the init call returns 1.
+assert_eq(
+  Win32API.new('RGSS Linker.dll', 'RGSSLinker_Initialize', 'p', 'i').call('RGSS104E.dll'),
+  1,
+  'RGSSLinker_Initialize reports success'
+)
+
 # Functions outside the bridge stay on the tolerant fallback: log + 0.
 assert_eq(
   Win32API.new('wininet', 'InternetConnectA', 'lplpplll', 'l').call(1, 'files.test', 80, '', '', 3, 0, 0),
@@ -451,4 +458,4 @@ assert_true(net_err.is_a?(Class) && net_err.ancestors.include?(StandardError),
             'error-suffixed Net constant becomes a StandardError subclass')
 assert_eq(Net::SomePlainThing, IOS::NullStub, 'plain Net constant resolves to NullStub')
 
-test_passed('test_win32_stubs', 65)
+test_passed('test_win32_stubs', 66)
