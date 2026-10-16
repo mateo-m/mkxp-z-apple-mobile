@@ -89,14 +89,15 @@ static const KbBindingData defaultKbBindings[] =
 	{ SDL_SCANCODE_RSHIFT, Input::D     },
 	{ SDL_SCANCODE_TAB,    Input::E     },
 	{ SDL_SCANCODE_LALT,   Input::E     },
+	{ SDL_SCANCODE_M,      Input::E     },
 	{ SDL_SCANCODE_F7,     Input::F     },
 
-	/* Rejuvenation's Kirin layout has run on H, turbo on T and mute
-	   on M. The game reads those keys only inside Kirin. On the
-	   desktop M is turbo, but the Kirin layout puts M on the screen. */
+	/* Rejuvenation's Kirin layout puts run on H and turbo on T. The
+	   game reads those keys only inside Kirin, but Empo shows the
+	   layout. Kirin's mute key, M, stays turbo as on the desktop,
+	   because that is what the game's controls screen says. */
 	{ SDL_SCANCODE_H,      Input::D     },
-	{ SDL_SCANCODE_T,      Input::E     },
-	{ SDL_SCANCODE_M,      Input::F     }
+	{ SDL_SCANCODE_T,      Input::E     }
 };
 
 /* RGSS1 */
