@@ -19,7 +19,7 @@ These constraints affect every layer of the architecture. Cross-session play (mu
 
 ```cpp
 // Created once, persist for the process lifetime
-SDL_Window *persistWin = SDL_CreateWindow(...);  // no SDL_WINDOW_OPENGL - ANGLE uses a plain CALayer
+SDL_Window *persistWin = SDL_CreateWindow(...);  // no SDL_WINDOW_OPENGL: ANGLE draws into the CAMetalLayer of an SDL Metal view
 initANGLE(persistWin);  // sets up s_eglDisplay / s_eglSurface / s_eglContext
 ALCdevice *persistAlcDev = alcOpenDevice(0);
 ALCcontext *persistAlcCtx = alcCreateContext(persistAlcDev, 0);

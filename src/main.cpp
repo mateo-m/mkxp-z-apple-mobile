@@ -40,7 +40,6 @@
 #include "ios_fatal_report.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <EGL/egl.h>
-#include <SDL_syswm.h>
 
 #include "binding.h"
 #include "sharedstate.h"
@@ -63,7 +62,6 @@ static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg);
 static void showInitError(const std::string &msg);
 static bool initANGLE(SDL_Window *win);
 static void teardownANGLE();
-extern "C" void *mkxp_getANGLENativeLayer(void *sdlWindow);
 
 static inline const char *glGetStringInt(GLenum name) {
   return (const char *)gl.GetString(name);
@@ -131,6 +129,7 @@ static GLuint s_screenFBO = 0;
 EGLDisplay s_eglDisplay = EGL_NO_DISPLAY;
 EGLSurface s_eglSurface = EGL_NO_SURFACE;
 EGLContext s_eglContext = EGL_NO_CONTEXT;
+static SDL_MetalView s_metalView = nullptr;
 
 /* Thin wrappers over EGL that preserve the old SDL_GL_* signatures.
  * `ctx` is a sentinel: the EGL context pointer cast to SDL_GLContext
@@ -156,14 +155,12 @@ void mkxpGL_GetDrawableSize(SDL_Window * /*win*/, int *w, int *h) {
     if (h) *h = eglH;
 }
 
-extern "C" void mkxp_refreshANGLENativeLayerSize(void *sdlWindow, int *outW, int *outH);
-
 // Called on rotation / resize. eglQuerySurface returns a drawable size
-// cached during the last obtainNextDrawable call (pre-rotation). Drive
-// the CAMetalLayer update on the main thread ourselves and return the
-// resulting pixel size.
+// cached during the last obtainNextDrawable call (pre-rotation). SDL's
+// Metal view updates the layer's drawable size in layoutSubviews, which
+// UIKit runs before SDL sends the resize event.
 void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h) {
-    mkxp_refreshANGLENativeLayerSize(win, w, h);
+    SDL_Metal_GetDrawableSize(win, w, h);
 }
 
 /* Single-shot RGSS thread.
@@ -429,8 +426,8 @@ static void shutdownSDLLibs() {
 }
 
 /* Create the persistent SDL window. No SDL_WINDOW_OPENGL flag
- * because ANGLE uses a plain CALayer (not a CAEAGLLayer) as its
- * native window. Returns nullptr on failure after posting an error. */
+ * because ANGLE draws into the CAMetalLayer of SDL's Metal view.
+ * Returns nullptr on failure after posting an error. */
 static SDL_Window *createPersistentWindow(const Config &initConf) {
   Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
 
@@ -558,6 +555,7 @@ bool EngineHost::init(int argc, char *argv[]) {
 
   persistGLCtx_ = createPersistentGL(persistWin_);
   if (!persistGLCtx_) {
+    teardownANGLE();
     SDL_DestroyWindow(persistWin_);
     persistWin_ = nullptr;
     shutdownSDLLibs();
@@ -749,12 +747,16 @@ static bool initANGLE(SDL_Window *win) {
     return false;
   }
 
-  // Upstream ANGLE's Metal backend expects a CALayer* as native window
-  EGLNativeWindowType nativeWindow = (EGLNativeWindowType)mkxp_getANGLENativeLayer(win);
-  if (!nativeWindow) {
-    showInitError("ANGLE: failed to get native layer from SDL window");
+  // ANGLE draws straight into a CAMetalLayer that it gets as the native
+  // window. With any other CALayer, it adds its own sublayer and copies the
+  // frame only once, so a view that UIKit places later leaves the picture
+  // off screen.
+  s_metalView = SDL_Metal_CreateView(win);
+  if (!s_metalView) {
+    showInitError(std::string("ANGLE: SDL_Metal_CreateView failed: ") + SDL_GetError());
     return false;
   }
+  EGLNativeWindowType nativeWindow = (EGLNativeWindowType)SDL_Metal_GetLayer(s_metalView);
 
   s_eglSurface = eglCreateWindowSurface(s_eglDisplay, eglConfig, nativeWindow, NULL);
   if (s_eglSurface == EGL_NO_SURFACE) {
@@ -815,6 +817,10 @@ static void teardownANGLE() {
   if (s_eglDisplay != EGL_NO_DISPLAY) {
     eglTerminate(s_eglDisplay);
     s_eglDisplay = EGL_NO_DISPLAY;
+  }
+  if (s_metalView) {
+    SDL_Metal_DestroyView(s_metalView);
+    s_metalView = nullptr;
   }
   glGetProcAddressOverride = nullptr;
 }
