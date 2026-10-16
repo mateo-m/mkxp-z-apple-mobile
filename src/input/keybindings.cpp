@@ -92,9 +92,9 @@ static const KbBindingData defaultKbBindings[] =
 	{ SDL_SCANCODE_M,      Input::E     },
 	{ SDL_SCANCODE_F7,     Input::F     },
 
-	/* Rejuvenation's Kirin layout puts run on H and turbo on T. The
-	   game reads those keys only inside Kirin, but Empo shows the
-	   layout. Kirin's mute key, M, stays turbo as on the desktop,
+	/* Rejuvenation's Kirin touch layout puts run on H and turbo on T.
+	   The game reads those keys only inside Kirin, but a host can show
+	   the layout. Kirin's mute key, M, stays turbo as on the desktop,
 	   because that is what the game's controls screen says. */
 	{ SDL_SCANCODE_H,      Input::D     },
 	{ SDL_SCANCODE_T,      Input::E     }
