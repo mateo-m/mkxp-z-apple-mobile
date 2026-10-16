@@ -17,10 +17,14 @@ permissions:
   contents: write
 
 jobs:
+  # The SDKs share the source trees, so each one builds in its own job.
   build:
-    name: Build and publish
+    name: Build ${{ matrix.sdk }}
     runs-on: macos-latest
     timeout-minutes: 300
+    strategy:
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,10 +45,33 @@ jobs:
 
       - name: Build
         run: |
-          for sdk in iphoneos iphonesimulator; do
-            tools/build-deps-ios.sh "$sdk"
-            (cd deps && make -f "$sdk.make" mkxp-merged mkxp-core)
-          done
+          tools/build-deps-ios.sh "${{ matrix.sdk }}"
+          (cd deps && make -f "${{ matrix.sdk }}.make" mkxp-merged mkxp-core)
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: build-${{ matrix.sdk }}-arm64
+          path: |
+            deps/build-${{ matrix.sdk }}-arm64/lib
+            deps/build-${{ matrix.sdk }}-arm64/ruby-stdlib
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Package and publish
+    needs: build
+    # tools/package-ios.sh checks each library with otool and nm.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      # Each artifact goes into deps/<artifact name>, the folder that
+      # tools/package-ios.sh reads.
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: build-*-arm64
+          path: deps
 
       - name: Package
         id: package
