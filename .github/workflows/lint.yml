@@ -84,7 +84,7 @@ jobs:
       # upstream code and hold no launcher names.
       - name: Checkout hmode7
         run: |
-          git -c url."https://github.com/".insteadOf="git@github.com:" \
+          git -c url.https://github.com/.insteadOf=git@github.com: \
               submodule update --init --depth 1 hmode7
 
       - name: check

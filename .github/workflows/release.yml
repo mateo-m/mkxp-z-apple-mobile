@@ -28,7 +28,7 @@ jobs:
 
       - name: Select the newest Xcode
         run: |
-          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          XCODE="$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -n 1)"
           echo "Using $XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
@@ -60,6 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
+          # shellcheck disable=SC2016 # markdown backticks, not a command
           printf 'Built from `%s`.\n\nsha256: `%s`\n' "$GITHUB_SHA" "$SHA256" > notes.md
           gh release create "$GITHUB_REF_NAME" mkxp-z-ios.tar.gz --title "$GITHUB_REF_NAME" --notes-file notes.md
 
