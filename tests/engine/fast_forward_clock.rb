@@ -28,14 +28,16 @@ clock_rate = (System.uptime - clock_start) / (Time.now - wall_start)
 drawn_frame_rate = frames / (Time.now - wall_start) / MULTIPLIER
 
 EngineTest.test('System.uptime runs at the fast-forward speed') do
-  EngineTest.assert((clock_rate - MULTIPLIER).abs < MULTIPLIER * 0.1,
-                    format('clock rate %.2f, expected %d', clock_rate, MULTIPLIER))
+  message = format('clock rate %<rate>.2f, expected %<expected>d',
+                   :rate => clock_rate, :expected => MULTIPLIER)
+  EngineTest.assert((clock_rate - MULTIPLIER).abs < MULTIPLIER * 0.1, message)
 end
 
 EngineTest.test('Graphics.average_frame_rate counts drawn frames in real time') do
   average = Graphics.average_frame_rate
-  EngineTest.assert((average - drawn_frame_rate).abs < drawn_frame_rate * 0.15,
-                    format('average %.1f, drawn %.1f', average, drawn_frame_rate))
+  message = format('average %<average>.1f, drawn %<drawn>.1f',
+                   :average => average, :drawn => drawn_frame_rate)
+  EngineTest.assert((average - drawn_frame_rate).abs < drawn_frame_rate * 0.15, message)
 end
 
 EngineTest.finish
