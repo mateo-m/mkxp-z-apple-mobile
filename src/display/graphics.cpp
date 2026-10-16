@@ -498,6 +498,7 @@ struct GraphicsPrivate {
     
     std::vector<double> avgFPSData;
     double last_avg_update;
+    Uint64 avgFPSStart;
     SDL_mutex *avgFPSLock;
 
     SDL_mutex *glResourceLock;
@@ -520,7 +521,7 @@ struct GraphicsPrivate {
     multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
-    last_update(0), last_delta(0), last_avg_update(0), backingScaleFactor(1), integerScaleFactor(0, 0),
+    last_update(0), last_delta(0), last_avg_update(0), avgFPSStart(SDL_GetPerformanceCounter()), backingScaleFactor(1), integerScaleFactor(0, 0),
     glResourceLockOwner(0), glResourceLockDepth(0),
     integerScaleActive(rtData->config.integerScaling.active),
     integerLastMileScaling(rtData->config.integerScaling.lastMileScaling) {
@@ -1137,7 +1138,9 @@ struct GraphicsPrivate {
         if (avgFPSData.size() > 40)
             avgFPSData.erase(avgFPSData.begin());
         
-        double time = shState->runTime();
+        // Use real time here. Fast-forward speeds up shState->runTime(),
+        // and this rate must count the frames that the screen shows.
+        double time = (double)(SDL_GetPerformanceCounter() - avgFPSStart) / SDL_GetPerformanceFrequency();
         avgFPSData.push_back(time - last_avg_update);
         last_avg_update = time;
         SDL_UnlockMutex(avgFPSLock);

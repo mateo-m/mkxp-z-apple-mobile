@@ -145,7 +145,8 @@ unless $PokemonSystem.nil?
     MKXP_RGSS_BUTTON_CODES = [2, 4, 6, 8,
                               11, 12, 13, 14, 15, 16, 17, 18,
                               21, 22, 23,
-                              25, 26, 27, 28, 29].freeze
+                              25, 26, 27, 28, 29,
+                              50, 51, 52].freeze
 
     def self.mkxp_extended_vkeys(button)
       return nil if MKXP_RGSS_BUTTON_CODES.include?(button)

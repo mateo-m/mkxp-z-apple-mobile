@@ -44,6 +44,7 @@ game, which is the only way to reach the drawing code.
 | `mega_bitmap.rb` | Mega-surface suite. |
 | `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
 | `legacy_methods_off.rb` | The legacy methods stay away when the transform is off. |
+| `fast_forward_clock.rb` | `System.uptime` runs at the fast-forward speed, and the average frame rate does not. |
 
 Run it on a simulator with one command:
 
@@ -68,6 +69,14 @@ for v in 18 19 31
 do
     tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" --no-build
 done
+```
+
+`--fast-forward <n>` starts the engine at that fast-forward
+multiplier. Run `fast_forward_clock.rb` with and without it:
+
+```sh
+tools/run-engine-tests.sh --suite fast_forward_clock.rb --no-build
+tools/run-engine-tests.sh --suite fast_forward_clock.rb --fast-forward 4 --no-build
 ```
 
 `--game` is the exception. That folder goes into the app bundle, so a

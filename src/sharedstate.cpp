@@ -40,11 +40,13 @@
 #include "debugwriter.h"
 #include "sharedmidistate.h"
 #include "patcher.h"
+#include "app_bridge.h"
 
 #include <unistd.h>
 #include <stdio.h>
 #include <string>
 #include <chrono>
+#include <mutex>
 
 SharedState *SharedState::instance = 0;
 int SharedState::rgssVersion = 0;
@@ -102,7 +104,9 @@ struct SharedStatePrivate
 
 	unsigned int stampCounter;
     
-    std::chrono::time_point<std::chrono::steady_clock> startupTime;
+    std::mutex runTimeMutex;
+    std::chrono::time_point<std::chrono::steady_clock> lastRunTimeSample;
+    double scaledRunTime = 0;
 
     Patcher patcher;
 
@@ -126,7 +130,7 @@ struct SharedStatePrivate
 	void init(RGSSThreadData *threadData)
 	{
         
-        startupTime = std::chrono::steady_clock::now();
+        lastRunTimeSample = std::chrono::steady_clock::now();
         
 		/* Shaders have been compiled in ShaderSet's constructor */
 		if (gl.ReleaseShaderCompiler)
@@ -414,10 +418,17 @@ Font &SharedState::defaultFont() const
 	return *p->defaultFont;
 }
 
+// Essentials v21 moves the player and events by System.uptime, not by
+// frames. Fast-forward must speed up this clock too, or only the
+// frame-counted menus get faster.
 double SharedState::runTime() {
     if (!p) return 0;
+    std::lock_guard<std::mutex> lock(p->runTimeMutex);
     const auto now = std::chrono::steady_clock::now();
-    return std::chrono::duration_cast<std::chrono::microseconds>(now - p->startupTime).count() / 1000.0 / 1000.0;
+    const double elapsed = std::chrono::duration<double>(now - p->lastRunTimeSample).count();
+    p->lastRunTimeSample = now;
+    p->scaledRunTime += elapsed * mkxp_getFastForwardMultiplier();
+    return p->scaledRunTime;
 }
 
 unsigned int SharedState::genTimeStamp()

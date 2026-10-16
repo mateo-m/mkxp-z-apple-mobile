@@ -85,6 +85,9 @@ public:
 	static MouseState mouseState;
 	static TouchState touchState;
     static SDL_atomic_t verticalScrollDistance;
+
+	enum InputDevice { InputDeviceUnknown, InputDeviceKBM, InputDeviceGamepad };
+	static SDL_atomic_t lastInputDevice;
     
     std::string textInputBuffer;
     void lockText(bool lock);
