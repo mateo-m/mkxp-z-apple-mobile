@@ -297,7 +297,13 @@ $(LIBDIR)/libSDL2_image.a: $(SOURCES)/sdl2_image/$(CMAKE_BUILDDIR)/Makefile
 	cd $(SOURCES)/sdl2_image/$(CMAKE_BUILDDIR); \
 	make -j$(NPROC); make install
 
+# SDL_image pins 8 image libraries as submodules. With these flags it
+# builds only jpeg, libpng and the zlib that libpng needs. libjxl's own
+# submodules live on googlesource.com, which answers GitHub's runners
+# with 503, so a recursive checkout must not reach them.
 $(SOURCES)/sdl2_image/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/sdl2_image/CMakeLists.txt
+	cd $(SOURCES)/sdl2_image; \
+	git submodule update --init --depth 1 external/jpeg external/libpng external/zlib
 	cd $(SOURCES)/sdl2_image; mkdir -p $(CMAKE_BUILDDIR); cd $(CMAKE_BUILDDIR); \
 	$(CMAKE) \
 	-DBUILD_SHARED_LIBS=no \
@@ -1023,10 +1029,6 @@ $(SOURCES)/ruby18/configure: $(SOURCES)/ruby18/configure.in
 # ====
 init_dirs:
 	@mkdir -p $(LIBDIR) $(INCLUDEDIR)
-
-# Fetch vendored sources for SDL_image (must run once after submodule init)
-sdl2image-vendored: $(SOURCES)/sdl2_image/external/download.sh
-	cd $(SOURCES)/sdl2_image; ./external/download.sh
 
 clean: clean-compiled
 
