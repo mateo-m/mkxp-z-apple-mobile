@@ -57,7 +57,11 @@ public:
         /* HOME: added for JoiPlay-compatible cheat scripts. Mapped to
            SDL_SCANCODE_HOME; mirrors JoiPlay's input binding so any
            script that does Input.trigger?(Input::HOME) resolves. */
-        HOME = 43
+        HOME = 43,
+        /* Pokemon Rejuvenation's engine adds these, with the same
+           codes. Its scripts read D to run, E to toggle turbo and F
+           to mute, and check `defined?(Input::E)` first. */
+        D = 50, E = 51, F = 52
 	};
     
     void recalcRepeat(unsigned int fps);

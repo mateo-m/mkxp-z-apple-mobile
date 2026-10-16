@@ -82,7 +82,21 @@ static const KbBindingData defaultKbBindings[] =
 	{ SDL_SCANCODE_Q,      Input::L     },
 	{ SDL_SCANCODE_W,      Input::R     },
 	{ SDL_SCANCODE_A,      Input::X     },
-	{ SDL_SCANCODE_S,      Input::Y     }
+	{ SDL_SCANCODE_S,      Input::Y     },
+
+	/* The keys of Pokemon Rejuvenation's own engine */
+	{ SDL_SCANCODE_LSHIFT, Input::D     },
+	{ SDL_SCANCODE_RSHIFT, Input::D     },
+	{ SDL_SCANCODE_TAB,    Input::E     },
+	{ SDL_SCANCODE_LALT,   Input::E     },
+	{ SDL_SCANCODE_F7,     Input::F     },
+
+	/* Rejuvenation's Kirin layout has run on H, turbo on T and mute
+	   on M. The game reads those keys only inside Kirin. On the
+	   desktop M is turbo, but the Kirin layout puts M on the screen. */
+	{ SDL_SCANCODE_H,      Input::D     },
+	{ SDL_SCANCODE_T,      Input::E     },
+	{ SDL_SCANCODE_M,      Input::F     }
 };
 
 /* RGSS1 */
@@ -227,7 +241,8 @@ static bool verifyDesc(const BindingDesc &desc)
 	    Input::X, Input::Y, Input::Z,
 	    Input::L, Input::R,
 	    Input::Shift, Input::Ctrl, Input::Alt,
-	    Input::F5, Input::F6, Input::F7, Input::F8, Input::F9
+	    Input::F5, Input::F6, Input::F7, Input::F8, Input::F9,
+	    Input::D, Input::E, Input::F
 	};
 
 	elementsN(codes);

@@ -38,7 +38,7 @@
 #include <string.h>
 #include <assert.h>
 
-#define BUTTON_CODE_COUNT 27
+#define BUTTON_CODE_COUNT 30
 
 #define m(vk,sc) { vk, SDL_SCANCODE_##sc }
 std::unordered_map<int, int> vKeyToScancode{
@@ -637,7 +637,9 @@ static const int mapToIndex[] =
     16, 17, 18, 19, 20,
     0, 0, 0, 0, 0, 0, 0, 0,
     21, 22, 23, 24, 25,
-    26
+    26,
+    0, 0, 0, 0, 0, 0,
+    27, 28, 29
 };
 
 static elementsN(mapToIndex);
