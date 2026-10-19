@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Assertion and reporting harness for the engine test suites in this
 # directory. Each suite loads it on its first lines, because the
 # engine skips "preloadScript" for games that boot from a

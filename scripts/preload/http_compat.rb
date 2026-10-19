@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # JoiPlay-style HTTP module shim.
 #
 # JoiPlay's C++ binding exposes an `HTTP` module with

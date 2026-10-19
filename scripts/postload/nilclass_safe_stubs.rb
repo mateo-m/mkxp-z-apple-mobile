@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # NilClass safe-stubs - a monkey patch that makes nil behave like
 # an empty string / zero number / false flag for the long tail of
 # methods older RGSS scripts assume will exist on their operands.

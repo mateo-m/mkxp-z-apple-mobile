@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Legacy-method suite for a game that runs with the syntax transform off.
 #
 # The Ruby 3.1 build defines the methods Ruby 1.9 removed again, and each

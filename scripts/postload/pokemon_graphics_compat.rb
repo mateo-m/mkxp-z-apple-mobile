@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Pokemon Essentials Graphics + movie-plugin compatibility aliases.
 #
 # JoiPlay bound `Graphics.poke_*` as distinct C++ entry points and

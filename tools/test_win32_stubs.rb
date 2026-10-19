@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Unit tests for the Berka-downloader boot and download fixes:
 #   1. win32_wrap.rb: the wininet bridge. InternetOpenA returns a
 #      nonzero session handle (Pokemon Daybreak's "LUKA DOWNLOADER

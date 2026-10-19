@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Build libmkxpz-core.a - the engine-core static library (everything
 # under src/: renderer, audio, event loop, filesystem, host bridge) -
 # for one Apple SDK. The Ruby binding half (binding/ + hmode7/) is NOT

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Fails when the engine names a launcher or asks a host for a
 # function. A host sets each value through src/app_bridge.h. The
 # engine must never reach up to a name that the host defines.

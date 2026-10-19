@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Package the engine for a host: mkxp-z-ios.tar.gz.
 #
 # Run it after tools/build-deps-ios.sh and `make mkxp-merged mkxp-core`

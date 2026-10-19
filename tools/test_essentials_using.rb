@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Unit tests for essentials_using_compat.rb.
 # Run: ruby tools/test_essentials_using.rb
 

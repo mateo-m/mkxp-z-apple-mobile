@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Unit tests for the alias-era save recovery guards in
 # windows_fs.rb: the cwd gate, the symlink-proof identity
 # guard, artifact exclusion, and unique collision backups.

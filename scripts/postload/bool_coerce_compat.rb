@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Bool-coercion compat - native RGSS treats any truthy value as ON
 # when assigning a bool-typed property (`font.shadow = 20` simply
 # turns the shadow on), but mkxp-z's rb_bool_arg accepts only

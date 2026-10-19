@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Interpreter compatibility suite.
 #
 # The engine ships Ruby 1.8, 1.9 and 3.1, and a launcher picks one

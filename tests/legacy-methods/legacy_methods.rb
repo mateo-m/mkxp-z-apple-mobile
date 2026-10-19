@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Legacy-method suite.
 #
 # Ruby 1.9 removed a set of methods that Pokemon Essentials forks

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # windows_fs.rb
 # Windows filesystem-semantics emulation layer.
 # Auto-loaded before platform_compat.rb and game scripts. Games

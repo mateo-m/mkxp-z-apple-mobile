@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Regression tests for pokemon_tilemap_fix.rb: the paged tileset
 # storage that replaced Pokemon Essentials' fold-into-columns wrap.
 #

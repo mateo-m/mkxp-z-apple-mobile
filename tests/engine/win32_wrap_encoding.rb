@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Text conversion in the Win32API stand-ins (scripts/preload/
 # win32_wrap_encoding.rb). The engine loads that preload only on
 # Ruby 1.9 and 3.1, so run this suite on those two:

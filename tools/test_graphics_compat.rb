@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Regression tests for the Graphics compat delegates: the preload
 # snapshot (pokemon_compat.rb) plus the postload poke_* / mkxp_*
 # delegates (pokemon_graphics_compat.rb). The bug class under test:

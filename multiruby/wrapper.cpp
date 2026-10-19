@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 // multi-Ruby per-version wrapper
 //
 // Compiled separately for each Ruby version (1.8, 1.9, 3.1) and

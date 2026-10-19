@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Build and run the host-side C++ tests in tests/cpp.
 #
 # These cover engine code that needs no window, no GPU, and no Ruby.

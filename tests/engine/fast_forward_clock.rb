@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # The clocks under fast-forward. Pokemon Essentials v21 moves the
 # player by System.uptime, not by frames, so that clock must speed up
 # with the frames. The average frame rate still counts the frames

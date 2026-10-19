@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Unit tests for the System stand-ins in platform_compat.rb.
 # System.mouse_in_window: mkxp-z moved the method to Input, and
 # Pokemon Essentials v20 and v20.1 still call the System name from

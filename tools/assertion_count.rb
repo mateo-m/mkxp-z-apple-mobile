@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Assertion accounting for the host-side Ruby tests.
 #
 # Every test file here fails fast: an assertion that does not hold

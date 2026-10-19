@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 #ifndef IOS_FATAL_REPORT_H
 #define IOS_FATAL_REPORT_H
 

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Pokemon Essentials (v18 and older) defines a top-level
 # `using(window) { ... }` that disposes the window after the block.
 # UIHelper calls it from module methods, for example the quantity

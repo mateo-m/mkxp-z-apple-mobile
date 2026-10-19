@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # A path without an extension picks the first matching file in name
 # order, as it does on Windows. Graphics/Lookup has lookup.bmp (2x1)
 # and lookup.png (1x1). APFS lists that folder with the .png first, so

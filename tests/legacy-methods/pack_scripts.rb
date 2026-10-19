@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Packs the harness and the suite into Data/Scripts.rxdata.
 #
 # The engine turns the syntax transform on for the sections of

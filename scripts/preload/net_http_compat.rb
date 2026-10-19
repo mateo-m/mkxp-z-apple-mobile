@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Net::HTTP facade for Ruby VMs without the real network stdlib.
 #
 # Ruby 1.8 / 1.9 can't link the era openssl C ext against our

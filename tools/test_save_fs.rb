@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Unit tests for MKXPSaveFS save-path handling in windows_fs.rb:
 # bare-filename remap into UserData, literal portable "Save Data",
 # UserData-root protections, and the alias->literal save migration.

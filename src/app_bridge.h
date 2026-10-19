@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 // app_bridge.h - C-linkage bridge between the mkxp-z engine and the
 // host UI layer. The only interface between them: UI never imports
 // engine headers (SDL, SharedState), engine never imports UI headers

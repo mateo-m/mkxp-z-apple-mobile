@@ -1,4 +1,7 @@
 #!/usr/bin/env ruby
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Case-semantics tests for windows_fs.rb: write-mode case
 # resolution, the live walk, the deletion-safe boot cache, the
 # "pathCache": false probe folding, and predicate parity across the

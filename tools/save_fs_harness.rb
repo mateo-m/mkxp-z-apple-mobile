@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Shared harness for the save-fs test files (test_save_fs.rb and
 # test_save_fs_case.rb). Workspace setup, windows_fs loading,
 # assertions, raw probes, and the device case-semantics emulation

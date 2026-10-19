@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # pokemon_compat.rb
 # Compatibility patches for Pokemon Essentials / Pokemon fangames.
 # Separated from platform_compat.rb to keep engine-generic code clean.

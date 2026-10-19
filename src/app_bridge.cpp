@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 // app_bridge.cpp - Minimal C bridge for host overlay to query engine state.
 // Kept separate from engine code. No UIKit imports. No game logic.
 

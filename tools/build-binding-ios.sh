@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Build mkxp<NN>-merged.o, the Ruby binding half of the engine, for one
 # Ruby version and one Apple SDK.
 #

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Graphics.delta unit compatibility for modern Pokemon Essentials.
 #
 # Upstream mkxp-z changed Graphics.delta from microseconds to seconds

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
+
 # Build the dependencies for one iOS SDK into deps/build-<sdk>-arm64.
 # The engine build (make mkxp-merged mkxp-core in deps) needs them.
 #
