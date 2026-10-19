@@ -1,0 +1,7 @@
+Liberation Sans, version 2.00.1
+Digitized data copyright (c) 2010 Google Corporation.
+Copyright (c) 2012 Red Hat, Inc.
+
+Liberation is a trademark of Red Hat, Inc. registered in U.S. Patent and Trademark Office and certain other jurisdictions.
+
+Licensed under the SIL Open Font License, Version 1.1. The license is at https://openfontlicense.org.

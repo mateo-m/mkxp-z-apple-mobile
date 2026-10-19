@@ -29,3 +29,6 @@ make -f "$SDK.make" ruby19 ruby18
 make -f "$SDK.make" "$LIB/libruby.3.1-static.a"
 make -f "$SDK.make" "$LIB/libruby.3.1-ext.a"
 make -f "$SDK.make" ruby-stdlib
+
+# The release packs this file in a job that has no source trees.
+ruby ../tools/licenses.rb write "build-$SDK-arm64/licenses.json"

@@ -1,0 +1,7 @@
+mkxp-z-apple-mobile, Copyright (C) 2026 Mateo M., https://github.com/mateo-m/mkxp-z-apple-mobile
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3, with the additional terms that section 7 of that license permits.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license is at https://www.gnu.org/licenses/gpl-3.0.html and in the LICENSE file of the source code. The additional terms are in the ADDITIONAL-TERMS.md file of the source code.

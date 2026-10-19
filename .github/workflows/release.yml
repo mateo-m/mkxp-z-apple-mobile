@@ -54,6 +54,7 @@ jobs:
           path: |
             deps/build-${{ matrix.sdk }}-arm64/lib
             deps/build-${{ matrix.sdk }}-arm64/ruby-stdlib
+            deps/build-${{ matrix.sdk }}-arm64/licenses.json
           if-no-files-found: error
           retention-days: 1
 

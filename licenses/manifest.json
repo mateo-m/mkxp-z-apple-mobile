@@ -1,0 +1,234 @@
+[
+  {
+    "name": "mkxp-z-apple-mobile",
+    "license": "GPL-3.0 with additional terms",
+    "archives": ["libmkxpz-core.a"],
+    "files": ["licenses/mkxp-z-apple-mobile.txt"]
+  },
+  {
+    "name": "mkxp-z",
+    "license": "GPL-2.0 or later",
+    "archives": ["libmkxpz-core.a", "mkxp*-merged.o"],
+    "files": ["licenses/mkxp-z.txt"]
+  },
+  {
+    "name": "theoraplay",
+    "license": "zlib License",
+    "files": ["src/theoraplay/LICENSE.txt"]
+  },
+  {
+    "name": "json5pp",
+    "license": "MIT",
+    "files": ["licenses/json5pp.txt"]
+  },
+  {
+    "name": "cpp-httplib",
+    "license": "MIT",
+    "files": ["licenses/cpp-httplib.txt"]
+  },
+  {
+    "name": "LUrlParser",
+    "license": "MIT",
+    "files": [{ "path": "src/net/LUrlParser.h", "from": "Copyright (C)", "to": "*/" }]
+  },
+  {
+    "name": "libnsgif",
+    "license": "MIT",
+    "files": ["licenses/libnsgif.txt"]
+  },
+  {
+    "name": "rapidcsv",
+    "license": "BSD 3-Clause",
+    "files": ["licenses/rapidcsv.txt"]
+  },
+  {
+    "name": "sigslot",
+    "license": "MIT",
+    "files": ["licenses/sigslot.txt"]
+  },
+  {
+    "name": "H-Mode7",
+    "license": "Terms of the original release",
+    "files": ["licenses/hmode7.txt"]
+  },
+  {
+    "name": "Ruby",
+    "license": "Ruby License / BSD 2-Clause",
+    "archives": ["mkxp*-merged.o"],
+    "files": [
+      "deps/sources/ruby/COPYING",
+      "deps/sources/ruby/BSDL",
+      "deps/sources/ruby19/COPYING",
+      "deps/sources/ruby18/COPYING"
+    ]
+  },
+  {
+    "name": "libyaml",
+    "license": "MIT",
+    "files": [{ "path": "deps/sources/ruby/LEGAL", "from": "Copyright (c) 2006:: Kirill Simonov", "to": "[ext/" }]
+  },
+  {
+    "name": "SDL2",
+    "license": "zlib License",
+    "archives": ["libSDL2.a"],
+    "files": [
+      "deps/sources/sdl2/LICENSE.txt",
+      "deps/sources/sdl2/src/hidapi/LICENSE.txt",
+      "deps/sources/sdl2/src/hidapi/LICENSE-bsd.txt",
+      "deps/sources/sdl2/src/video/yuv2rgb/LICENSE"
+    ]
+  },
+  {
+    "name": "SDL2_image",
+    "license": "zlib License",
+    "archives": ["libSDL2_image.a"],
+    "files": ["deps/sources/sdl2_image/LICENSE.txt"]
+  },
+  {
+    "name": "stb_image",
+    "license": "MIT or public domain",
+    "files": [
+      { "path": "deps/sources/sdl2_image/stb_image.h", "from": "This software is available under 2 licenses", "to": "*/" }
+    ]
+  },
+  {
+    "name": "miniz",
+    "license": "Public domain",
+    "files": [{ "path": "deps/sources/sdl2_image/miniz.h", "from": "This is free and unencumbered software", "to": "*/" }]
+  },
+  {
+    "name": "TinyJPEG",
+    "license": "Public domain",
+    "files": [{ "path": "deps/sources/sdl2_image/tiny_jpeg.h", "from": "This software is in the public domain", "to": "*/" }]
+  },
+  {
+    "name": "NanoSVG",
+    "license": "zlib License",
+    "files": [{ "path": "deps/sources/sdl2_image/nanosvg.h", "from": "Copyright (c) 2013-14 Mikko Mononen", "to": "*/" }]
+  },
+  {
+    "name": "QOI",
+    "license": "MIT",
+    "files": [{ "path": "deps/sources/sdl2_image/qoi.h", "from": "Copyright(c) 2021 Dominic Szablewski", "to": "-- About" }]
+  },
+  {
+    "name": "SDL2_sound",
+    "license": "zlib License",
+    "archives": ["libSDL2_sound.a"],
+    "files": ["deps/sources/sdl_sound/LICENSE.txt"]
+  },
+  {
+    "name": "dr_flac",
+    "license": "MIT-0 or public domain",
+    "files": [
+      { "path": "deps/sources/sdl_sound/src/dr_flac.h", "from": "This software is available as a choice", "to": "*/" }
+    ]
+  },
+  {
+    "name": "dr_mp3",
+    "license": "MIT-0 or public domain",
+    "files": [{ "path": "deps/sources/sdl_sound/src/dr_mp3.h", "from": "This software is available as a choice", "to": "*/" }]
+  },
+  {
+    "name": "stb_vorbis",
+    "license": "MIT or public domain",
+    "files": [
+      { "path": "deps/sources/sdl_sound/src/stb_vorbis.h", "from": "This software is available under 2 licenses", "to": "*/" }
+    ]
+  },
+  {
+    "name": "libmodplug",
+    "license": "Public domain",
+    "files": [
+      { "path": "deps/sources/sdl_sound/src/libmodplug/fastmix.c", "from": "This source code is public domain", "to": "*/" }
+    ]
+  },
+  {
+    "name": "SDL2_ttf",
+    "license": "zlib License",
+    "archives": ["libSDL2_ttf.a"],
+    "files": ["deps/sources/sdl2_ttf/COPYING.txt"]
+  },
+  {
+    "name": "FreeType",
+    "license": "FreeType License (FTL)",
+    "archives": ["libfreetype.a"],
+    "files": ["deps/sources/freetype/LICENSE.TXT", "deps/sources/freetype/docs/FTL.TXT"]
+  },
+  {
+    "name": "pixman",
+    "license": "MIT",
+    "archives": ["libpixman-1.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/pixman/COPYING"]
+  },
+  {
+    "name": "libogg",
+    "license": "BSD 3-Clause",
+    "archives": ["libogg.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/ogg/COPYING"]
+  },
+  {
+    "name": "libvorbis",
+    "license": "BSD 3-Clause",
+    "archives": ["libvorbis.a", "libvorbisfile.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/vorbis/COPYING"]
+  },
+  {
+    "name": "libtheora",
+    "license": "BSD 3-Clause",
+    "archives": ["libtheora.a", "libtheoradec.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/theora/COPYING", "deps/downloads/aarch64-apple-darwin/theora/LICENSE"]
+  },
+  {
+    "name": "PhysicsFS",
+    "license": "zlib License",
+    "archives": ["libphysfs.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/physfs/LICENSE.txt"]
+  },
+  {
+    "name": "uchardet",
+    "license": "MPL 1.1 / GPL 2.0 / LGPL 2.1",
+    "archives": ["libuchardet.a"],
+    "files": ["deps/downloads/aarch64-apple-darwin/uchardet/COPYING"]
+  },
+  {
+    "name": "OpenAL Soft",
+    "license": "LGPL 2.0 or later",
+    "archives": ["libopenal.a"],
+    "files": [
+      "deps/sources/openal-soft/COPYING",
+      "deps/sources/openal-soft/LICENSE-pffft",
+      "deps/sources/openal-soft/fmt-11.2.0/LICENSE",
+      "deps/sources/openal-soft/gsl/LICENSE"
+    ]
+  },
+  {
+    "name": "OpenSSL",
+    "license": "Apache License 2.0",
+    "archives": ["libssl.a", "libcrypto.a"],
+    "files": [
+      { "path": "deps/downloads/aarch64-apple-darwin/openssl-3.5.7/README.md", "from": "Copyright (c) 1998", "to": "<!--" },
+      "deps/downloads/aarch64-apple-darwin/openssl-3.5.7/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "Liberation fonts",
+    "license": "SIL Open Font License 1.1",
+    "files": ["licenses/liberation.txt"]
+  },
+  {
+    "name": "WenQuanYi Micro Hei",
+    "license": "Apache License 2.0",
+    "files": ["licenses/wqy-microhei.txt"]
+  },
+  {
+    "name": "SDL_GameControllerDB",
+    "license": "zlib License",
+    "files": ["licenses/gamecontrollerdb.txt"]
+  },
+  {
+    "name": "CA certificates",
+    "license": "MPL 2.0",
+    "files": ["licenses/cacert.txt"]
+  }
+]

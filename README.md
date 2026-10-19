@@ -80,6 +80,12 @@ file holds the libraries, the `app_bridge.h` header, the engine
 assets, the Ruby standard library, and a `LINK` file with the linker
 flags. A host links the libraries into its app with those flags.
 
+The file also holds `licenses.json`, the license notice of each
+library in the package, as `name`, `license` and `text`. Show the
+notices in the app. `tools/build-deps-ios.sh` writes the file from
+`licenses/manifest.json` and the source trees. `tools/package-ios.sh`
+fails when a library in the package has no entry in the manifest.
+
 A push of a `v*` tag runs the release workflow. It builds both SDKs
 and publishes `mkxp-z-ios.tar.gz` as a GitHub release, with its
 sha256 in the release notes.

@@ -1,0 +1,5 @@
+H-Mode7 Engine by MGC (MGCaladtogel), version 1.4.4, 2011.
+Heightmap cache by DerVVulfman.
+https://www.save-point.org/thread-3151.html
+
+The native port to mkxp-z comes from https://github.com/mateo-m/hmode7-apple-mobile. It is under the same terms as the original from save-point.org. The original release thread gives the licensing statement.

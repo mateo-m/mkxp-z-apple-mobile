@@ -1,0 +1,3 @@
+The CA certificate bundle (cacert.pem) holds certificate data from Mozilla. curl extracts it from the Mozilla source tree: https://curl.se/docs/caextract.html
+
+The bundle is under the same license as the Mozilla source file: Mozilla Public License, version 2.0. The license is at https://www.mozilla.org/MPL/2.0/.

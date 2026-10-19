@@ -42,6 +42,14 @@ libSDL2.a libSDL2_image.a libSDL2_sound.a libSDL2_ttf.a libfreetype.a
 libpixman-1.a libogg.a libvorbis.a libvorbisfile.a libtheora.a
 libtheoradec.a libphysfs.a libuchardet.a libopenal.a libssl.a libcrypto.a"
 
+# shellcheck disable=SC2086
+ruby "$ENGINE/tools/licenses.rb" check $LIBS
+LICENSES="$DEPS/build-iphoneos-arm64/licenses.json"
+if [ ! -f "$LICENSES" ]; then
+    echo "package-ios: $LICENSES missing. tools/build-deps-ios.sh writes it" >&2
+    exit 1
+fi
+
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxp-z-ios.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 
@@ -93,6 +101,7 @@ if [ "$COMPILED" = yes ]; then RGSS_MASK=7; else RGSS_MASK=3; fi
 mkdir -p "$STAGE/include" "$STAGE/assets/Shaders" "$STAGE/assets/Fonts" \
     "$STAGE/assets/Preload" "$STAGE/assets/Postload"
 cp "$ENGINE/src/app_bridge.h" "$STAGE/include/"
+cp "$LICENSES" "$STAGE/"
 cp "$ENGINE"/shader/*.frag "$ENGINE"/shader/*.vert "$ENGINE"/shader/*.h "$STAGE/assets/Shaders/"
 cp "$ENGINE"/assets/liberation.ttf "$ENGINE"/assets/wqymicrohei.ttf "$STAGE/assets/Fonts/"
 cp "$ENGINE"/assets/gamecontrollerdb.txt "$ENGINE"/assets/icon.png \
@@ -124,6 +133,6 @@ LINK
     echo "rgss_mask=$RGSS_MASK"
 } >"$STAGE/MANIFEST"
 
-tar -czf "$OUT" -C "$STAGE" MANIFEST LINK include assets iphoneos iphonesimulator
+tar -czf "$OUT" -C "$STAGE" MANIFEST LINK licenses.json include assets iphoneos iphonesimulator
 echo "package-ios: $OUT"
 shasum -a 256 "$OUT"
