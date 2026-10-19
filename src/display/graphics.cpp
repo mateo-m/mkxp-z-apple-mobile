@@ -1318,7 +1318,7 @@ void Graphics::update(bool checkForShutdown) {
     if (p->last_update > 0) {
         p->last_delta = now - p->last_update;
     } else if (p->frameRate > 0) {
-        p->last_delta = 1000000.0 / p->frameRate;
+        p->last_delta = 1.0 / p->frameRate;
     } else {
         p->last_delta = 0;
     }
