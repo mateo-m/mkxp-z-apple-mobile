@@ -157,6 +157,9 @@ ruby tests/script-folder/pack_scripts.rb
 tools/run-engine-tests.sh --game tests/script-folder
 ```
 
+The split is in `scripts/preload/script_folder_split.rb`.
+`tools/test_script_folder.rb` tests it on the host, with no simulator.
+
 ## The test host
 
 `host/` is the app that runs `engine/`. It is a shim, not a launcher:

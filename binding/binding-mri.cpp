@@ -1626,49 +1626,22 @@ static long lastCodeSection(VALUE scriptArray) {
     return index;
 }
 
-// The script extractor of Essentials v21 games (Pokemon Re:Union) leaves
-// one section that defines load_scripts_from_folder and calls it on
-// Data/Scripts, and the last file it evals runs the game loop. The
-// postloads would then run before any game class exists. Split that
-// section into the loader's definitions plus one section per file, in
-// the loader's order: the files of a folder by name, then its
-// subfolders by name. Returns nil when the section is not that loader.
+static VALUE expandScriptFolderBody(VALUE args) {
+    VALUE mod = rb_const_get(rb_cObject, rb_intern("MKXPScriptFolder"));
+    return rb_funcall(mod, rb_intern("expand"), 2,
+                      rb_ary_entry(args, 0), rb_ary_entry(args, 1));
+}
+
+// See scripts/preload/script_folder_split.rb. Returns nil when the
+// section at mainIndex is not the Data/Scripts loader.
 static VALUE expandScriptFolderLoader(VALUE scriptArray, long mainIndex) {
-    VALUE section = rb_ary_entry(scriptArray, mainIndex);
-    if (!RB_TYPE_P(section, RUBY_T_ARRAY))
-        return Qnil;
-    VALUE code = rb_ary_entry(section, 3);
-    if (!RB_TYPE_P(code, RUBY_T_STRING) ||
-        !strstr(RSTRING_PTR(code), "load_scripts_from_folder"))
+    if (!rb_const_defined(rb_cObject, rb_intern("MKXPScriptFolder")))
         return Qnil;
 
-    rb_gv_set("$__mkxp_scripts", scriptArray);
-    rb_gv_set("$__mkxp_main_index", LONG2NUM(mainIndex));
     int state = 0;
-    VALUE expanded = rb_eval_string_protect(
-        "scripts = $__mkxp_scripts\n"
-        "i = $__mkxp_main_index\n"
-        "code = scripts[i][3]\n"
-        "call = /^[ \\t]*load_scripts_from_folder\\([ \\t]*([\"'])Data\\/Scripts\\1[ \\t]*\\)[ \\t]*\\r?$/\n"
-        "if code =~ /^[ \\t]*def load_scripts_from_folder\\b/ && code =~ call\n"
-        "  files = []\n"
-        "  walk = lambda do |path|\n"
-        "    entries = Dir.entries(path) - ['.', '..']\n"
-        "    folders, names = entries.partition { |f| File.directory?(path + '/' + f) }\n"
-        "    names.sort.each do |f|\n"
-        "      files << [0, f, '', File.open(path + '/' + f, 'r') { |io| io.read }]\n"
-        "    end\n"
-        "    folders.sort.each { |f| walk.call(path + '/' + f) }\n"
-        "  end\n"
-        "  walk.call('Data/Scripts')\n"
-        "  main = scripts[i].dup\n"
-        "  main[3] = code.sub(call, '')\n"
-        "  scripts[0, i] + [main] + files + scripts[i + 1..-1]\n"
-        "end\n",
-        &state);
-    rb_gv_set("$__mkxp_scripts", Qnil);
-    rb_gv_set("$__mkxp_main_index", Qnil);
-
+    VALUE expanded = rb_protect(expandScriptFolderBody,
+                                rb_assoc_new(scriptArray, LONG2NUM(mainIndex)),
+                                &state);
     if (state) {
         VALUE exc = rb_gv_get("$!");
         VALUE msg = exc == Qnil ? Qnil : rb_funcall(exc, rb_intern("message"), 0);
@@ -1823,6 +1796,13 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
     
     
+    mkxp::ScriptBootstrap::loadEnginePreloads();
+    mkxp::ScriptBootstrap::loadConfigPreloadScripts(conf);
+    
+    VALUE exc = rb_gv_get("$!");
+    if (exc != Qnil)
+        return;
+
     long mainIndex = lastCodeSection(scriptArray);
     VALUE expanded = expandScriptFolderLoader(scriptArray, mainIndex);
     if (expanded != Qnil) {
@@ -1832,13 +1812,6 @@ static void runRMXPScripts(BacktraceData &btData) {
         scriptCount = RARRAY_LEN(scriptArray);
         mainIndex = lastCodeSection(scriptArray);
     }
-
-    mkxp::ScriptBootstrap::loadEnginePreloads();
-    mkxp::ScriptBootstrap::loadConfigPreloadScripts(conf);
-    
-    VALUE exc = rb_gv_get("$!");
-    if (exc != Qnil)
-        return;
     
     while (true) {
         for (long i = 0; i < scriptCount; ++i) {
