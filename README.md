@@ -118,7 +118,13 @@ When you open a PR:
 
 ## License
 
-[GPLv2+](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html), matching upstream.
+Copyright (C) 2026 Mateo M. for the files that say so in their header.
+
+- Code from upstream mkxp-z and from other projects keeps its own license. Most of it is under [GPLv2+](COPYING).
+- The iOS and multi-Ruby code that Mateo M. wrote is under the [GPLv3](LICENSE), with [additional terms](ADDITIONAL-TERMS.md) that GPLv3 section 7 permits. Each of these files says so in its header.
+- Because of this, a build of the whole engine is under the GPLv3. Upstream mkxp-z permits this, because its license is GPLv2 "or any later version".
+
+If you ship this engine in an app, keep the text "mkxp-z-apple-mobile, Copyright (C) 2026 Mateo M., https://github.com/mateo-m/mkxp-z-apple-mobile" on the licenses or credits screen of the app, and do not say that you wrote this code. Versions before this change are under GPLv2+.
 
 ## Credits
 
