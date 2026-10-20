@@ -102,8 +102,8 @@ static std::atomic<float> s_vpBoundsG{0};
 static std::atomic<float> s_vpBoundsB{0};
 static std::atomic<float> s_vpBoundsA{1};
 
-// Cheat menu toggle. Polled by a Ruby bridge helper that keeps
-// $CHEATS in sync so cheat scripts pick up UI toggles immediately.
+// Cheat menu toggle. The cheat scripts read it through
+// MKXP.cheats_enabled? each time the player opens the menu.
 static std::atomic<bool>  s_cheatsEnabled{false};
 
 // When false, EventThread discards SDL_CONTROLLER* events so a host

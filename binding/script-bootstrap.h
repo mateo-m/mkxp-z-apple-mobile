@@ -31,7 +31,7 @@ void loadEnginePreloads();
 void loadConfigPreloadScripts(const Config &conf);
 void loadConfigPostloadScripts(const Config &conf);
 void loadEnginePostloadsBeforeMain();
-void loadCheatPostloadAndPoller();
+void loadCheatPostload();
 
 } // namespace ScriptBootstrap
 } // namespace mkxp

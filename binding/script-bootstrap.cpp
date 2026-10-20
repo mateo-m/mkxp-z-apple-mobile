@@ -286,7 +286,7 @@ void loadEnginePostloadsBeforeMain() {
         runBundledScript("Postload", enginePostloads[p], "POSTLOAD");
 }
 
-void loadCheatPostloadAndPoller() {
+void loadCheatPostload() {
     int cheatRgssVer = shState->rtData().config.rgssVersion;
     bool isPE = false;
     {
@@ -312,36 +312,6 @@ void loadCheatPostloadAndPoller() {
         return;
 
     runBundledScript("Postload", cheatScript, "POSTLOAD");
-
-    int pollState = 0;
-    rb_eval_string_protect(
-        "$CHEATS = MKXP.cheats_enabled?\n"
-        "module Input\n"
-        "  unless respond_to?(:_mkxp_cheat_orig_update)\n"
-        "    class << self\n"
-        "      alias_method :_mkxp_cheat_orig_update, :update\n"
-        "    end\n"
-        "    def self.update\n"
-        "      _mkxp_cheat_orig_update\n"
-        "      $CHEATS = MKXP.cheats_enabled?\n"
-        "    end\n"
-        "  end\n"
-        "end\n",
-        &pollState);
-    if (pollState) {
-#if RAPI_FULL > 187
-        VALUE pollExc = rb_errinfo();
-#else
-        VALUE pollExc = rb_gv_get("$!");
-#endif
-        if (pollExc != Qnil) {
-            VALUE msg = rb_funcall(pollExc, rb_intern("message"), 0);
-            Debug() << "Error installing cheat-poller:" << StringValueCStr(msg);
-            rb_set_errinfo(Qnil);
-        } else {
-            Debug() << "Error installing cheat-poller";
-        }
-    }
 }
 
 } // namespace ScriptBootstrap

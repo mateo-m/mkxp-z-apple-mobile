@@ -929,8 +929,6 @@ RB_METHOD(mkxpIsReallyWindowsHost) {
     return rb_bool_new(false);
 }
 
-/* MKXP.cheats_enabled? - reads the live bridge flag so the Ruby-side
-   cheat menu can sync $CHEATS with the UI toggle each frame. */
 RB_METHOD(mkxpCheatsEnabled) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getCheatsEnabled());
@@ -1756,7 +1754,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             
             if (i == mainIndex) {
                 mkxp::ScriptBootstrap::loadEnginePostloadsBeforeMain();
-                mkxp::ScriptBootstrap::loadCheatPostloadAndPoller();
+                mkxp::ScriptBootstrap::loadCheatPostload();
             }
             
             VALUE script = rb_ary_entry(scriptArray, i);

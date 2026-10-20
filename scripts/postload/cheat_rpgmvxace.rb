@@ -2,7 +2,7 @@
 #
 # Ported from JoiPlay's cheat_rpgmvxace.rb. Loaded by
 # cheat_dispatch.rb when the RGSS version is 3. Menu is triggered
-# in-game by pressing Input::HOME while $CHEATS is true.
+# in-game by pressing Input::HOME while MKXP.cheats_enabled? is true.
 #
 # Features: level up current player actor (x1, x5, x10, x100),
 # gain gold, add items / weapons / armors via SceneManager.
@@ -85,7 +85,7 @@ if defined?(Game_Player) && Game_Player.method_defined?(:update)
     alias cheat_update update unless method_defined?(:cheat_update)
     def update
       cheat_update
-      return unless Input.trigger?(Input::HOME) && $CHEATS
+      return unless Input.trigger?(Input::HOME) && MKXP.cheats_enabled?
 
       Sound.play_ok
       SceneManager.call(Scene_Cheat)
