@@ -1595,6 +1595,64 @@ static void logRubyError(const char *type, const char *detail) {
  * the "game has ended" message. */
 static int s_scriptsExecutedThisSession = 0;
 
+// Some games end with empty sections after Main (Hello Charlotte EP1).
+// Main never returns, so postloads must run before the last section
+// that has code, not only comments.
+static long lastCodeSection(VALUE scriptArray) {
+    long index = RARRAY_LEN(scriptArray) - 1;
+    while (index > 0) {
+        VALUE script = rb_ary_entry(scriptArray, index);
+        if (RB_TYPE_P(script, RUBY_T_ARRAY)) {
+            VALUE code = rb_ary_entry(script, 3);
+            if (RB_TYPE_P(code, RUBY_T_STRING) &&
+                rubySourceHasCode(RSTRING_PTR(code), RSTRING_LEN(code)))
+                break;
+        }
+        --index;
+    }
+    return index;
+}
+
+static VALUE expandScriptFolderBody(VALUE args) {
+    VALUE mod = rb_const_get(rb_cObject, rb_intern("MKXPScriptFolder"));
+    return rb_funcall(mod, rb_intern("expand"), 2,
+                      rb_ary_entry(args, 0), rb_ary_entry(args, 1));
+}
+
+// See scripts/preload/script_folder_split.rb. Returns nil when the
+// section at mainIndex is not the Data/Scripts loader.
+static VALUE expandScriptFolderLoader(VALUE scriptArray, long mainIndex) {
+    if (!rb_const_defined(rb_cObject, rb_intern("MKXPScriptFolder")))
+        return Qnil;
+
+    int state = 0;
+    VALUE expanded = rb_protect(expandScriptFolderBody,
+                                rb_assoc_new(scriptArray, LONG2NUM(mainIndex)),
+                                &state);
+    if (state) {
+        VALUE exc = rb_gv_get("$!");
+        VALUE msg = exc == Qnil ? Qnil : rb_funcall(exc, rb_intern("message"), 0);
+        char message[512];
+        snprintf(message, sizeof(message),
+                 "Data/Scripts loader split failed, the section runs whole: %s: %.*s",
+                 exc == Qnil ? "unknown error" : rb_class2name(rb_obj_class(exc)),
+                 RB_TYPE_P(msg, RUBY_T_STRING) ? (int)RSTRING_LEN(msg) : 0,
+                 RB_TYPE_P(msg, RUBY_T_STRING) ? RSTRING_PTR(msg) : "");
+        logRubyError("SCRIPTS", message);
+        rb_set_errinfo(Qnil);
+        return Qnil;
+    }
+    if (!RB_TYPE_P(expanded, RUBY_T_ARRAY))
+        return Qnil;
+
+    char message[128];
+    snprintf(message, sizeof(message),
+             "split the Data/Scripts loader into %ld sections",
+             RARRAY_LEN(expanded) - RARRAY_LEN(scriptArray) + 1);
+    mkxp_debugLog("SCRIPTS", "binding-mri.cpp [C++]", message);
+    return expanded;
+}
+
 static void runRMXPScripts(BacktraceData &btData) {
     const Config &conf = shState->rtData().config;
     const std::string &scriptPack = conf.game.scripts;
@@ -1725,27 +1783,22 @@ static void runRMXPScripts(BacktraceData &btData) {
     }
     
     
-    // Some games end with empty sections after Main (Hello Charlotte EP1).
-    // Main never returns, so postloads must run before the last section
-    // that has code, not only comments.
-    long mainIndex = scriptCount - 1;
-    while (mainIndex > 0) {
-        VALUE script = rb_ary_entry(scriptArray, mainIndex);
-        if (RB_TYPE_P(script, RUBY_T_ARRAY)) {
-            VALUE code = rb_ary_entry(script, 3);
-            if (RB_TYPE_P(code, RUBY_T_STRING) &&
-                rubySourceHasCode(RSTRING_PTR(code), RSTRING_LEN(code)))
-                break;
-        }
-        --mainIndex;
-    }
-
     mkxp::ScriptBootstrap::loadEnginePreloads();
     mkxp::ScriptBootstrap::loadConfigPreloadScripts(conf);
     
     VALUE exc = rb_gv_get("$!");
     if (exc != Qnil)
         return;
+
+    long mainIndex = lastCodeSection(scriptArray);
+    VALUE expanded = expandScriptFolderLoader(scriptArray, mainIndex);
+    if (expanded != Qnil) {
+        // $RGSS_SCRIPTS keeps the packed sections: the Essentials
+        // translation tool inflates each one's [2].
+        scriptArray = expanded;
+        scriptCount = RARRAY_LEN(scriptArray);
+        mainIndex = lastCodeSection(scriptArray);
+    }
     
     while (true) {
         for (long i = 0; i < scriptCount; ++i) {

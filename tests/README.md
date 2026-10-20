@@ -141,6 +141,25 @@ off:
 tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31
 ```
 
+## Script folder
+
+`script-folder/` is a game whose one `Scripts.rxdata` section evals
+every file of `Data/Scripts`, the way the Essentials v21 script
+extractor leaves a game. The last of those files runs the game, so
+the engine splits that section into one section per file and runs the
+postloads before the last one. The suite checks that the postloads
+see the classes of `Data/Scripts`, that the files keep the order of
+the loader, and that `$RGSS_SCRIPTS` still holds the sections of
+`Scripts.rxdata`:
+
+```sh
+ruby tests/script-folder/pack_scripts.rb
+tools/run-engine-tests.sh --game tests/script-folder
+```
+
+The split is in `scripts/preload/script_folder_split.rb`.
+`tools/test_script_folder.rb` tests it on the host, with no simulator.
+
 ## The test host
 
 `host/` is the app that runs `engine/`. It is a shim, not a launcher:

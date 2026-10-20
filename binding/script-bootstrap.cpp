@@ -216,6 +216,7 @@ void loadEnginePreloads() {
         "mkxp_wrap",
         "http_compat",
         "net_http_compat",
+        "script_folder_split",
         nullptr
     };
 
