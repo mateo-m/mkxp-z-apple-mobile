@@ -110,10 +110,6 @@ int rb_stack_growup_p(volatile VALUE *addr);
 #include <SDL_messagebox.h>
 #include <SDL_power.h>
 
-extern const char module_rpg1[];
-extern const char module_rpg2[];
-extern const char module_rpg3[];
-
 static void mriBindingExecute();
 static void mriBindingTerminate();
 static void mriBindingReset();
@@ -535,14 +531,7 @@ static void mriBindingInit() {
     _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
     _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
     
-    if (rgssVer == 1)
-        rb_eval_string(module_rpg1);
-    else if (rgssVer == 2)
-        rb_eval_string(module_rpg2);
-    else if (rgssVer == 3)
-        rb_eval_string(module_rpg3);
-    else
-        assert(!"unreachable");
+    mkxp::ScriptBootstrap::loadRpgModule(rgssVer);
     
     VALUE mod = rb_define_module("System");
     _rb_define_module_function(mod, "delta", mkxpDelta);
@@ -940,8 +929,6 @@ RB_METHOD(mkxpIsReallyWindowsHost) {
     return rb_bool_new(false);
 }
 
-/* MKXP.cheats_enabled? - reads the live bridge flag so the Ruby-side
-   cheat menu can sync $CHEATS with the UI toggle each frame. */
 RB_METHOD(mkxpCheatsEnabled) {
     RB_UNUSED_PARAM;
     return rb_bool_new(mkxp_getCheatsEnabled());
@@ -1820,7 +1807,7 @@ static void runRMXPScripts(BacktraceData &btData) {
             
             if (i == mainIndex) {
                 mkxp::ScriptBootstrap::loadEnginePostloadsBeforeMain();
-                mkxp::ScriptBootstrap::loadCheatPostloadAndPoller();
+                mkxp::ScriptBootstrap::loadCheatPostload();
             }
             
             VALUE script = rb_ary_entry(scriptArray, i);
@@ -2039,18 +2026,13 @@ static VALUE exceptionDetailMessage(VALUE exc) {
             return em;
     }
 
-    {
-        int state = 0;
-        rb_gv_set("$__mkxp_exc", exc);
-        VALUE detail = rb_eval_string_protect(
-            "begin; defined?(pbGetExceptionMessage) ? pbGetExceptionMessage($__mkxp_exc) : nil; "
-            "ensure; $__mkxp_exc = nil; end",
-            &state);
-        if (!state && !NIL_P(detail) && RB_TYPE_P(detail, T_STRING) &&
-            RSTRING_LEN(detail) > 0)
+    // Pokemon Essentials defines pbGetExceptionMessage at the top
+    // level, which makes it a private method of Object.
+    ID getMessage = rb_intern("pbGetExceptionMessage");
+    if (rb_method_boundp(rb_cObject, getMessage, 0)) {
+        VALUE detail = protectedCall(rb_cObject, getMessage, 1, &exc);
+        if (RB_TYPE_P(detail, T_STRING) && RSTRING_LEN(detail) > 0)
             return detail;
-        if (state)
-            rb_set_errinfo(Qnil);
     }
 
     /* Exception#full_message takes keyword arguments only; a

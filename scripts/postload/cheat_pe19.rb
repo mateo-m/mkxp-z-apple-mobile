@@ -3,7 +3,7 @@
 # Ported from JoiPlay's cheat_pe19.rb. Loaded by cheat_dispatch.rb
 # when the game is detected as Pokemon Essentials (PBItems or
 # GameData::Item constant is defined). The menu is triggered
-# in-game by pressing Input::HOME while $CHEATS is true.
+# in-game by pressing Input::HOME while MKXP.cheats_enabled? is true.
 #
 # Features: heal party, get items (reuses PokemonMart screen with a
 # zero-price adapter), walk-through-walls toggle ($wtw).
@@ -143,7 +143,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
   class Scene_Map
     alias cheatUpdateMaps updateMaps unless method_defined?(:cheatUpdateMaps)
     def updateMaps
-      if Input.trigger?(Input::HOME) && $CHEATS
+      if Input.trigger?(Input::HOME) && MKXP.cheats_enabled?
         $game_temp.menu_calling = false if $game_temp
         $game_temp.in_menu = true if $game_temp && $game_temp.respond_to?(:in_menu=)
         $game_player.straighten if $game_player

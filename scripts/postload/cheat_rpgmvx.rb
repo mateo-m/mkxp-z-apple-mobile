@@ -2,7 +2,7 @@
 #
 # Ported from JoiPlay's cheat_rpgmvx.rb. Loaded by cheat_dispatch.rb
 # when the RGSS version is 2. Menu is triggered in-game by pressing
-# Input::HOME while $CHEATS is true.
+# Input::HOME while MKXP.cheats_enabled? is true.
 #
 # Features: level up party member 0 (x1, x5, x10, x100), gain gold,
 # add items/weapons/armors with a number-picker window.
@@ -295,7 +295,7 @@ if defined?(Game_Player) && Game_Player.method_defined?(:update)
     alias cheat_update update unless method_defined?(:cheat_update)
     def update
       cheat_update
-      return unless Input.trigger?(Input::HOME) && $CHEATS
+      return unless Input.trigger?(Input::HOME) && MKXP.cheats_enabled?
 
       $scene = Scene_Cheat.new
     end

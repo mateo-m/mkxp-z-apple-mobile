@@ -21,6 +21,7 @@
 #include "util/util.h"
 #include "filesystem/filesystem.h"
 
+#include <cassert>
 #include <cctype>
 #include <string>
 #include <vector>
@@ -185,6 +186,12 @@ static void setLauncherIdentityGlobals() {
         rb_gv_set(("$" + identity).c_str(), Qtrue);
 }
 
+void loadRpgModule(int rgssVersion) {
+    static const char *const modules[] = {"rpg_xp", "rpg_vx", "rpg_vxace"};
+    assert(rgssVersion >= 1 && rgssVersion <= 3);
+    runBundledScript("Preload", modules[rgssVersion - 1], "PRELOAD");
+}
+
 void loadEnginePreloads() {
     setLauncherIdentityGlobals();
 
@@ -280,16 +287,10 @@ void loadEnginePostloadsBeforeMain() {
         runBundledScript("Postload", enginePostloads[p], "POSTLOAD");
 }
 
-void loadCheatPostloadAndPoller() {
+void loadCheatPostload() {
     int cheatRgssVer = shState->rtData().config.rgssVersion;
-    bool isPE = false;
-    {
-        int st = 0;
-        VALUE pe = rb_eval_string_protect(
-            "Object.const_defined?(:GameData) || Object.const_defined?(:PBItems)",
-            &st);
-        if (!st && pe != Qnil && pe != Qfalse) isPE = true;
-    }
+    bool isPE = rb_const_defined(rb_cObject, rb_intern("GameData")) ||
+                rb_const_defined(rb_cObject, rb_intern("PBItems"));
 
     const char *cheatScript = nullptr;
     if (isPE) {
@@ -306,36 +307,6 @@ void loadCheatPostloadAndPoller() {
         return;
 
     runBundledScript("Postload", cheatScript, "POSTLOAD");
-
-    int pollState = 0;
-    rb_eval_string_protect(
-        "$CHEATS = MKXP.cheats_enabled?\n"
-        "module Input\n"
-        "  unless respond_to?(:_mkxp_cheat_orig_update)\n"
-        "    class << self\n"
-        "      alias_method :_mkxp_cheat_orig_update, :update\n"
-        "    end\n"
-        "    def self.update\n"
-        "      _mkxp_cheat_orig_update\n"
-        "      $CHEATS = MKXP.cheats_enabled?\n"
-        "    end\n"
-        "  end\n"
-        "end\n",
-        &pollState);
-    if (pollState) {
-#if RAPI_FULL > 187
-        VALUE pollExc = rb_errinfo();
-#else
-        VALUE pollExc = rb_gv_get("$!");
-#endif
-        if (pollExc != Qnil) {
-            VALUE msg = rb_funcall(pollExc, rb_intern("message"), 0);
-            Debug() << "Error installing cheat-poller:" << StringValueCStr(msg);
-            rb_set_errinfo(Qnil);
-        } else {
-            Debug() << "Error installing cheat-poller";
-        }
-    }
 }
 
 } // namespace ScriptBootstrap

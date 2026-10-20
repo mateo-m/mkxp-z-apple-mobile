@@ -525,9 +525,9 @@ bool mkxp_getNetworkEnabled(void);
 void        mkxp_setShowViewportBounds(bool enabled);
 bool        mkxp_getShowViewportBounds(void);
 
-// Cheat menu toggle (UI -> Engine). The postload layer reads the
-// current value each update. Ruby reassigns $CHEATS from the bridge
-// so the toggle takes effect mid-game without re-entering scripts.
+// Cheat menu toggle (UI -> Engine). The cheat scripts read the
+// current value each time the player opens the menu, so the toggle
+// takes effect mid-game.
 void        mkxp_setCheatsEnabled(bool enabled);
 bool        mkxp_getCheatsEnabled(void);
 
