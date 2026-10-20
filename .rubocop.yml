@@ -24,6 +24,9 @@ AllCops:
     - deps/**/*
     - src/**/*
     - binding/**/*
+    # RPG Maker's built-in classes, kept as RPG Maker wrote them.
+    # tools/test_rpg_modules.rb loads them.
+    - scripts/preload/rpg_*.rb
     # `bundle install --path vendor/bundle` (used by ruby/setup-ruby's
     # bundler-cache) drops gem files under vendor/, which rubocop
     # would otherwise lint (some have Ruby shebangs even without

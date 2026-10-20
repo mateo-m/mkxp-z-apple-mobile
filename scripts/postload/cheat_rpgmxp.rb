@@ -3,7 +3,7 @@
 # Ported from the non-Pokemon branch of JoiPlay's cheat_rpgmxp.rb.
 # Loaded by cheat_dispatch.rb when the RGSS version is 1 and the
 # project is not a Pokemon Essentials game. Menu is triggered
-# in-game by pressing Input::HOME while $CHEATS is true.
+# in-game by pressing Input::HOME while MKXP.cheats_enabled? is true.
 #
 # Features: level up actor[0] (x1, x5, x10, x100), gain gold,
 # add items/weapons/armors via a custom Window_GetItem.
@@ -317,7 +317,7 @@ if defined?(Game_Player) && Game_Player.method_defined?(:update)
     alias cheat_update update unless method_defined?(:cheat_update)
     def update
       cheat_update
-      return unless Input.trigger?(Input::HOME) && $CHEATS
+      return unless Input.trigger?(Input::HOME) && MKXP.cheats_enabled?
 
       $scene = Scene_Cheat.new
     end

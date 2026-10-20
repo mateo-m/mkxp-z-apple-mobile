@@ -20,7 +20,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('ruby-compat', 6)
+EngineTest.suite('ruby-compat', 7)
 
 # A path with no per-cent sign in it, and a spare argument after it.
 # Pokemon Essentials writes many calls in this shape.
@@ -77,6 +77,12 @@ EngineTest.test('sprintf still fills the directives it has') do
     EngineTest.assert_equal('a 2', sprintf('%s %d', 'a', 2), 'sprintf with directives')
     # rubocop:enable Style/FormatString, Style/RedundantFormat, Style/FormatStringToken
   end
+end
+
+# The engine loads RPG Maker's built-in classes from
+# scripts/preload/rpg_*.rb. A file that fails to load only logs.
+EngineTest.test('the RPG module of the game loads') do
+  EngineTest.assert_equal(true, RPG.const_defined?(:Map), 'RPG::Map')
 end
 
 EngineTest.finish
