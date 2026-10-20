@@ -288,14 +288,8 @@ void loadEnginePostloadsBeforeMain() {
 
 void loadCheatPostload() {
     int cheatRgssVer = shState->rtData().config.rgssVersion;
-    bool isPE = false;
-    {
-        int st = 0;
-        VALUE pe = rb_eval_string_protect(
-            "Object.const_defined?(:GameData) || Object.const_defined?(:PBItems)",
-            &st);
-        if (!st && pe != Qnil && pe != Qfalse) isPE = true;
-    }
+    bool isPE = rb_const_defined(rb_cObject, rb_intern("GameData")) ||
+                rb_const_defined(rb_cObject, rb_intern("PBItems"));
 
     const char *cheatScript = nullptr;
     if (isPE) {

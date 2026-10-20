@@ -1973,18 +1973,13 @@ static VALUE exceptionDetailMessage(VALUE exc) {
             return em;
     }
 
-    {
-        int state = 0;
-        rb_gv_set("$__mkxp_exc", exc);
-        VALUE detail = rb_eval_string_protect(
-            "begin; defined?(pbGetExceptionMessage) ? pbGetExceptionMessage($__mkxp_exc) : nil; "
-            "ensure; $__mkxp_exc = nil; end",
-            &state);
-        if (!state && !NIL_P(detail) && RB_TYPE_P(detail, T_STRING) &&
-            RSTRING_LEN(detail) > 0)
+    // Pokemon Essentials defines pbGetExceptionMessage at the top
+    // level, which makes it a private method of Object.
+    ID getMessage = rb_intern("pbGetExceptionMessage");
+    if (rb_method_boundp(rb_cObject, getMessage, 0)) {
+        VALUE detail = protectedCall(rb_cObject, getMessage, 1, &exc);
+        if (RB_TYPE_P(detail, T_STRING) && RSTRING_LEN(detail) > 0)
             return detail;
-        if (state)
-            rb_set_errinfo(Qnil);
     }
 
     /* Exception#full_message takes keyword arguments only; a
