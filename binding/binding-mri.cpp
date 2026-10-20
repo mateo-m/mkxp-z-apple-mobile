@@ -110,10 +110,6 @@ int rb_stack_growup_p(volatile VALUE *addr);
 #include <SDL_messagebox.h>
 #include <SDL_power.h>
 
-extern const char module_rpg1[];
-extern const char module_rpg2[];
-extern const char module_rpg3[];
-
 static void mriBindingExecute();
 static void mriBindingTerminate();
 static void mriBindingReset();
@@ -535,14 +531,7 @@ static void mriBindingInit() {
     _rb_define_module_function(rb_mKernel, "msgbox", mriPrint);
     _rb_define_module_function(rb_mKernel, "msgbox_p", mriP);
     
-    if (rgssVer == 1)
-        rb_eval_string(module_rpg1);
-    else if (rgssVer == 2)
-        rb_eval_string(module_rpg2);
-    else if (rgssVer == 3)
-        rb_eval_string(module_rpg3);
-    else
-        assert(!"unreachable");
+    mkxp::ScriptBootstrap::loadRpgModule(rgssVer);
     
     VALUE mod = rb_define_module("System");
     _rb_define_module_function(mod, "delta", mkxpDelta);

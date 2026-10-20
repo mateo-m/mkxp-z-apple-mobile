@@ -26,6 +26,7 @@ void setEvalReceiver(void *self);
 /** Load a user-supplied script path from disk. */
 void runConfigScript(const std::string &path, bool showDialogOnMissing);
 
+void loadRpgModule(int rgssVersion);
 void loadEnginePreloads();
 void loadConfigPreloadScripts(const Config &conf);
 void loadConfigPostloadScripts(const Config &conf);

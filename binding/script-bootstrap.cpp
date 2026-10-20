@@ -21,6 +21,7 @@
 #include "util/util.h"
 #include "filesystem/filesystem.h"
 
+#include <cassert>
 #include <cctype>
 #include <string>
 #include <vector>
@@ -183,6 +184,12 @@ static void setLauncherIdentityGlobals() {
                        || identity[i] == '_';
     if (validIdentifier)
         rb_gv_set(("$" + identity).c_str(), Qtrue);
+}
+
+void loadRpgModule(int rgssVersion) {
+    static const char *const modules[] = {"rpg_xp", "rpg_vx", "rpg_vxace"};
+    assert(rgssVersion >= 1 && rgssVersion <= 3);
+    runBundledScript("Preload", modules[rgssVersion - 1], "PRELOAD");
 }
 
 void loadEnginePreloads() {
