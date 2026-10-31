@@ -496,6 +496,59 @@ module IOS
   # rubocop:enable Style/MutableConstant
   ERROR_SUFFIX_RE = /(?:Error|Err|Exception|Failure)\z/.freeze
   PB_DATA_TABLE_RE = /\APB[A-Z]/.freeze
+  TOP_LEVEL_CONSTANT_RE = /^(?:(?:class|module)[ \t]+([A-Z]\w*)(?![\w:])|([A-Z]\w*)[ \t]*=(?![=~>]))/.freeze
+  SECTION_FRAME_RE = /\A(?:(\d+):|Section(\d+):|\{(\d+)\}:)/.freeze
+
+  # Name => index of the first section that declares it at column 0.
+  # The VM outlives a game, so the table follows $RGSS_SCRIPTS.
+  def self.game_constant_sections
+    scripts = $RGSS_SCRIPTS
+    return @game_constant_sections if @game_constant_sections && @game_constant_sections_for.equal?(scripts)
+
+    @game_constant_sections_for = scripts
+    @game_constant_sections = {}
+    return @game_constant_sections unless scripts.is_a?(Array)
+
+    scripts.each_with_index do |script, index|
+      code = script[3] if script.is_a?(Array)
+      next unless code.is_a?(String)
+
+      code = code.dup.force_encoding('BINARY') if code.respond_to?(:force_encoding)
+      code.scan(TOP_LEVEL_CONSTANT_RE) do |declared, assigned|
+        @game_constant_sections[declared || assigned] ||= index
+      end
+    end
+    @game_constant_sections
+  end
+
+  # The section that the engine evals now: the outermost frame named
+  # like one. Nil outside the sections, for example in a postload.
+  def self.running_section
+    index = nil
+    caller.each do |frame|
+      match = SECTION_FRAME_RE.match(frame)
+      index = (match[1] || match[2] || match[3]).to_i if match
+    end
+    index
+  end
+
+  # Windows raises NameError for a game constant whose section has not
+  # run yet, and games rescue it to take a fallback (Pokemon GS Vitro
+  # picks the language before its language scene class loads). Once
+  # the section ran, a missing constant means the section failed on
+  # iOS, and the stub stands in for it.
+  def self.game_constant_not_loaded_yet?(name)
+    sections = game_constant_sections
+    section = sections[name.to_s]
+    return false unless section
+
+    running = running_section
+    return false unless running
+    return true if section > running
+
+    sections.delete(name.to_s)
+    false
+  end
 end
 
 class Module
@@ -506,6 +559,7 @@ class Module
 
   def const_missing(name)
     return _mkxp_orig_const_missing(name) unless Object.const_defined?(:IOS)
+    return _mkxp_orig_const_missing(name) if ::IOS.game_constant_not_loaded_yet?(name)
 
     # Pokemon Essentials keeps its data tables in PB* classes
     # (PBItems, PBSpecies, PBMoves, ...). Games probe these tables
