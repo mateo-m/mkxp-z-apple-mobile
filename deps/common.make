@@ -568,6 +568,8 @@ $(SOURCES)/ruby/.configured-$(SDK_TAG): $(SOURCES)/ruby/configure $(LIBDIR)/libc
 	ac_cv_func_pwritev=no \
 	ac_cv_func_copy_file_range=no \
 	ac_cv_func_close_range=no \
+	ac_cv_func_getattrlist=no \
+	ac_cv_func_fgetattrlist=no \
 	cross_compiling=yes; \
 	sed -i '' 's|^ASFLAGS.*=.*|ASFLAGS = $$(ARCH_FLAG) $$(INCFLAGS) $(TARGETFLAGS)|' Makefile
 	$(MARK_SDK_CONFIGURED)

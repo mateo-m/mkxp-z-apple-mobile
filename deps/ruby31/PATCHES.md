@@ -95,6 +95,8 @@ ac_cv_func_preadv=no
 ac_cv_func_pwritev=no
 ac_cv_func_copy_file_range=no
 ac_cv_func_close_range=no
+ac_cv_func_getattrlist=no
+ac_cv_func_fgetattrlist=no
 cross_compiling=yes
 ```
 
