@@ -1,3 +1,4 @@
-# iOS SDL2 patches applied on top of mkxp-z/SDL @ mkxp-z-2.28.1.
+# SDL2 patches applied on top of mkxp-z/SDL @ mkxp-z-2.28.1.
 # See deps/sdl2/PATCHES.md.
 sdl2/ios.patch
+sdl2/macos-no-opengl.patch

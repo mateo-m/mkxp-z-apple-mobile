@@ -7,6 +7,8 @@ TARGETFLAGS := -isysroot $(SYSROOT) $(TARGET_FLAG) -arch $(ARCH)
 # device (`ios`) and simulator (`ios-simulator`); we infer from $(SDK).
 ifeq ($(SDK),iphonesimulator)
 LD_PLATFORM := ios-simulator
+else ifeq ($(SDK),macosx)
+LD_PLATFORM := macos
 else
 LD_PLATFORM := ios
 endif
@@ -80,7 +82,7 @@ CMAKE_ARGS := \
 	-DCMAKE_C_FLAGS="$(CFLAGS)" \
 	-DCMAKE_CXX_FLAGS="$(CXXFLAGS)" \
 	-DCMAKE_BUILD_TYPE=Release \
-	-DCMAKE_SYSTEM_NAME=iOS \
+	-DCMAKE_SYSTEM_NAME=$(if $(filter macosx,$(SDK)),Darwin,iOS) \
 	-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MINIMUM_REQUIRED) \
 	-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	-DCMAKE_FIND_ROOT_PATH="$(BUILD_PREFIX)" \
@@ -275,7 +277,7 @@ $(LIBDIR)/libSDL2.a: $(SOURCES)/sdl2/$(CMAKE_BUILDDIR)/Makefile
 	cd $(SOURCES)/sdl2/$(CMAKE_BUILDDIR); \
 	make -j$(NPROC); make install
 
-$(SOURCES)/sdl2/.patched-$(SDK_TAG): $(PATCHES)/sdl2.patches.lst $(PATCHES)/sdl2/ios.patch
+$(SOURCES)/sdl2/.patched-$(SDK_TAG): $(PATCHES)/sdl2.patches.lst $(PATCHES)/sdl2/ios.patch $(PATCHES)/sdl2/macos-no-opengl.patch
 	cd $(SOURCES)/sdl2; \
 	git checkout -- . 2>/dev/null; \
 	$(PATCHES)/apply-sdl-patches.sh $(SOURCES)/sdl2 --patches-root $(PATCHES); \
@@ -428,6 +430,10 @@ OPENSSL_CONFIGURE_FLAGS := -miphoneos-version-min=$(MINIMUM_REQUIRED)
 ifeq ($(SDK),iphonesimulator)
 OPENSSL_CONFIGURE_TARGET := iossimulator-xcrun
 OPENSSL_CONFIGURE_FLAGS := -mios-simulator-version-min=$(MINIMUM_REQUIRED)
+endif
+ifeq ($(SDK),macosx)
+OPENSSL_CONFIGURE_TARGET := darwin64-arm64-cc
+OPENSSL_CONFIGURE_FLAGS := -mmacosx-version-min=$(MINIMUM_REQUIRED)
 endif
 OPENSSL_CONFIGURED := $(OPENSSL_DIR)/.configured-$(SDK)-$(ARCH)
 

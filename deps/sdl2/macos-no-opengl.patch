@@ -1,0 +1,18 @@
+diff --git a/src/video/cocoa/SDL_cocoawindow.m b/src/video/cocoa/SDL_cocoawindow.m
+index f586bdb..6475d58 100644
+--- a/src/video/cocoa/SDL_cocoawindow.m
++++ b/src/video/cocoa/SDL_cocoawindow.m
+@@ -922,11 +922,13 @@ static void Cocoa_UpdateClipCursor(SDL_Window * window)
+ - (void)windowDidChangeScreen:(NSNotification *)aNotification
+ {
+     /*printf("WINDOWDIDCHANGESCREEN\n");*/
++#if SDL_VIDEO_OPENGL_CGL
+     if (_data && _data.nscontexts) {
+         for (SDLOpenGLContext *context in _data.nscontexts) {
+             [context movedToNewScreen];
+         }
+     }
++#endif
+ }
+ 
+ - (void)windowWillEnterFullScreen:(NSNotification *)aNotification
