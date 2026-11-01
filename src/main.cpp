@@ -183,7 +183,7 @@ extern "C" void mkxp_noteRgssThreadFailure(void *userdata, const char *message) 
     return;
   const char *detail =
       message ? message : "An unexpected error occurred.";
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
   mkxp_presentErrorAndWait(detail);
 #endif
   rgssThreadError(static_cast<RGSSThreadData *>(userdata), detail);
@@ -275,7 +275,7 @@ int rgssThreadFun(void *userdata) {
                     ? "rgss thread QoS: user-interactive"
                     : "rgss thread QoS: elevation FAILED");
 #endif
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
   return mkxp_guardedRgssThreadMain(userdata, rgssThreadFunImpl);
 #else
   return rgssThreadFunImpl(userdata);
@@ -353,7 +353,7 @@ static void initSyntaxTransform(Config &conf) {
 
 static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
   rtData->rgssErrorMsg = msg;
-#if !TARGET_OS_IPHONE
+#if !MKXPZ_MOBILE
   mkxp_setErrorMessage(msg.c_str());
 #endif
   rtData->ethread->requestTerminate();
@@ -362,7 +362,7 @@ static void rgssThreadError(RGSSThreadData *rtData, const std::string &msg) {
 
 static void showInitError(const std::string &msg) {
   Debug() << msg;
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
   mkxp_reportFatalError(msg.c_str());
 #else
   SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "mkxp-z", msg.c_str(), 0);
@@ -430,6 +430,9 @@ static void shutdownSDLLibs() {
  * Returns nullptr on failure after posting an error. */
 static SDL_Window *createPersistentWindow(const Config &initConf) {
   Uint32 winFlags = SDL_WINDOW_INPUT_FOCUS | SDL_WINDOW_ALLOW_HIGHDPI;
+#if !TARGET_OS_IPHONE
+  winFlags |= SDL_WINDOW_RESIZABLE;
+#endif
 
   /* Allow all orientations. Without this, SDL infers supported
    * orientations from the window w/h: a landscape-shaped game
@@ -523,7 +526,7 @@ private:
 };
 
 bool EngineHost::init(int argc, char *argv[]) {
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
   mkxp_installFatalErrorHandlers();
 #endif
   /* FIRST LAUNCH: wait for Library UI before SDL_Init. SDL_Init
@@ -552,10 +555,12 @@ bool EngineHost::init(int argc, char *argv[]) {
     shutdownSDLLibs();
     return false;
   }
+  mkxp_setGameSDLWindow(persistWin_);
 
   persistGLCtx_ = createPersistentGL(persistWin_);
   if (!persistGLCtx_) {
     teardownANGLE();
+    mkxp_setGameSDLWindow(nullptr);
     SDL_DestroyWindow(persistWin_);
     persistWin_ = nullptr;
     shutdownSDLLibs();
@@ -564,6 +569,7 @@ bool EngineHost::init(int argc, char *argv[]) {
 
   if (!createPersistentAudio(&persistAlcDev_, &persistAlcCtx_)) {
     teardownANGLE();
+    mkxp_setGameSDLWindow(nullptr);
     SDL_DestroyWindow(persistWin_);
     persistWin_ = nullptr;
     persistGLCtx_ = nullptr;
@@ -641,7 +647,7 @@ void EngineHost::runSession(int argc, char *argv[]) {
 
   if (!rtData.rgssErrorMsg.empty()) {
     Debug() << rtData.rgssErrorMsg;
-#if !TARGET_OS_IPHONE
+#if !MKXPZ_MOBILE
     mkxp_setErrorMessage(rtData.rgssErrorMsg.c_str());
 #endif
   }
@@ -678,10 +684,17 @@ void EngineHost::shutdown() {
     persistAlcDev_ = nullptr;
   }
   if (persistWin_) {
+    mkxp_setGameSDLWindow(nullptr);
     SDL_DestroyWindow(persistWin_);
     persistWin_ = nullptr;
   }
 }
+
+// The host enters through mkxp_run_app, which calls SDL_main. SDL_main.h
+// renames main to SDL_main on iOS, but not on macOS.
+#if MKXPZ_MOBILE && !defined(main)
+#define main SDL_main
+#endif
 
 int main(int argc, char *argv[]) {
   try {
@@ -696,19 +709,19 @@ int main(int argc, char *argv[]) {
     return 0;
   } catch (const Exception &exc) {
     Debug() << "FATAL uncaught Exception:" << exc.msg;
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     mkxp_reportFatalError(exc.msg.c_str());
 #endif
     return 1;
   } catch (const std::exception &e) {
     Debug() << "FATAL uncaught std::exception:" << e.what();
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     mkxp_reportFatalError(e.what());
 #endif
     return 1;
   } catch (...) {
     Debug() << "FATAL unknown exception caught";
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     mkxp_reportFatalError("An unexpected engine error occurred.");
 #endif
     return 1;

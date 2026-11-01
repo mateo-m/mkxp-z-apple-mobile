@@ -60,6 +60,9 @@ case "$SDK" in
     iphonesimulator)
         TARGET_FLAG="-mios-simulator-version-min=$MIN_OS -target ${ARCH}-apple-ios${MIN_OS}-simulator"
         ;;
+    macosx)
+        TARGET_FLAG="-mmacosx-version-min=$MIN_OS -target ${ARCH}-apple-macos${MIN_OS}"
+        ;;
     *)
         echo "build-core-ios: unsupported --sdk $SDK" >&2
         exit 2

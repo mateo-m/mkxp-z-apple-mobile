@@ -29,7 +29,7 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
@@ -225,7 +225,7 @@ static BridgeCallback<mkxp_ErrorMessageCallback> s_errorMsgCb;
 // can present them without error framing.
 static BridgeCallback<mkxp_InfoMessageCallback> s_infoMsgCb;
 
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
 static std::mutex s_errorDismissMutex;
 static std::condition_variable s_errorDismissCV;
 static std::atomic<bool> s_errorDismissed{false};
@@ -282,7 +282,7 @@ void mkxp_setGamePath(const char *path) {
 }
 
 const char *mkxp_waitForGamePath(void) {
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     // On iOS, SDL_main runs on the main thread. We must pump the main
     // run loop while waiting so that UIKit can render the Library UI
     // and dispatch_async blocks can execute.
@@ -507,15 +507,26 @@ bool mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
     return true;
 }
 
+// The first game rect fires from inside the SharedState constructor,
+// before SharedState::instance is set. The window exists by then.
+static std::atomic<SDL_Window *> s_gameSDLWindow{nullptr};
+
+void mkxp_setGameSDLWindow(SDL_Window *window) {
+    s_gameSDLWindow.store(window, std::memory_order_release);
+}
+
 void *mkxp_getGameWindow(void) {
-    if (!SharedState::instance) return nullptr;
-    SDL_Window *win = SharedState::instance->sdlWindow();
+    SDL_Window *win = s_gameSDLWindow.load(std::memory_order_acquire);
     if (!win) return nullptr;
 
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(win, &info)) return nullptr;
+#if TARGET_OS_IPHONE
     return info.info.uikit.window;
+#else
+    return info.info.cocoa.window;
+#endif
 }
 
 // Input bridge
@@ -778,7 +789,7 @@ void mkxp_setErrorMessage(const char *message) {
     }
 }
 
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
 void mkxp_presentErrorAndWait(const char *message) {
     if (!message || !message[0])
         return;
@@ -852,7 +863,7 @@ void mkxp_reportFatalError(const char *message) {
     const char *detail =
         (message && message[0]) ? message : "An unexpected error occurred.";
     mkxp_debugLog("FATAL", "app_bridge.cpp", detail);
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     mkxp_presentErrorAndWait(detail);
 #else
     mkxp_setErrorMessage(detail);

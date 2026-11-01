@@ -226,7 +226,7 @@ void EventThread::process(RGSSThreadData &rtData)
     
     while (true)
     {
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
         /* Timed waits keep the main run loop spinning so SwiftUI
          * alerts stay tappable while the engine session is alive. */
         const int waitRc = SDL_WaitEventTimeout(&event, 16);
@@ -519,7 +519,7 @@ void EventThread::process(RGSSThreadData &rtData)
                         break;
                         
                     case REQUEST_WINRESIZE :
-#if !TARGET_OS_IPHONE
+#if !MKXPZ_MOBILE
                         /* On iOS the window is always the full screen and
                          * cannot be resized. Calling SDL_SetWindowSize here
                          * causes SDL to cache the requested (smaller) size
@@ -832,7 +832,7 @@ void EventThread::showMessageBox(const char *body, int flags)
     if (shState->rtData().rqTerm)
         return;
 
-#if TARGET_OS_IPHONE
+#if MKXPZ_MOBILE
     /* Block until the user dismisses the host alert. Without this,
      * the RGSS thread tears down GL/Ruby while SwiftUI is still
      * presenting the error and the process crashes on device.

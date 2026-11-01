@@ -40,6 +40,11 @@ The first three change `SDL_uikitopengles.m` and
 `SDL_OPENGLES` is OFF, so the three fixes do nothing now. They stay in
 the patch for a build that turns GL ES on again.
 
+**`macos-no-opengl.patch`** - the macOS build of `SDL_cocoawindow.m`
+calls `movedToNewScreen` on SDL's OpenGL contexts. That code does not
+compile while `SDL_OPENGL` is OFF, so the patch puts it behind
+`SDL_VIDEO_OPENGL_CGL`.
+
 After you edit the SDL submodule, regenerate the patch:
 
 ```sh

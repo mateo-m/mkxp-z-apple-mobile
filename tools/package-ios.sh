@@ -5,7 +5,7 @@
 # Package the engine for a host: mkxp-z-ios.tar.gz.
 #
 # Run it after tools/build-deps-ios.sh and `make mkxp-merged mkxp-core`
-# in deps/, for both SDKs. The archive holds:
+# in deps/, for iphoneos, iphonesimulator and macosx. The archive holds:
 #
 #   MANIFEST             tag, commit, ANGLE release, RGSS version mask
 #   LINK                 the libraries and frameworks a host links
@@ -15,6 +15,7 @@
 #   <sdk>/lib/           the engine core, the three binding objects and
 #                        every dependency library
 #   <sdk>/ruby-stdlib/   the Ruby stdlib subsets for the three Rubies
+#   macosx/LINK          the macOS link flags, with AppKit and not UIKit
 #
 # A host links with the flags in LINK, from <sdk>/, and with ANGLE from
 # the release that MANIFEST names. The engine finds assets/ as Assets.bundle
@@ -53,16 +54,22 @@ fi
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/mkxp-z-ios.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT INT TERM
 
-for sdk in iphoneos iphonesimulator; do
+SDKS="iphoneos iphonesimulator macosx"
+
+for sdk in $SDKS; do
     tree="$DEPS/build-$sdk-arm64"
-    if [ "$sdk" = iphoneos ]; then platform=2; else platform=7; fi
+    case "$sdk" in
+        macosx) platform=1 ;;
+        iphoneos) platform=2 ;;
+        *) platform=7 ;;
+    esac
     mkdir -p "$STAGE/$sdk/lib"
     for lib in $LIBS; do
         if [ ! -f "$tree/lib/$lib" ]; then
             echo "package-ios: $tree/lib/$lib missing. Build $sdk first, see README.md" >&2
             exit 1
         fi
-        # LC_BUILD_VERSION platform 2 is iOS, 7 is the iOS simulator.
+        # LC_BUILD_VERSION platform 1 is macOS, 2 is iOS, 7 is the iOS simulator.
         wrong="$(otool -l "$tree/lib/$lib" | awk -v want="$platform" \
             '$1 == "platform" && $2 != want { n++ } END { print n + 0 }')"
         if [ "$wrong" -gt 0 ]; then
@@ -83,7 +90,7 @@ if grep -q 'DMKXPZ_HAVE_SYNTAX_TRANSFORM_PATCHES' "$ENGINE/tools/build-core-ios.
 else
     COMPILED=no
 fi
-for sdk in iphoneos iphonesimulator; do
+for sdk in $SDKS; do
     if nm -a "$STAGE/$sdk/lib/mkxp31-merged.o" |
         grep -q '_mkxp_syntax_transform_target_ruby_version_major$'; then
         LINKED=yes
@@ -126,6 +133,20 @@ cat >"$STAGE/LINK" <<LINK
 -framework IOSurface -weak_framework CoreBluetooth -weak_framework CoreHaptics
 LINK
 
+cat >"$STAGE/macosx/LINK" <<LINK
+-Wl,-force_load,lib/libmkxpz-core.a lib/mkxp18-merged.o lib/mkxp19-merged.o lib/mkxp31-merged.o
+-Llib -lSDL2 -lSDL2_image -lSDL2_sound -lSDL2_ttf -lfreetype -lpixman-1
+-logg -lvorbis -lvorbisfile -ltheora -ltheoradec -lphysfs -luchardet
+-lopenal -lssl -lcrypto -lz -lbz2 -liconv
+-lANGLE_static -lEGL_static -lGLESv2_static
+-framework Foundation -framework AppKit -framework CoreFoundation
+-framework CoreGraphics -framework CoreVideo -framework CoreAudio
+-framework AudioToolbox -framework AVFoundation -framework Metal
+-framework QuartzCore -framework GameController -framework IOKit
+-framework Carbon -framework ForceFeedback -framework IOSurface
+-weak_framework CoreBluetooth -weak_framework CoreHaptics
+LINK
+
 {
     echo "tag=$TAG"
     echo "commit=$(git -C "$ENGINE" rev-parse HEAD)"
@@ -133,6 +154,7 @@ LINK
     echo "rgss_mask=$RGSS_MASK"
 } >"$STAGE/MANIFEST"
 
-tar -czf "$OUT" -C "$STAGE" MANIFEST LINK licenses.json include assets iphoneos iphonesimulator
+# shellcheck disable=SC2086
+tar -czf "$OUT" -C "$STAGE" MANIFEST LINK licenses.json include assets $SDKS
 echo "package-ios: $OUT"
 shasum -a 256 "$OUT"

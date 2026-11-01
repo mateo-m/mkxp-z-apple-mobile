@@ -55,8 +55,8 @@ deps/            Dependency recipes and patches, sources as git submodules
 ## Build
 
 This repository builds the engine and all of its dependencies for the
-iOS device and the iOS simulator. It needs Xcode and a few Homebrew
-tools:
+iOS device, the iOS simulator and the Mac (`macosx`). It needs Xcode and
+a few Homebrew tools:
 
 ```sh
 brew install automake autoconf libtool cmake pkg-config bison
@@ -74,8 +74,8 @@ ANGLE. The `make` line then builds the engine with two scripts:
 | `tools/build-core-ios.sh` | `libmkxpz-core.a`, everything under `src/` | Dependency headers only |
 | `tools/build-binding-ios.sh` | `mkxp<NN>-merged.o`, one per Ruby version | That version's libruby archives |
 
-Do the same with `iphoneos` for the device. Then
-`tools/package-ios.sh` puts both SDKs into `mkxp-z-ios.tar.gz`. The
+Do the same with `iphoneos` for the device and `macosx` for the Mac.
+Then `tools/package-ios.sh` puts the three SDKs into `mkxp-z-ios.tar.gz`. The
 file holds the libraries, the `app_bridge.h` header, the engine
 assets, the Ruby standard library, and a `LINK` file with the linker
 flags. A host links the libraries into its app with those flags.
@@ -109,7 +109,7 @@ own game folder and the engine boots it.
 The C++ tests under `tests/cpp/` need none of this, not even the
 dependencies. See [tests/README.md](tests/README.md).
 
-This fork does not build for macOS, Linux, or Windows. The desktop code, the desktop build files (meson, platform Makefiles, the macOS Xcode project), and the desktop stand-ins are all removed. Use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) for desktop.
+This fork builds for macOS only as a core that a host app loads, with the same `app_bridge.h` interface as on iOS. It does not build for Linux or Windows. The desktop code, the desktop build files (meson, platform Makefiles, the macOS Xcode project), and the desktop stand-ins are all removed. Use [upstream mkxp-z](https://github.com/mkxp-z/mkxp-z) for a desktop app.
 
 ## Contributing
 

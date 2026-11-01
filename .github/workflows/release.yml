@@ -1,5 +1,6 @@
-# Builds the engine and its dependencies for the device and the
-# simulator, and publishes mkxp-z-ios.tar.gz when a tag v* is pushed.
+# Builds the engine and its dependencies for the iOS device, the iOS
+# simulator and the Mac, and publishes mkxp-z-ios.tar.gz when a tag v*
+# is pushed.
 # A run from the Actions tab builds the same file and keeps it as a
 # workflow artifact.
 #
@@ -24,7 +25,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       matrix:
-        sdk: [iphoneos, iphonesimulator]
+        sdk: [iphoneos, iphonesimulator, macosx]
     steps:
       - uses: actions/checkout@v6
         with:

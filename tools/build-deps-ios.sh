@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# Build the dependencies for one iOS SDK into deps/build-<sdk>-arm64.
+# Build the dependencies for one SDK into deps/build-<sdk>-arm64.
 # The engine build (make mkxp-merged mkxp-core in deps) needs them.
 #
-# Usage: tools/build-deps-ios.sh <iphoneos|iphonesimulator>
+# Usage: tools/build-deps-ios.sh <iphoneos|iphonesimulator|macosx>
 set -euo pipefail
 
-SDK="${1:?usage: tools/build-deps-ios.sh <iphoneos|iphonesimulator>}"
+SDK="${1:?usage: tools/build-deps-ios.sh <iphoneos|iphonesimulator|macosx>}"
 cd "$(dirname "$0")/../deps"
 LIB="$PWD/build-$SDK-arm64/lib"
 
