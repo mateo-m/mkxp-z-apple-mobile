@@ -120,6 +120,10 @@ case "$SDK" in
         TARGET_FLAG="-mios-simulator-version-min=$MIN_OS -target ${ARCH}-apple-ios${MIN_OS}-simulator"
         LD_PLATFORM="ios-simulator"
         ;;
+    macosx)
+        TARGET_FLAG="-mmacosx-version-min=$MIN_OS -target ${ARCH}-apple-macos${MIN_OS}"
+        LD_PLATFORM="macos"
+        ;;
     *)
         echo "build-binding-ios: unsupported --sdk $SDK" >&2
         exit 2

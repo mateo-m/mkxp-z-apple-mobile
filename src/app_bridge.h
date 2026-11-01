@@ -18,13 +18,13 @@
 #include <stdbool.h>
 
 // MKXPZ_MOBILE - 1 on platforms where a host app embeds the engine
-// (iOS/iPadOS/tvOS), 0 elsewhere. Overridable from the build system.
-// Defaults to Apple's own platform conditionals.
+// (iOS, iPadOS, tvOS and macOS), 0 elsewhere. Overridable from the
+// build system.
+#ifdef __APPLE__
+#  include <TargetConditionals.h>
+#endif
 #ifndef MKXPZ_MOBILE
 #  ifdef __APPLE__
-#    include <TargetConditionals.h>
-#  endif
-#  if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #    define MKXPZ_MOBILE 1
 #  else
 #    define MKXPZ_MOBILE 0
@@ -447,10 +447,16 @@ bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h,
 // Screen scale factor (e.g. 3.0 on iPhone Pro).
 float       mkxp_getScreenScale(void);
 
-// The UIWindow* the game draws in, or NULL before the engine creates
-// it. Owned by the engine. Do not retain. For embedding host controls
-// in the same window stack as the game view on iOS.
+// The UIWindow* (iOS) or NSWindow* (macOS) the game draws in, or NULL
+// before the engine creates it. Owned by the engine. Do not retain.
+// For embedding host controls in the same window stack as the game
+// view.
 void       *mkxp_getGameWindow(void);
+
+// Engine-internal: sets the window that mkxp_getGameWindow reports.
+// NOT for UI.
+struct SDL_Window;
+void        mkxp_setGameSDLWindow(struct SDL_Window *window);
 
 // Per-game settings (UI -> Engine), set by the host before engine
 // boot and read by the engine during the run.
@@ -740,6 +746,8 @@ static inline void        mkxp_clearHostViewportRegion(void) {}
 static inline bool        mkxp_getHostViewportRegion(float *x, float *y, float *w, float *h, bool *isPortrait) { (void)x; (void)y; (void)w; (void)h; (void)isPortrait; return false; }
 static inline float       mkxp_getScreenScale(void) { return 1.0f; }
 static inline void       *mkxp_getGameWindow(void) { return NULL; }
+struct SDL_Window;
+static inline void        mkxp_setGameSDLWindow(struct SDL_Window *window) { (void)window; }
 
 static inline void        mkxp_applyPerGameSettings(MKXPVerticalAlignment verticalAlignment, bool postloadEnabled) { (void)verticalAlignment; (void)postloadEnabled; }
 // CENTER, not the mobile TOP_CENTER default: stock desktop mkxp-z

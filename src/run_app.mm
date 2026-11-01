@@ -24,6 +24,7 @@ extern "C" int mkxp_run_app(int argc, char **argv) {
     // it does not run when a launcher owns UIApplicationMain.
     SDL_SetMainReady();
 
+#if TARGET_OS_IPHONE
     // Makes SDL pump the UIKit run loop from inside SDL_PumpEvents and
     // start its lifecycle observers (SDL_uikitevents.m:45-63). Without
     // it the engine holds the main thread and the launcher stops
@@ -32,4 +33,8 @@ extern "C" int mkxp_run_app(int argc, char **argv) {
     int status = SDL_main(argc, argv);
     SDL_iPhoneSetEventPump(SDL_FALSE);
     return status;
+#else
+    // SDL's Cocoa backend pumps the AppKit run loop by itself.
+    return SDL_main(argc, argv);
+#endif
 }

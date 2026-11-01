@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>
+#else
+#import <AppKit/AppKit.h>
+#endif
 #import "system.h"
 #import "app_bridge.h"
 
@@ -42,14 +47,22 @@ std::string systemImpl::getUserName() {
     }
 }
 
-int systemImpl::getScalingFactor() {
+static float displayScale() {
+#if TARGET_OS_IPHONE
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if ([scene isKindOfClass:[UIWindowScene class]]) {
             UIWindowScene *ws = (UIWindowScene *)scene;
-            return (int)ws.traitCollection.displayScale;
+            return ws.traitCollection.displayScale;
         }
     }
-    return 2;
+    return 2.0f;
+#else
+    return NSScreen.mainScreen ? NSScreen.mainScreen.backingScaleFactor : 2.0f;
+#endif
+}
+
+int systemImpl::getScalingFactor() {
+    return (int)displayScale();
 }
 
 bool systemImpl::isWine() {
@@ -94,13 +107,7 @@ float mkxp_getScreenScale(void) {
     __block float scale = 2.0f;
 
     void (^queryBlock)(void) = ^{
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *ws = (UIWindowScene *)scene;
-                scale = ws.traitCollection.displayScale;
-                break;
-            }
-        }
+        scale = displayScale();
     };
 
     if ([NSThread isMainThread]) {
