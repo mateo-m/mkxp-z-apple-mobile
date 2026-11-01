@@ -118,21 +118,21 @@ all: angle deps-core ruby ruby18 ruby19 mkxp-merged mkxp-core ruby-stdlib
 # ANGLE (prebuilt). The engine draws with GLES through ANGLE, which
 # draws with Metal. The core needs the headers only. A host links the
 # static libraries of the same release.
-ANGLE_VERSION := angle-2026-10-01
-ANGLE_SHA256 := 9a084762c29f24aaec0d3e4c5b674a321ba63fccfed80b4660240f202df0b245
+ANGLE_VERSION := angle-2026-11-01
+ANGLE_SHA256 := 22f6b332acaa9973650c30a99314287594fbf9ed38db682c2389bd34181e7831
 ANGLE_STAMP := ${PWD}/ANGLE/.$(ANGLE_VERSION)
 
 angle: $(ANGLE_STAMP)
 
 $(ANGLE_STAMP):
 	@mkdir -p $(DOWNLOADS)
-	curl -fL --retry 3 -o $(DOWNLOADS)/angle-ios-prebuilt.tar.gz \
-		$(GITHUB)/mateo-m/empo-deps/releases/download/$(ANGLE_VERSION)/angle-ios-prebuilt.tar.gz
-	echo "$(ANGLE_SHA256)  $(DOWNLOADS)/angle-ios-prebuilt.tar.gz" | shasum -a 256 -c
+	curl -fL --retry 3 -o $(DOWNLOADS)/angle-apple-prebuilt.tar.gz \
+		$(GITHUB)/mateo-m/empo-deps/releases/download/$(ANGLE_VERSION)/angle-apple-prebuilt.tar.gz
+	echo "$(ANGLE_SHA256)  $(DOWNLOADS)/angle-apple-prebuilt.tar.gz" | shasum -a 256 -c
 	rm -rf ${PWD}/ANGLE
 	mkdir -p ${PWD}/ANGLE
-	tar -xzf $(DOWNLOADS)/angle-ios-prebuilt.tar.gz -C ${PWD}/ANGLE
-	rm $(DOWNLOADS)/angle-ios-prebuilt.tar.gz
+	tar -xzf $(DOWNLOADS)/angle-apple-prebuilt.tar.gz -C ${PWD}/ANGLE
+	rm $(DOWNLOADS)/angle-apple-prebuilt.tar.gz
 	touch $@
 
 # Theora
