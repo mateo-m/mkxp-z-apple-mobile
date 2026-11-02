@@ -170,7 +170,7 @@ static void installRaiseHook() {
 // name verbatim. `$<name> = true` follows the JoiPlay `$joiplay`
 // detection convention and is only defined when the name is a valid
 // Ruby identifier.
-static void setLauncherIdentityGlobals() {
+void setLauncherIdentityGlobals() {
     const std::string identity(mkxp_getLauncherIdentity());
     if (identity.empty())
         return;
@@ -196,8 +196,6 @@ void loadRpgModule(int rgssVersion) {
 }
 
 void loadEnginePreloads() {
-    setLauncherIdentityGlobals();
-
     /* Raise tracing records rescued-and-dropped exceptions for the
      * end-of-session RAISETRACE dump (binding-mri.cpp). Load it
      * first so later preloads and all game scripts are covered, and
