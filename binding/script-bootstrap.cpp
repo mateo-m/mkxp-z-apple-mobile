@@ -176,6 +176,9 @@ static void setLauncherIdentityGlobals() {
         return;
 
     rb_gv_set("$userAgent", rb_utf8_str_new_cstr(identity.c_str()));
+    VALUE version = rb_utf8_str_new_cstr(mkxp_getLauncherVersion());
+    rb_str_freeze(version);
+    rb_gv_set("$userAgentVersion", version);
 
     bool validIdentifier = std::isalpha((unsigned char)identity[0])
                         || identity[0] == '_';

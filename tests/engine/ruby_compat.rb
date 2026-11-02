@@ -20,7 +20,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('ruby-compat', 7)
+EngineTest.suite('ruby-compat', 9)
 
 # A path with no per-cent sign in it, and a spare argument after it.
 # Pokemon Essentials writes many calls in this shape.
@@ -83,6 +83,16 @@ end
 # scripts/preload/rpg_*.rb. A file that fails to load only logs.
 EngineTest.test('the RPG module of the game loads') do
   EngineTest.assert_equal(true, RPG.const_defined?(:Map), 'RPG::Map')
+end
+
+# tests/host/host.m names the launcher and passes no version.
+EngineTest.test('$userAgent is the name of the launcher') do
+  EngineTest.assert_equal('mkxp-z engine tests', $userAgent, '$userAgent')
+end
+
+EngineTest.test('$userAgentVersion is a frozen "unknown" when the launcher passes no version') do
+  EngineTest.assert_equal('unknown', $userAgentVersion, '$userAgentVersion')
+  EngineTest.assert_equal(true, $userAgentVersion.frozen?, '$userAgentVersion.frozen?')
 end
 
 EngineTest.finish
