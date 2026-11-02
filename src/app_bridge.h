@@ -327,16 +327,21 @@ const char *mkxp_getSharedFontsDirectory(void);
 // Name of the host launcher embedding the engine, exposed to game
 // scripts before any preload/game code runs:
 //
-//   $userAgent = "<name>"
-//   $<name>    = true     (only when the name is a valid Ruby
-//                          identifier: [A-Za-z_][A-Za-z0-9_]*)
+//   $userAgent        = "<name>"
+//   $userAgentVersion = "<version>"  (frozen, "unknown" when the
+//                                     version is NULL or "")
+//   $<name>           = true         (only when the name is a valid
+//                                     Ruby identifier:
+//                                     [A-Za-z_][A-Za-z0-9_]*)
 //
 // This is the same detection contract JoiPlay established with its
 // `$joiplay` global. Each host declares its own name so games and
 // patches can branch on the specific launcher. Set once before the
-// engine boots. Pass NULL/"" to clear (no globals are defined).
-void        mkxp_setLauncherIdentity(const char *name);
+// engine boots. Pass a NULL or "" name to clear (no globals are
+// defined).
+void        mkxp_setLauncherIdentity(const char *name, const char *version);
 const char *mkxp_getLauncherIdentity(void);
+const char *mkxp_getLauncherVersion(void);
 
 // CA certificate bundle (UI -> Engine).
 //
@@ -716,8 +721,9 @@ static inline void        mkxp_setUserDataDirectory(const char *path) { (void)pa
 static inline const char *mkxp_getUserDataDirectory(void) { return NULL; }
 static inline void        mkxp_setSharedFontsDirectory(const char *path) { (void)path; }
 static inline const char *mkxp_getSharedFontsDirectory(void) { return NULL; }
-static inline void        mkxp_setLauncherIdentity(const char *name) { (void)name; }
+static inline void        mkxp_setLauncherIdentity(const char *name, const char *version) { (void)name; (void)version; }
 static inline const char *mkxp_getLauncherIdentity(void) { return NULL; }
+static inline const char *mkxp_getLauncherVersion(void) { return NULL; }
 static inline void        mkxp_setCABundlePath(const char *path) { (void)path; }
 static inline const char *mkxp_getCABundlePath(void) { return NULL; }
 

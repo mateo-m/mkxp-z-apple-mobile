@@ -134,7 +134,7 @@ static void engineTestHostStart(void) {
         if (fastForward)
             mkxp_setFastForwardMultiplier(atoi(fastForward));
 
-        mkxp_setLauncherIdentity("mkxp-z engine tests");
+        mkxp_setLauncherIdentity("mkxp-z engine tests", NULL);
         mkxp_setUserDataDirectory(documents.fileSystemRepresentation);
         mkxp_setSharedFontsDirectory(
             [resources stringByAppendingPathComponent:@"Assets.bundle/Fonts"]

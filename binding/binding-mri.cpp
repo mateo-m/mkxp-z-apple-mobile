@@ -2408,6 +2408,8 @@ static void mriBindingExecute() {
         rb_ary_push(lpaths, mkxp_str_new_cstr(mkxp_fs::getCurrentDirectory().c_str()));
     }
     
+    mkxp::ScriptBootstrap::setLauncherIdentityGlobals();
+
     std::string &customScript = conf.customScript;
     if (!customScript.empty()) {
         mkxp::ScriptBootstrap::runConfigScript(customScript, true);
