@@ -1,9 +1,10 @@
 name: Engine tests
 
-# The in-engine suite needs a running engine: a simulator, a GPU, and
+# The in-engine suites need a running engine: a simulator, a GPU, and
 # a Ruby VM. That rules out the ubuntu runner the other checks use.
 # This workflow builds the engine, links the test host in tests/host,
-# and reads the results back off the simulator.
+# and reads the results back off the simulator. It also builds the
+# engine for the iOS device and the Mac, as the release does.
 #
 # It also runs the host Ruby tests a second time. Two of them
 # (test_save_fs, test_save_fs_case) simulate a case-sensitive device
@@ -15,114 +16,92 @@ on:
   push:
     branches: [dev]
   workflow_dispatch:
-    inputs:
-      runner:
-        description: Runner to build on
-        type: choice
-        options: [hosted, self]
-        default: hosted
 
+# A new push to a pull request replaces its old run. Each push to dev
+# gets its own run, because the release reads the result of each one.
 concurrency:
-  group: engine-tests-${{ github.ref }}
-  cancel-in-progress: true
+  group: engine-tests-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
-  # A job that `if:` skips still reports, and the summary job counts a
-  # skip as a pass. A workflow that `paths-ignore` skips never reports,
-  # so the required check would wait forever.
+  # A run that passes uploads a marker named after a hash of every
+  # file except Markdown. A run that finds the marker of its own files
+  # does not test again: a pull request skips the tests, and dev only
+  # fills the caches. A job that `if:` skips still reports, and the
+  # summary job counts a skip as a pass.
   changes:
-    name: Detect docs-only changes
+    name: Find an earlier pass
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
+    timeout-minutes: 5
     outputs:
-      code: ${{ steps.classify.outputs.code }}
+      fingerprint: ${{ steps.check.outputs.fingerprint }}
+      test: ${{ steps.check.outputs.test }}
     steps:
-      - name: Classify the changed paths
-        id: classify
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A fork's run can upload a marker of any name, so only a run of
+      # this repository counts. A failed lookup runs the tests.
+      - name: Look for a pass of the same files
+        id: check
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
         run: |
-          if [ -z "$PR_NUMBER" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          FINGERPRINT="$(git ls-files -s -- ':!:*.md' | shasum -a 256 | cut -d' ' -f1)"
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+          PASSES=0
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            PASSES="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=engine-tests-passed-$FINGERPRINT&per_page=100" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID)] | length")" || PASSES=0
           fi
-          # An empty list, also from a failed call, runs the tests.
-          FILES="$(gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename')" || FILES=""
-          printf 'changed files:\n%s\n' "$FILES"
-          if [ -n "$FILES" ] && ! printf '%s\n' "$FILES" | grep -qv '\.md$'; then
-            echo "code=false" >> "$GITHUB_OUTPUT"
+          if [ "$PASSES" -gt 0 ]; then
+            echo "::notice::These files passed in an earlier run, so this run does not test them again."
+            echo "test=false" >> "$GITHUB_OUTPUT"
           else
-            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "test=true" >> "$GITHUB_OUTPUT"
           fi
 
   simulator:
     name: Engine tests
     needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.runner == 'self') && fromJSON('["self-hosted", "macOS"]') || 'macos-latest' }}
-    timeout-minutes: 120
+    if: needs.changes.outputs.test == 'true' || github.event_name == 'push'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      TEST: ${{ needs.changes.outputs.test }}
     steps:
-      # The core build compiles hmode7. The dependency sources are
-      # needed only when the dependency cache misses. The submodule
-      # URLs use SSH, and the runner has no SSH key.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The binding build compiles hmode7. The submodule URLs use SSH,
+      # and the runner has no SSH key.
       - name: Check out hmode7
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 hmode7
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ./.github/actions/xcode
+
+      # The boot takes minutes, so it runs while the job builds. The
+      # first launch waits until the boot is complete.
+      - name: Start the simulator boot
+        if: env.TEST == 'true'
+        run: nohup tools/run-engine-tests.sh --boot > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - uses: ./.github/actions/ccache
+        with:
+          name: engine-tests-iphonesimulator
+
+      - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: "3.4"
-          bundler-cache: true
-
-      - name: Select newest Xcode
-        # DEVELOPER_DIR instead of xcode-select: no sudo, so the same
-        # step works on a hosted runner and on a self-hosted Mac.
-        run: |
-          XCODE="$(printf '%s\n' /Applications/Xcode*.app | sort -V | tail -n 1)"
-          echo "Using $XCODE"
-          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
-          DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
-
-      # Most of this job is the two builds, and a push changes a few
-      # sources at a time. ccache turns the rest into a hit. The two
-      # build scripts pick it up on their own. It also helps inside
-      # one job: the binding loop has no up-to-date check, so the
-      # second build compiles all three Ruby versions again.
-      - name: Set up ccache
-        run: |
-          command -v ccache >/dev/null || brew install ccache
-          {
-            echo "CCACHE_DIR=$HOME/.ccache"
-            # This job picks the newest Xcode above. The default
-            # compiler check reads size and mtime, so a runner image
-            # that ships a new clang could serve objects the old one
-            # built. Hashing the compiler removes the doubt.
-            echo "CCACHE_COMPILERCHECK=content"
-            # The cache travels to and from the runner on every job.
-            echo "CCACHE_MAXSIZE=800M"
-          } >> "$GITHUB_ENV"
-
-      # Restore on every run, but save only on a push to dev. A cache
-      # a pull request writes is scoped to that pull request, so no
-      # other run can read it. Saving one per push would fill the
-      # 10 GB the repository gets and evict the cache dev wrote.
-      - name: Restore the compiler cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.ccache
-          key: ccache-engine-tests-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            ccache-engine-tests-${{ runner.os }}-
 
       # The host Ruby tests need no engine, so run them before the
       # long build. A break here fails the job in seconds.
       - name: Host Ruby tests, with no skips allowed
+        if: env.TEST == 'true'
         env:
           MKXP_TESTS_NO_SKIP: "1"
         run: |
@@ -131,106 +110,141 @@ jobs:
             ruby "$test"
           done
 
-      # A dependency build takes most of an hour. The key changes only
-      # when a recipe, a patch, a source file of ours, a pinned source,
-      # or Xcode changes.
-      - name: Key the dependency cache
-        id: deps-key
-        run: |
-          {
-            git ls-tree HEAD deps/sources
-            xcodebuild -version
-          } | shasum -a 256 | cut -d' ' -f1 | sed 's/^/sources=/' >> "$GITHUB_OUTPUT"
-
-      - name: Restore the dependencies
-        id: deps-cache
-        uses: actions/cache@v4
+      - uses: ./.github/actions/deps
         with:
-          path: |
-            deps/build-iphonesimulator-arm64
-            deps/ANGLE
-          key: deps-iphonesimulator-${{ steps.deps-key.outputs.sources }}-${{ hashFiles('deps/*.make', 'deps/*.sh', 'deps/*.lst', 'deps/*/*.patch', 'deps/*/*.rb', 'deps/*/*.c', 'deps/*/*.S', 'tools/build-deps-ios.sh') }}
+          sdk: iphonesimulator
 
-      - name: Build the dependencies
-        if: steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 deps/sources
-          brew install automake autoconf libtool pkg-config bison
-          tools/build-deps-ios.sh iphonesimulator
-
-      # This step builds the host. The steps after it pick their suite
-      # and their interpreter at launch, so they reuse the build.
-      - name: Run the in-engine suite
-        run: tools/run-engine-tests.sh --timeout 300
-
-      # Once per interpreter: the engine ships three, and a game
-      # that runs on one has to run on the others.
-      - name: Run the interpreter suite
-        run: |
-          for v in 18 19 31; do
-            tools/run-engine-tests.sh --suite ruby_compat.rb --ruby "$v" \
-              --no-build --timeout 300
-          done
-
-      # The win32 text stand-ins load only on Ruby 1.9 and later.
-      - name: Run the win32 text conversion suite
-        run: |
-          for v in 19 31; do
-            tools/run-engine-tests.sh --suite win32_wrap_encoding.rb --ruby "$v" \
-              --no-build --timeout 300
-          done
-
-      - name: Run the file lookup order suite
-        run: |
-          tools/run-engine-tests.sh --suite file_lookup_order.rb \
-            --no-build --timeout 300
-
-      # The other side of the legacy-method check: with the transform
-      # off, no script can call a legacy method, so the engine must
-      # not define one. A game reads Module#method_defined? and
-      # installs its own copy.
-      - name: Run the legacy-method suite with the transform off
-        run: |
-          tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31 \
-            --no-build --timeout 300
-
-      # The last two suites each need a game folder of their own, and
-      # so a build of their own. The legacy-method support only runs
-      # for scripts that come out of Scripts.rxdata. See tests/README.md.
-      - name: Run the legacy-method suite
+      # One build holds all three game folders. The steps below pick
+      # the game, the suites and the interpreter at launch.
+      - name: Build the test host
+        id: host
         run: |
           ruby tests/legacy-methods/pack_scripts.rb
-          tools/run-engine-tests.sh --game tests/legacy-methods --timeout 300
+          ruby tests/script-folder/pack_scripts.rb
+          tools/build-test-host-ios.sh \
+            --game tests/engine --game tests/legacy-methods --game tests/script-folder
+
+      - name: Report the cache hit rate
+        run: ccache -s
+
+      # A cache that a pull request saves serves only that pull
+      # request, so only dev saves.
+      - name: Save the compiler cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.ccache
+          key: ccache-engine-tests-iphonesimulator-${{ github.sha }}
+
+      # Each launch runs its suites one after the other, and each
+      # suite reports on its own. The suite steps run also when an
+      # earlier one fails, so one run shows every failure.
+      #
+      # fast_forward_clock.rb goes first, because it measures the
+      # frame rate of a fresh engine.
+      - name: Suites on the default Ruby
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          tools/run-engine-tests.sh --no-build --timeout 300 \
+            --suite fast_forward_clock.rb --suite mega_bitmap.rb --suite file_lookup_order.rb
+
+      - name: Fast-forward suite at four times the speed
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          tools/run-engine-tests.sh --no-build --timeout 300 \
+            --suite fast_forward_clock.rb --fast-forward 4
+
+      # legacy_methods_off.rb goes first, because the other suites
+      # load code that it must not see. The win32 text stand-ins load
+      # only on Ruby 1.9 and later.
+      - name: Suites on Ruby 3.1
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          tools/run-engine-tests.sh --no-build --timeout 300 --ruby 31 \
+            --suite legacy_methods_off.rb --suite ruby_compat.rb --suite win32_wrap_encoding.rb
+
+      - name: Suites on Ruby 1.9
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          tools/run-engine-tests.sh --no-build --timeout 300 --ruby 19 \
+            --suite ruby_compat.rb --suite win32_wrap_encoding.rb
+
+      - name: Suites on Ruby 1.8
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          tools/run-engine-tests.sh --no-build --timeout 300 --ruby 18 \
+            --suite ruby_compat.rb
+
+      # The legacy-method support only runs for scripts that come out
+      # of Scripts.rxdata, so this suite needs a game folder of its
+      # own. See tests/README.md.
+      - name: Legacy-method suite
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: tools/run-engine-tests.sh --no-build --timeout 300 --game tests/legacy-methods
 
       # Once per interpreter: the engine splits the Data/Scripts loader
       # with the Ruby that the game runs on.
-      - name: Run the script-folder suite
+      - name: Script-folder suite
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
         run: |
-          ruby tests/script-folder/pack_scripts.rb
-          tools/run-engine-tests.sh --game tests/script-folder --timeout 300
-          for v in 18 19; do
-            tools/run-engine-tests.sh --game tests/script-folder --ruby "$v" \
-              --no-build --timeout 300
+          STATUS=0
+          for ruby in default 18 19; do
+            set -- --no-build --timeout 300 --game tests/script-folder
+            [ "$ruby" = default ] || set -- "$@" --ruby "$ruby"
+            tools/run-engine-tests.sh "$@" || STATUS=1
           done
+          exit "$STATUS"
 
-      - name: Report the cache hit rate
-        if: always()
-        run: ccache -s || true
+  # The release builds these two. A break here shows before a tag.
+  engine:
+    name: Engine for ${{ matrix.sdk }}
+    needs: changes
+    if: needs.changes.outputs.test == 'true' || github.event_name == 'push'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, macosx]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Save the compiler cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/cache/save@v4
+      - name: Check out hmode7
+        if: needs.changes.outputs.test == 'true'
+        run: |
+          git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 hmode7
+
+      - uses: ./.github/actions/xcode
+
+      # On dev this also fills the cache that the release reads.
+      - uses: ./.github/actions/deps
         with:
-          path: ~/.ccache
-          key: ccache-engine-tests-${{ runner.os }}-${{ github.sha }}
+          sdk: ${{ matrix.sdk }}
+
+      - name: Build the engine
+        if: needs.changes.outputs.test == 'true'
+        run: tools/build-engine-ios.sh --sdk "${{ matrix.sdk }}"
 
   # Aggregate gate, so the ruleset has one context to require.
   summary:
     name: Engine tests summary
-    needs: [changes, simulator]
+    needs: [changes, simulator, engine]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify every job passed
         run: |
           [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
+
+      - name: Write the pass marker
+        if: needs.changes.outputs.test == 'true'
+        run: echo "${{ needs.changes.outputs.fingerprint }}" > "$RUNNER_TEMP/fingerprint"
+
+      - name: Upload the pass marker
+        if: needs.changes.outputs.test == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: engine-tests-passed-${{ needs.changes.outputs.fingerprint }}
+          path: ${{ runner.temp }}/fingerprint
+          retention-days: 90

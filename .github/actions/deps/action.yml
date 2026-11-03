@@ -1,0 +1,122 @@
+name: Restore or build the dependencies
+description: >
+  Fills deps/build-<sdk>-arm64 and deps/ANGLE. It takes them from the
+  cache, then from an artifact of an earlier run of this repository,
+  and builds them only when both miss. The job needs the actions: read
+  permission.
+
+inputs:
+  sdk:
+    description: iphoneos, iphonesimulator or macosx.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The key changes when a recipe, a patch, a pinned source, a file
+    # that the Ruby patches take from syntax-transform, or Xcode
+    # changes.
+    - name: Key the dependency cache
+      id: key
+      shell: bash
+      env:
+        SDK: ${{ inputs.sdk }}
+      run: |
+        HASH="$({
+          git ls-files -s -- deps tools/build-deps-ios.sh tools/licenses.rb licenses syntax-transform
+          xcodebuild -version
+        } | shasum -a 256 | cut -d' ' -f1)"
+        echo "key=deps-$SDK-$HASH" >> "$GITHUB_OUTPUT"
+
+    # A run can restore a cache of its own ref or of the default
+    # branch. So a cache that dev saves serves pull requests, dev and
+    # release tags, and a cache of a fork's pull request serves no
+    # other run.
+    - name: Restore the dependencies
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          deps/build-${{ inputs.sdk }}-arm64
+          deps/ANGLE
+        key: ${{ steps.key.outputs.key }}
+
+    # A pull request that changes the dependencies uploads its build
+    # as an artifact. dev then uses it after the merge, and does not
+    # build again. A fork's run can upload an artifact of any name, so
+    # take only a build from a run of this repository. A failed lookup
+    # builds the dependencies.
+    - name: Find a build from an earlier run
+      id: artifact
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        KEY: ${{ steps.key.outputs.key }}
+        REPO_ID: ${{ github.repository_id }}
+      run: |
+        FOUND="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$KEY&per_page=100" --jq "
+          [.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID)]
+          | first // empty | \"id=\(.id)\nrun=\(.workflow_run.id)\"")" || FOUND=""
+        echo "${FOUND:-no build found}"
+        [ -n "$FOUND" ] && printf '%s\n' "$FOUND" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Download the earlier build
+      if: steps.artifact.outputs.id != ''
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        artifact-ids: ${{ steps.artifact.outputs.id }}
+        run-id: ${{ steps.artifact.outputs.run }}
+        github-token: ${{ github.token }}
+        path: ${{ runner.temp }}/deps-artifact
+
+    - name: Unpack the earlier build
+      if: steps.artifact.outputs.id != ''
+      shell: bash
+      run: tar -xzf "$RUNNER_TEMP/deps-artifact/deps.tar.gz" -C deps
+
+    - name: Build the dependencies
+      id: build
+      if: steps.cache.outputs.cache-hit != 'true' && steps.artifact.outputs.id == ''
+      shell: bash
+      env:
+        SDK: ${{ inputs.sdk }}
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+        HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      run: |
+        # The submodule URLs use SSH, and the runner has no SSH key.
+        git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 deps/sources
+        brew install automake autoconf libtool pkg-config bison
+        tools/build-deps-ios.sh "$SDK"
+
+    # A tar keeps the symbolic links and the file modes, and the
+    # artifact zip does not.
+    - name: Pack the build
+      if: steps.build.outcome == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      shell: bash
+      env:
+        SDK: ${{ inputs.sdk }}
+      run: tar -czf "$RUNNER_TEMP/deps.tar.gz" -C deps "build-$SDK-arm64" ANGLE
+
+    - name: Upload the build
+      if: steps.build.outcome == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ steps.key.outputs.key }}
+        path: ${{ runner.temp }}/deps.tar.gz
+        compression-level: 0
+        retention-days: 90
+        overwrite: true
+
+    # Before the engine build, so that the cache holds only the
+    # dependencies. Only the default branch saves, because no other
+    # ref can read a cache that a pull request or a tag saves.
+    - name: Save the dependencies
+      if: steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          deps/build-${{ inputs.sdk }}-arm64
+          deps/ANGLE
+        key: ${{ steps.key.outputs.key }}

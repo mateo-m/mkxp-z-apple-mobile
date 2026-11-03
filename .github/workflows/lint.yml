@@ -5,24 +5,25 @@ on:
   push:
     branches: [dev]
 
+concurrency:
+  group: lint-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# rubocop runs in the Format workflow.
 jobs:
   ruby:
-    name: Ruby (rubocop)
+    name: Ruby (regression tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: "3.4"
-          # bundler-cache reads Gemfile.lock and caches gem installs
-          # across runs. Saves ~15s after first run.
-          bundler-cache: true
-
-      - name: rubocop
-        run: bundle exec rubocop --format github
 
       # The compat scripts patch classes that only exist inside a
       # running game, so these tests stub the engine bindings and the
@@ -37,10 +38,9 @@ jobs:
   cpp:
     name: C++ (host tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # These build the engine sources under test directly. No SDL,
       # no GPU, no Ruby, and no launcher, so a plain runner is enough.
@@ -50,12 +50,11 @@ jobs:
   markdown:
     name: Markdown (markdownlint)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install markdownlint-cli
         run: bun install --frozen-lockfile
@@ -75,10 +74,9 @@ jobs:
   host-code:
     name: No launcher code
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Only hmode7. The dependency sources under deps/sources are
       # upstream code and hold no launcher names.
@@ -97,6 +95,7 @@ jobs:
     needs: [ruby, cpp, markdown, host-code]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify every job passed
         run: |

@@ -5,34 +5,32 @@ on:
   push:
     branches: [dev]
 
-# Format job verifies that the formatters would not modify any
-# tracked file. If they would, the job fails with a clear diff
-# so the contributor knows exactly what to run locally.
+concurrency:
+  group: format-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
+  # rubocop checks the style and the lint cops in one run. The
+  # annotations show each offense on the diff.
   ruby:
-    name: Ruby (rubocop --autocorrect)
+    name: Ruby (rubocop)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
         with:
           ruby-version: "3.4"
-          # bundler-cache reads Gemfile.lock and caches gem installs
-          # across runs. Saves ~15s after first run.
           bundler-cache: true
 
-      - name: rubocop --autocorrect (would-modify is failure)
+      - name: rubocop
         run: |
-          bundle exec rubocop --autocorrect-all --format quiet
-          # Scope the diff to the rubocop-managed paths so unrelated
-          # working-tree state (uninitialised hmode7 submodule on a
-          # shallow checkout, etc.) doesn't trip the check.
-          if ! git diff --exit-code -- scripts/preload scripts/postload; then
-            echo "::error::rubocop would modify files. Run \`bundle exec rubocop --autocorrect-all\` locally and commit."
+          if ! bundle exec rubocop --format github; then
+            echo "::error::rubocop found offenses. Run \`bundle exec rubocop --autocorrect-all\` locally, fix what it cannot fix, and commit."
             exit 1
           fi
 
@@ -43,6 +41,7 @@ jobs:
     needs: [ruby]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify every job passed
         run: |
