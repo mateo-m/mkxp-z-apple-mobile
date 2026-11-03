@@ -45,6 +45,9 @@ game, which is the only way to reach the drawing code.
 | `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
 | `legacy_methods_off.rb` | The legacy methods stay away when the transform is off. |
 | `fast_forward_clock.rb` | `System.uptime` runs at the fast-forward speed, and the average frame rate does not. |
+| `file_lookup_order.rb` | A path without an extension loads the first matching file in name order. |
+| `win32_wrap_encoding.rb` | Text conversion in the Win32API stand-ins, on Ruby 1.9 and 3.1. |
+| `run_suites.rb` | Runs several suites in one launch. |
 
 Run it on a simulator with one command:
 
@@ -71,6 +74,16 @@ do
 done
 ```
 
+Give `--suite` more than once to run several suites in one launch, in
+that order. `run_suites.rb` runs them, and the script checks the
+result of each suite on its own. A launch takes 20 to 30 seconds, so
+this saves time:
+
+```sh
+tools/run-engine-tests.sh --ruby 19 --no-build \
+    --suite ruby_compat.rb --suite win32_wrap_encoding.rb
+```
+
 `--fast-forward <n>` starts the engine at that fast-forward
 multiplier. Run `fast_forward_clock.rb` with and without it:
 
@@ -79,8 +92,20 @@ tools/run-engine-tests.sh --suite fast_forward_clock.rb --no-build
 tools/run-engine-tests.sh --suite fast_forward_clock.rb --fast-forward 4 --no-build
 ```
 
-`--game` is the exception. That folder goes into the app bundle, so a
-second folder needs a second build.
+`--game` picks the game folder. `build-test-host-ios.sh --game <dir>`
+puts each folder that it gets into the app bundle, so one build can
+hold all three:
+
+```sh
+ruby tests/legacy-methods/pack_scripts.rb
+ruby tests/script-folder/pack_scripts.rb
+tools/build-test-host-ios.sh \
+    --game tests/engine --game tests/legacy-methods --game tests/script-folder
+tools/run-engine-tests.sh --game tests/script-folder --ruby 18 --no-build
+```
+
+Without `--no-build`, `run-engine-tests.sh` builds the app with the
+one folder of its `--game`.
 
 `ruby_compat.rb` is that suite. Each check there states a behaviour a
 game gets on all three. It covers `$DEBUG` today: Ruby 1.8 and 1.9
@@ -92,9 +117,11 @@ Run `tools/build-deps-ios.sh iphonesimulator` once first. It builds
 the dependency libraries the engine links against.
 
 `mkxp.json` names the suite to run in its `customScript` key. Change
-that key to run another one, or pass `--suite`. The host copies the
-folder out of the read-only bundle at launch and writes the key into
-that copy, so the file in the repository keeps its own default. It
+that key to run another one, or pass `--suite`. At launch the host
+empties its Documents folder, copies the game folder out of the
+read-only bundle, and writes the key into that copy. So the file in
+the repository keeps its own default, and no launch sees the files of
+the launch before it. It
 also sets `maxTextureSize`, which is how the mega suite reaches the
 mega paths. See below.
 
@@ -226,8 +253,8 @@ Start from `mega_bitmap.rb`. A suite:
    each suite loads the harness itself.
 2. Calls `EngineTest.suite('<name>')`. Name it after the file, minus
    `.rb` and with every `_` written as `-`. `run-engine-tests.sh`
-   compares the two after a `--suite` run, so a suite the host failed
-   to select cannot report a clean pass.
+   finds the result of each `--suite` by that name, so a suite the
+   host failed to select cannot report a clean pass.
 3. Wraps each check in `EngineTest.test('<name>') { ... }`.
 4. Ends with `EngineTest.finish` and `exit`.
 

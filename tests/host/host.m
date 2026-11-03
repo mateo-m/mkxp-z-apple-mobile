@@ -16,14 +16,16 @@
 // loop while it waits, so the block runs from inside that wait, long
 // after static initialization.
 //
-// tools/build-test-host-ios.sh copies tests/engine into the bundle as
-// "Game". The host copies that folder into Documents, because the app
-// bundle is read only and the engine writes a path cache next to the
-// game. The folder holds an mkxp.json with a customScript, so the
-// engine runs the suite instead of a game.
+// tools/build-test-host-ios.sh copies each game folder into the bundle
+// under Games/<name>. The host copies the chosen folder into Documents,
+// because the app bundle is read only and the engine writes a path
+// cache next to the game. tests/engine holds an mkxp.json with a
+// customScript, so the engine runs the suite instead of a game.
 //
-// Two variables pick what the run covers, both read at launch:
+// Three variables pick what the run covers, all read at launch:
 //
+//   MKXP_TEST_GAME   the folder under Games/. Without it the host
+//                    opens "engine".
 //   MKXP_TEST_RUBY   the interpreter: 18, 19 or 31. Without it the
 //                    engine keeps its own default. A launcher picks
 //                    the version per game, so a suite that covers
@@ -31,8 +33,8 @@
 //   MKXP_TEST_SUITE  a file in the game folder to run in place of the
 //                    one mkxp.json names.
 //
-// Both belong to the launch and not to the build, so one build of
-// this host runs every suite on every interpreter.
+// They belong to the launch and not to the build, so one build of
+// this host runs every game and suite on every interpreter.
 
 #include <stdlib.h>
 #include <string.h>
@@ -50,13 +52,21 @@
 @implementation EngineTestSceneDelegate
 @end
 
+// The app stays installed between runs, so each launch empties
+// Documents first. Then no run sees the saves or caches of the run
+// before it.
+static void clearDocuments(NSString *documents) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *item in [fm contentsOfDirectoryAtPath:documents error:nil])
+        [fm removeItemAtPath:[documents stringByAppendingPathComponent:item]
+                       error:nil];
+}
+
 // Copy the suite out of the read only bundle. Returns the writable
 // copy, or the bundle folder if the copy fails.
 static NSString *prepareGameFolder(NSString *source, NSString *documents) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *target = [documents stringByAppendingPathComponent:@"Game"];
-
-    [fm removeItemAtPath:target error:nil];
 
     NSError *error = nil;
     if ([fm copyItemAtPath:source toPath:target error:&error])
@@ -122,8 +132,11 @@ static void engineTestHostStart(void) {
         NSString *documents = NSSearchPathForDirectoriesInDomains(
             NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
 
-        NSString *game = prepareGameFolder(
-            [resources stringByAppendingPathComponent:@"Game"], documents);
+        const char *name = getenv("MKXP_TEST_GAME");
+        NSString *bundled = [[resources stringByAppendingPathComponent:@"Games"]
+            stringByAppendingPathComponent:name && *name ? @(name) : @"engine"];
+        clearDocuments(documents);
+        NSString *game = prepareGameFolder(bundled, documents);
         applyRequestedSuite(game);
 
         MKXPRubyVersion ruby = requestedRubyVersion();

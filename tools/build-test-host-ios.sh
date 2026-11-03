@@ -7,17 +7,21 @@
 #
 # The app has no interface. It answers the engine's "which game?"
 # question with a folder inside its own bundle, and the engine runs
-# the suite there. Everything the suite reports goes to stdout, which
-# tools/run-engine-tests.sh reads back.
+# the suite there. Each --game folder goes into the bundle under its
+# own name, and MKXP_TEST_GAME picks one at launch. Everything the
+# suite reports goes to stdout, which tools/run-engine-tests.sh reads
+# back.
 #
 # There is no Xcode project. An iOS app bundle is a directory with a
 # Mach-O binary, an Info.plist and resources, so this script assembles
 # one by hand. That keeps the whole build in shell, the same as the
-# two engine recipes it calls.
+# engine recipe it calls.
 #
 # Usage:
 #   tools/build-test-host-ios.sh [--sdk iphonesimulator]
-#                                [--game <dir>] [--out <dir>]
+#                                [--game <dir> ...] [--out <dir>]
+#
+# Without --game, the bundle holds tests/engine.
 #
 # Prerequisite: tools/build-deps-ios.sh iphonesimulator
 set -eu
@@ -27,7 +31,7 @@ ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 SDK=iphonesimulator
 ARCH=arm64
 MIN_OS=26.0
-GAME="$ENGINE/tests/engine"
+GAMES=""
 OUT="$ENGINE/build"
 
 while [ "$#" -gt 0 ]
@@ -36,7 +40,7 @@ do
         --sdk) SDK="$2"; shift 2 ;;
         --arch) ARCH="$2"; shift 2 ;;
         --min-os) MIN_OS="$2"; shift 2 ;;
-        --game) GAME="$2"; shift 2 ;;
+        --game) GAMES="$GAMES $(cd "$2" && pwd)"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         *) echo "build-test-host-ios: unknown argument $1" >&2; exit 2 ;;
     esac
@@ -49,20 +53,17 @@ if [ "$SDK" != "iphonesimulator" ]; then
     exit 2
 fi
 
-DEPS="$ENGINE/deps"
-TREE="$DEPS/build-$SDK-$ARCH"
-ANGLE="$DEPS/ANGLE/$SDK"
+GAMES="${GAMES:-$ENGINE/tests/engine}"
+for game in $GAMES
+do
+    if [ ! -f "$game/mkxp.json" ]; then
+        echo "build-test-host-ios: $game holds no mkxp.json" >&2
+        exit 1
+    fi
+done
 
-if [ ! -d "$TREE/lib" ] || [ ! -d "$ANGLE/lib" ]; then
-    echo "build-test-host-ios: dependency libraries missing." >&2
-    echo "Run tools/build-deps-ios.sh iphonesimulator first." >&2
-    exit 1
-fi
-
-if [ ! -f "$GAME/mkxp.json" ]; then
-    echo "build-test-host-ios: $GAME holds no mkxp.json" >&2
-    exit 1
-fi
+TREE="$ENGINE/deps/build-$SDK-$ARCH"
+ANGLE="$ENGINE/deps/ANGLE/$SDK"
 
 BUILD="$OUT/$SDK-$ARCH"
 APP="$BUILD/EngineTests.app"
@@ -76,41 +77,9 @@ CC="$(xcrun --sdk "$SDK" -f clang)"
 CXX="$(xcrun --sdk "$SDK" -f clang++)"
 TARGET="${ARCH}-apple-ios${MIN_OS}-simulator"
 
-INCLUDES="\
- --include $TREE/include \
- --include $TREE/include/AL \
- --include $TREE/include/SDL2 \
- --include $TREE/include/pixman-1 \
- --include $TREE/include/uchardet \
- --include $TREE/include/freetype2 \
- --include $ANGLE/include"
-
-mkdir -p "$OBJ" "$LIB"
-
-# --- Engine core ------------------------------------------------------
-# shellcheck disable=SC2086
-"$ENGINE/tools/build-core-ios.sh" \
+"$ENGINE/tools/build-engine-ios.sh" \
     --sdk "$SDK" --arch "$ARCH" --min-os "$MIN_OS" \
-    --obj "$OBJ/core" --out "$LIB" \
-    $INCLUDES
-
-# --- Ruby bindings ----------------------------------------------------
-# All three go in. binding.h dispatches on the active Ruby version at
-# run time and names every entry point, so leaving one out breaks the
-# link even when the suite uses a single version.
-build_binding() {
-    # $1 = 18|19|31, $2 = header dir, $3 = static archive, $4 = ext archive
-    # shellcheck disable=SC2086
-    "$ENGINE/tools/build-binding-ios.sh" --ruby "$1" \
-        --sdk "$SDK" --arch "$ARCH" --min-os "$MIN_OS" \
-        --obj "$OBJ/binding$1" --out "$LIB" --scratch "$BUILD" \
-        --ruby-include "$TREE/include/$2" \
-        --static-lib "$TREE/lib/$3" --ext-lib "$TREE/lib/$4" \
-        $INCLUDES
-}
-build_binding 31 ruby31 libruby.3.1-static.a libruby.3.1-ext.a
-build_binding 19 ruby19 libruby19-static.a libruby19-ext.a
-build_binding 18 ruby18 libruby18-static.a libruby18-ext.a
+    --obj "$OBJ" --out "$LIB"
 
 # --- Host shim --------------------------------------------------------
 echo "[test-host] Compiling the host shim..."
@@ -168,10 +137,12 @@ cp "$ENGINE"/scripts/postload/*.rb "$ASSETS/Postload/"
 rm -rf "$APP/Ruby"
 cp -R "$TREE/ruby-stdlib" "$APP/Ruby"
 
-# The suite itself, as the game the host opens.
-rm -rf "$APP/Game"
-mkdir -p "$APP/Game"
-cp -R "$GAME"/. "$APP/Game/"
+rm -rf "$APP/Games"
+for game in $GAMES
+do
+    mkdir -p "$APP/Games/${game##*/}"
+    cp -R "$game"/. "$APP/Games/${game##*/}/"
+done
 
 # An unsigned bundle installs on some simulator runtimes and not on
 # others. An ad-hoc signature works everywhere and needs no identity.
