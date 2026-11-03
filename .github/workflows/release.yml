@@ -1,8 +1,12 @@
 # Builds the engine and its dependencies for the iOS device, the iOS
 # simulator and the Mac, and publishes mkxp-z-ios.tar.gz when a tag v*
-# is pushed.
+# is pushed. A tag needs a passing Engine tests run of a push of the
+# same commit to dev.
+#
 # A run from the Actions tab builds the same file and keeps it as a
-# workflow artifact. It publishes nothing.
+# workflow artifact. It publishes nothing. It needs a passing Engine
+# tests run of the same commit, from any event, and fails at once
+# when there is none.
 #
 # The release notes give the sha256, which a host pins next to the tag.
 
@@ -22,8 +26,6 @@ permissions:
   contents: read
 
 jobs:
-  # The builds run at the same time as this job, and the publish job
-  # waits for both.
   gate:
     name: Engine tests passed
     runs-on: ubuntu-latest
@@ -43,31 +45,47 @@ jobs:
         run: tools/check-no-host-code.sh
 
       # A fork's pull request can run its own copy of the workflow on
-      # this commit, so only a run of this repository counts.
+      # this commit, so only a run of this repository counts. A pull
+      # request run tests a merge commit, not this commit, so a tag
+      # takes only a run of a push to dev.
       - name: Wait for the engine tests of this commit
         env:
           GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          # The push of a tag and the push of its commit start their
-          # runs at about the same time, and no event tells this run
-          # when the other one starts. So look for it for 5 minutes.
+          QUERY="head_sha=$GITHUB_SHA"
+          TRIES=1
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            QUERY="$QUERY&event=push&branch=$DEFAULT_BRANCH"
+            # The push of a tag and the push of its commit start their
+            # runs at about the same time, and no event tells this run
+            # when the other one starts. So look for it for 5 minutes.
+            TRIES=30
+          fi
           RUN=""
-          for _ in $(seq 30); do
-            RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/engine-tests.yml/runs?head_sha=$GITHUB_SHA" \
+          for TRY in $(seq "$TRIES"); do
+            RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/engine-tests.yml/runs?$QUERY" \
               --jq '[.workflow_runs[] | select(.head_repository.id == .repository.id)] | first | .id // empty')"
             [ -n "$RUN" ] && break
-            sleep 10
+            if [ "$TRY" -lt "$TRIES" ]; then sleep 10; fi
           done
           if [ -z "$RUN" ]; then
-            echo "::error::Engine tests did not run on $GITHUB_SHA."
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "::error::No Engine tests run of a push of $GITHUB_SHA to $DEFAULT_BRANCH. Tag a commit of $DEFAULT_BRANCH."
+            else
+              echo "::error::No Engine tests run of $GITHUB_SHA. Open a pull request or start Engine tests on this commit, and run this again after it passes."
+            fi
             exit 1
           fi
           echo "Engine tests: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
           gh run watch "$RUN" -R "$GITHUB_REPOSITORY" --exit-status --interval 30
 
   # The SDKs share the source trees, so each one builds in its own job.
+  # A build waits for the gate, so that no runner builds a commit that
+  # did not pass.
   build:
     name: Build ${{ matrix.sdk }}
+    needs: gate
     runs-on: macos-latest
     timeout-minutes: 120
     permissions:
@@ -85,9 +103,11 @@ jobs:
 
       - uses: ./.github/actions/xcode
 
+      # Only the cache of dev or a build from source go into a release.
       - uses: ./.github/actions/deps
         with:
           sdk: ${{ matrix.sdk }}
+          artifacts: "false"
 
       - name: Build the engine
         run: tools/build-engine-ios.sh --sdk "${{ matrix.sdk }}"
@@ -100,7 +120,7 @@ jobs:
             deps/build-${{ matrix.sdk }}-arm64/ruby-stdlib
             deps/build-${{ matrix.sdk }}-arm64/licenses.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   publish:
     name: Package and publish
@@ -112,18 +132,37 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    outputs:
+      sha256: ${{ steps.published.outputs.sha256 || steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A re-run after a later step failed finds the release that the
+      # first attempt published, and keeps it.
+      - name: Find a published release
+        id: published
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json tagName > /dev/null 2>&1; then
+            gh release download "$GITHUB_REF_NAME" --pattern mkxp-z-ios.tar.gz --dir "$RUNNER_TEMP/published"
+            SHA256="$(shasum -a 256 "$RUNNER_TEMP/published/mkxp-z-ios.tar.gz" | awk '{print $1}')"
+            echo "::notice::$GITHUB_REF_NAME is already published, so this run keeps it."
+            echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          fi
 
       # Each artifact goes into deps/<artifact name>, the folder that
       # tools/package-ios.sh reads.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.published.outputs.sha256 == ''
         with:
           pattern: build-*-arm64
           path: deps
 
       - name: Package
         id: package
+        if: steps.published.outputs.sha256 == ''
         run: |
           set -eu
           tools/package-ios.sh --tag "$GITHUB_REF_NAME"
@@ -131,13 +170,13 @@ jobs:
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Attest the build provenance
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.published.outputs.sha256 == ''
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: mkxp-z-ios.tar.gz
 
       - name: Publish the release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.published.outputs.sha256 == ''
         env:
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha256 }}
@@ -146,25 +185,38 @@ jobs:
           printf 'Built from `%s`.\n\nsha256: `%s`\n' "$GITHUB_SHA" "$SHA256" > notes.md
           gh release create "$GITHUB_REF_NAME" mkxp-z-ios.tar.gz --title "$GITHUB_REF_NAME" --notes-file notes.md
 
-      - name: Send the core-released event
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
-          TARGET: ${{ vars.RELEASE_DISPATCH_REPO }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
-        run: |
-          if [ -z "$TARGET" ] || [ -z "$GH_TOKEN" ]; then
-            echo "::notice::RELEASE_DISPATCH_REPO or RELEASE_DISPATCH_TOKEN is not set, so no core-released event goes out."
-            exit 0
-          fi
-          jq -n --arg version "$GITHUB_REF_NAME" --arg sha256 "$SHA256" '{
-            event_type: "core-released",
-            client_payload: {core: "mkxp", version: $version, asset: "mkxp-z-ios.tar.gz", sha256: $sha256}
-          }' | gh api "repos/$TARGET/dispatches" --input -
-
       - name: Keep the build
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mkxp-z-ios
           path: mkxp-z-ios.tar.gz
+
+  # A job of its own, so that a re-run of a failed event does not
+  # publish again.
+  notify:
+    name: Send the core-released event
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Send the core-released event
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          TARGET: ${{ vars.RELEASE_DISPATCH_REPO }}
+          SHA256: ${{ needs.publish.outputs.sha256 }}
+        run: |
+          if [ -z "$TARGET" ]; then
+            echo "::notice::RELEASE_DISPATCH_REPO is not set, so no core-released event goes out."
+            exit 0
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASE_DISPATCH_REPO is set, but RELEASE_DISPATCH_TOKEN is not."
+            exit 1
+          fi
+          jq -n --arg version "$GITHUB_REF_NAME" --arg sha256 "$SHA256" '{
+            event_type: "core-released",
+            client_payload: {core: "mkxp", version: $version, asset: "mkxp-z-ios.tar.gz", sha256: $sha256}
+          }' | gh api "repos/$TARGET/dispatches" --input -
