@@ -9,13 +9,18 @@ inputs:
   sdk:
     description: iphoneos, iphonesimulator or macosx.
     required: true
+  artifacts:
+    description: >
+      "false" takes the dependencies only from the cache or from a
+      build, never from an artifact, and uploads no artifact.
+    default: "true"
 
 runs:
   using: composite
   steps:
     # The key changes when a recipe, a patch, a pinned source, a file
-    # that the Ruby patches take from syntax-transform, or Xcode
-    # changes.
+    # that the Ruby patches take from syntax-transform, this action, or
+    # Xcode changes.
     - name: Key the dependency cache
       id: key
       shell: bash
@@ -23,7 +28,7 @@ runs:
         SDK: ${{ inputs.sdk }}
       run: |
         HASH="$({
-          git ls-files -s -- deps tools/build-deps-ios.sh tools/licenses.rb licenses syntax-transform
+          git ls-files -s -- deps tools/build-deps-ios.sh tools/licenses.rb licenses syntax-transform .github/actions/deps/action.yml
           xcodebuild -version
         } | shasum -a 256 | cut -d' ' -f1)"
         echo "key=deps-$SDK-$HASH" >> "$GITHUB_OUTPUT"
@@ -41,23 +46,53 @@ runs:
           deps/ANGLE
         key: ${{ steps.key.outputs.key }}
 
-    # A pull request that changes the dependencies uploads its build
-    # as an artifact. dev then uses it after the merge, and does not
-    # build again. A fork's run can upload an artifact of any name, so
-    # take only a build from a run of this repository. A failed lookup
-    # builds the dependencies.
+    # A pull request of this repository uploads its dependencies as an
+    # artifact. A later run of the same pull request takes them from
+    # there. A fork's run can upload an artifact of any name, so it
+    # never counts.
+    #
+    # dev takes an artifact only from a run that passed on the head of
+    # the pull request that this commit merged. Squash merges give
+    # that pull request a merge_commit_sha equal to this commit. Any
+    # other push or a failed lookup builds the dependencies.
     - name: Find a build from an earlier run
       id: artifact
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: inputs.artifacts == 'true' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         KEY: ${{ steps.key.outputs.key }}
         REPO_ID: ${{ github.repository_id }}
+        DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+        SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
       run: |
-        FOUND="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$KEY&per_page=100" --jq "
-          [.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID)]
-          | first // empty | \"id=\(.id)\nrun=\(.workflow_run.id)\"")" || FOUND=""
+        HEAD=""
+        if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$SAME_REPO" = true ]; then
+          HEAD="$PR_HEAD"
+        elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = "$DEFAULT_REF" ]; then
+          HEAD="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$GITHUB_SHA\")] | first | .head.sha // empty")" || HEAD=""
+        fi
+        FOUND=""
+        if [ -n "$HEAD" ]; then
+          CANDIDATES="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$KEY&per_page=100" --jq "
+            .artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID)
+            | \"\(.id) \(.workflow_run.id) \(.workflow_run.head_sha)\"")" || CANDIDATES=""
+          while read -r ID RUN SHA; do
+            [ -n "$ID" ] || continue
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              [ "$SHA" = "$HEAD" ] || continue
+              CONCLUSION="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" --jq .conclusion)" || continue
+              [ "$CONCLUSION" = success ] || continue
+            elif [ "$RUN" != "$GITHUB_RUN_ID" ]; then
+              BRANCH="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" --jq .head_branch)" || continue
+              [ "$BRANCH" = "$GITHUB_HEAD_REF" ] || continue
+            fi
+            FOUND="$(printf 'id=%s\nrun=%s' "$ID" "$RUN")"
+            break
+          done <<< "$CANDIDATES"
+        fi
         echo "${FOUND:-no build found}"
         [ -n "$FOUND" ] && printf '%s\n' "$FOUND" >> "$GITHUB_OUTPUT"
         exit 0
@@ -72,6 +107,7 @@ runs:
         path: ${{ runner.temp }}/deps-artifact
 
     - name: Unpack the earlier build
+      id: unpack
       if: steps.artifact.outputs.id != ''
       shell: bash
       run: tar -xzf "$RUNNER_TEMP/deps-artifact/deps.tar.gz" -C deps
@@ -90,17 +126,25 @@ runs:
         brew install automake autoconf libtool pkg-config bison
         tools/build-deps-ios.sh "$SDK"
 
-    # A tar keeps the symbolic links and the file modes, and the
-    # artifact zip does not.
+    # dev reads the artifact only from the run of the pull request
+    # head, so that run uploads it again when it took it from an
+    # earlier run. A tar keeps the symbolic links and the file modes,
+    # and the artifact zip does not.
     - name: Pack the build
-      if: steps.build.outcome == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      if: >-
+        inputs.artifacts == 'true' && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && (steps.build.outcome == 'success' || steps.unpack.outcome == 'success')
       shell: bash
       env:
         SDK: ${{ inputs.sdk }}
       run: tar -czf "$RUNNER_TEMP/deps.tar.gz" -C deps "build-$SDK-arm64" ANGLE
 
     - name: Upload the build
-      if: steps.build.outcome == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      if: >-
+        inputs.artifacts == 'true' && github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && (steps.build.outcome == 'success' || steps.unpack.outcome == 'success')
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ steps.key.outputs.key }}
