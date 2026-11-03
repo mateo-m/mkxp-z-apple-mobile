@@ -85,19 +85,13 @@ expand_path() {
         esac
     fi
 
-    shopt -s nullglob
-    local -a matches=( "$dir"/$pattern )
-    shopt -u nullglob
-
-    if ((${#matches[@]} == 0)); then
+    local matches
+    matches="$(compgen -G "$dir/$pattern" | LC_ALL=C sort)"
+    if [[ -z "$matches" ]]; then
         echo "error: glob matched no patches: $1" >&2
         exit 1
     fi
-
-    local match
-    while IFS= read -r match; do
-        printf '%s\n' "$match"
-    done < <(printf '%s\n' "${matches[@]}" | LC_ALL=C sort)
+    printf '%s\n' "$matches"
 }
 
 apply_git_patch() {
@@ -131,17 +125,19 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == patch:* ]]; then
         mode="patch"
         line="${line#patch:}"
-        line="$(echo "$line" | sed 's/^[[:space:]]*//')"
+        line="${line#"${line%%[![:space:]]*}"}"
     fi
 
+    # In a process substitution, the exit of expand_path does not stop the script.
+    patch_paths="$(expand_path "$line")"
     while IFS= read -r patch_path; do
+        if [[ "$patch_path" != /* ]]; then
+            patch_path="${PATCHES_ROOT}/${patch_path}"
+        fi
         if [[ "$mode" == "patch" ]]; then
             apply_unified_patch "$patch_path"
         else
-            if [[ "$patch_path" != /* ]]; then
-                patch_path="${PATCHES_ROOT}/${patch_path}"
-            fi
             apply_git_patch "$patch_path"
         fi
-    done < <(expand_path "$line")
+    done <<< "$patch_paths"
 done < "$MANIFEST"
