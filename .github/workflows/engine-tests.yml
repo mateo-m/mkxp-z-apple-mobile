@@ -28,67 +28,77 @@ permissions:
   actions: read
 
 jobs:
-  # A run that passes uploads a marker named after a hash of every
-  # file except Markdown. A run that finds the marker of its own files
-  # does not test again: a pull request skips the tests, and dev only
-  # fills the caches. A job that `if:` skips still reports, and the
-  # summary job counts a skip as a pass.
-  changes:
-    name: Find an earlier pass
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  simulator:
+    name: Engine tests
+    runs-on: macos-latest
+    timeout-minutes: 60
     outputs:
-      fingerprint: ${{ steps.check.outputs.fingerprint }}
-      test: ${{ steps.check.outputs.test }}
+      fingerprint: ${{ steps.pass.outputs.fingerprint }}
+      test: ${{ steps.pass.outputs.test }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # A fork's run can upload a marker of any name, so only a run of
-      # this repository counts. A failed lookup runs the tests.
+      - uses: ./.github/actions/xcode
+
+      # A run that passes uploads a marker named after a hash of every
+      # file except Markdown, the Xcode version and the macOS version.
+      # A pull request that finds a marker of its own hash does not
+      # test again, and dev only fills the caches.
+      #
+      # A fork's run can upload a marker of any name, and an older
+      # version of this workflow uploaded markers for runs that did not
+      # pass. So only a v2 marker counts, and only from a run of this
+      # workflow in this repository that ended in success. A failed
+      # lookup runs the tests.
+      #
+      # TEST runs the suites. BUILD builds the test host, which a push
+      # to dev always does to fill the caches.
       - name: Look for a pass of the same files
-        id: check
+        id: pass
         env:
           GH_TOKEN: ${{ github.token }}
           REPO_ID: ${{ github.repository_id }}
         run: |
-          FINGERPRINT="$(git ls-files -s -- ':!:*.md' | shasum -a 256 | cut -d' ' -f1)"
+          FINGERPRINT="$({
+            git ls-files -s -- ':!:*.md'
+            xcodebuild -version
+            sw_vers
+          } | shasum -a 256 | cut -d' ' -f1)"
           echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
-          PASSES=0
+          PASS=""
           if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
-            PASSES="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=engine-tests-passed-$FINGERPRINT&per_page=100" \
-              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID)] | length")" || PASSES=0
+            RUNS="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=engine-tests-passed-v2-$FINGERPRINT&per_page=100" \
+              --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == $REPO_ID) | .workflow_run.id] | unique | .[]")" || RUNS=""
+            for RUN in $RUNS; do
+              PASS="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" \
+                --jq 'select(.conclusion == "success" and .path == ".github/workflows/engine-tests.yml" and .head_repository.id == .repository.id) | .html_url')" || PASS=""
+              [ -n "$PASS" ] && break
+            done
           fi
-          if [ "$PASSES" -gt 0 ]; then
-            echo "::notice::These files passed in an earlier run, so this run does not test them again."
-            echo "test=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "test=true" >> "$GITHUB_OUTPUT"
+          TEST=true
+          if [ -n "$PASS" ]; then
+            echo "::notice::These files passed in $PASS, so this run does not test them again."
+            TEST=false
           fi
-
-  simulator:
-    name: Engine tests
-    needs: changes
-    if: needs.changes.outputs.test == 'true' || github.event_name == 'push'
-    runs-on: macos-latest
-    timeout-minutes: 60
-    env:
-      TEST: ${{ needs.changes.outputs.test }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          BUILD="$TEST"
+          [ "$GITHUB_EVENT_NAME" = push ] && BUILD=true
+          echo "test=$TEST" >> "$GITHUB_OUTPUT"
+          printf 'TEST=%s\nBUILD=%s\n' "$TEST" "$BUILD" >> "$GITHUB_ENV"
 
       # The binding build compiles hmode7. The submodule URLs use SSH,
       # and the runner has no SSH key.
       - name: Check out hmode7
+        if: env.BUILD == 'true'
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 hmode7
 
-      - uses: ./.github/actions/xcode
-
       - uses: ./.github/actions/ccache
+        if: env.BUILD == 'true'
         with:
           name: engine-tests-iphonesimulator
 
       - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
+        if: env.BUILD == 'true'
         with:
           ruby-version: "3.4"
 
@@ -105,6 +115,7 @@ jobs:
           done
 
       - uses: ./.github/actions/deps
+        if: env.BUILD == 'true'
         with:
           sdk: iphonesimulator
 
@@ -112,6 +123,7 @@ jobs:
       # the game, the suites and the interpreter at launch.
       - name: Build the test host
         id: host
+        if: env.BUILD == 'true'
         run: |
           ruby tests/legacy-methods/pack_scripts.rb
           ruby tests/script-folder/pack_scripts.rb
@@ -119,6 +131,7 @@ jobs:
             --game tests/engine --game tests/legacy-methods --game tests/script-folder
 
       - name: Report the cache hit rate
+        if: env.BUILD == 'true'
         run: ccache -s
 
       # A cache that a pull request saves serves only that pull
@@ -192,8 +205,6 @@ jobs:
   # The release builds these two. A break here shows before a tag.
   engine:
     name: Engine for ${{ matrix.sdk }}
-    needs: changes
-    if: needs.changes.outputs.test == 'true' || github.event_name == 'push'
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
@@ -204,7 +215,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check out hmode7
-        if: needs.changes.outputs.test == 'true'
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --depth 1 hmode7
 
@@ -216,13 +226,13 @@ jobs:
           sdk: ${{ matrix.sdk }}
 
       - name: Build the engine
-        if: needs.changes.outputs.test == 'true'
         run: tools/build-engine-ios.sh --sdk "${{ matrix.sdk }}"
 
-  # Aggregate gate, so the ruleset has one context to require.
+  # One check for the whole run. The ruleset does not require it. It
+  # writes the pass marker that a later run looks for.
   summary:
     name: Engine tests summary
-    needs: [changes, simulator, engine]
+    needs: [simulator, engine]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -233,22 +243,18 @@ jobs:
       - name: Verify every job passed
         env:
           NEEDS: ${{ toJSON(needs) }}
-          RAN: ${{ needs.changes.outputs.test == 'true' || github.event_name == 'push' }}
         run: |
           jq -c 'map_values(.result)' <<< "$NEEDS"
-          if [ "$RAN" = true ]; then WANT=success; else WANT=skipped; fi
-          jq -e --arg want "$WANT" \
-            '.changes.result == "success" and .simulator.result == $want and .engine.result == $want' \
-            <<< "$NEEDS" > /dev/null
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null
 
       - name: Write the pass marker
-        if: needs.changes.outputs.test == 'true'
-        run: echo "${{ needs.changes.outputs.fingerprint }}" > "$RUNNER_TEMP/fingerprint"
+        if: needs.simulator.outputs.test == 'true'
+        run: echo "${{ needs.simulator.outputs.fingerprint }}" > "$RUNNER_TEMP/fingerprint"
 
       - name: Upload the pass marker
-        if: needs.changes.outputs.test == 'true'
+        if: needs.simulator.outputs.test == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: engine-tests-passed-${{ needs.changes.outputs.fingerprint }}
+          name: engine-tests-passed-v2-${{ needs.simulator.outputs.fingerprint }}
           path: ${{ runner.temp }}/fingerprint
           retention-days: 90
