@@ -146,20 +146,21 @@ jobs:
           printf 'Built from `%s`.\n\nsha256: `%s`\n' "$GITHUB_SHA" "$SHA256" > notes.md
           gh release create "$GITHUB_REF_NAME" mkxp-z-ios.tar.gz --title "$GITHUB_REF_NAME" --notes-file notes.md
 
-      - name: Tell empo-app about the release
+      - name: Send the core-released event
         if: github.event_name == 'push'
         env:
-          GH_TOKEN: ${{ secrets.EMPO_APP_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_DISPATCH_TOKEN }}
+          TARGET: ${{ vars.RELEASE_DISPATCH_REPO }}
           SHA256: ${{ steps.package.outputs.sha256 }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::notice::EMPO_APP_DISPATCH_TOKEN is not set, so empo-app gets no core-released event."
+          if [ -z "$TARGET" ] || [ -z "$GH_TOKEN" ]; then
+            echo "::notice::RELEASE_DISPATCH_REPO or RELEASE_DISPATCH_TOKEN is not set, so no core-released event goes out."
             exit 0
           fi
           jq -n --arg version "$GITHUB_REF_NAME" --arg sha256 "$SHA256" '{
             event_type: "core-released",
             client_payload: {core: "mkxp", version: $version, asset: "mkxp-z-ios.tar.gz", sha256: $sha256}
-          }' | gh api repos/mateo-m/empo-app/dispatches --input -
+          }' | gh api "repos/$TARGET/dispatches" --input -
 
       - name: Keep the build
         if: github.event_name == 'workflow_dispatch'
