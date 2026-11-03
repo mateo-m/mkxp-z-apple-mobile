@@ -19,6 +19,8 @@
 #
 # Run: ruby mkxp-z-apple-mobile/tools/test_engine_harness.rb
 
+require 'fileutils'
+require 'tmpdir'
 require_relative 'assertion_count'
 
 ROOT = File.expand_path('..', __dir__)
@@ -176,6 +178,13 @@ System.reset
 EngineTest.suite('demo', 7)
 assert(System::LINES.include?('[TEST] PLAN 7'), 'suite prints the plan')
 
+# --- A suite prints the game folder that the host opened ---
+ENV['MKXP_TEST_GAME'] = 'legacy-methods'
+System.reset
+EngineTest.suite('demo', 1)
+assert(System::LINES.include?('[TEST] INFO game=legacy-methods'), 'suite prints the game folder')
+ENV.delete('MKXP_TEST_GAME')
+
 # --- Running fewer checks than planned is a failure ---
 System.reset
 EngineTest.suite('demo', 3)
@@ -277,10 +286,42 @@ Bitmap.reset
 EngineTest.bitmap(8, 4, :red) { nil }
 assert_eq(Bitmap::MADE.first.fills, [[0, 0, 8, 4, :red]], 'bitmap fills the whole bitmap')
 
+# --- run_suites.rb runs every suite, also after one that raises ---
+Dir.mktmpdir do |dir|
+  File.write(File.join(dir, 'first.rb'), <<~RUBY)
+    EngineTest.suite('first', 1)
+    EngineTest.test('a') { EngineTest.assert(true, 'a') }
+    EngineTest.finish
+    exit
+  RUBY
+  File.write(File.join(dir, 'broken.rb'), <<~RUBY)
+    EngineTest.suite('broken', 1)
+    raise MKXPError, 'boom'
+  RUBY
+  File.write(File.join(dir, 'last.rb'), <<~RUBY)
+    EngineTest.suite('last', 1)
+    EngineTest.test('b') { EngineTest.assert(true, 'b') }
+    exit(EngineTest.finish.zero? ? 0 : 1)
+  RUBY
+  FileUtils.cp(File.join(ROOT, 'tests', 'engine', 'run_suites.rb'), dir)
+  ENV['MKXP_TEST_SUITES'] = 'first.rb broken.rb last.rb'
+  System.reset
+  begin
+    load File.join(dir, 'run_suites.rb')
+  rescue SystemExit
+    nil
+  end
+end
+lines = System::LINES.map { |line| line.sub('[TEST] ', '') }.grep(/\A(SUITE|ok|FAIL|DONE)/)
+assert_eq(lines, ['SUITE first', 'ok a', 'DONE passed=1 failed=0 pending=0',
+                  'SUITE broken', 'FAIL broken.rb -- MKXPError: boom', 'DONE passed=0 failed=1 pending=0',
+                  'SUITE last', 'ok b', 'DONE passed=1 failed=0 pending=0'],
+          'run_suites runs each suite and reports the one that raised')
+
 unless $failures.empty?
   warn "test_engine_harness: #{$failures.size} failure(s)"
   $failures.each { |failure| warn "FAIL: #{failure}" }
   exit 1
 end
 
-test_passed('test_engine_harness', 32)
+test_passed('test_engine_harness', 33)

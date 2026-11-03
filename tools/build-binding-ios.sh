@@ -20,11 +20,11 @@
 # Usage:
 #   tools/build-binding-ios.sh --ruby 18|19|31 \
 #       --sdk iphoneos|iphonesimulator \
+#       --arch <arch> --min-os <version> \
 #       --out <libdir> --obj <objdir> --scratch <dir> \
 #       --static-lib <libruby-static.a> --ext-lib <libruby-ext.a> \
 #       --ruby-include <dir> \
-#       --include <dir> [--include <dir> ...] \
-#       [--arch arm64] [--min-os 26.0]
+#       --include <dir> [--include <dir> ...]
 #
 # Outputs into <libdir>:
 #   mkxp<NN>-merged.o
@@ -41,8 +41,8 @@ ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 
 RUBY=""
 SDK=""
-ARCH=arm64
-MIN_OS=26.0
+ARCH=""
+MIN_OS=""
 OUT=""
 OBJ=""
 SCRATCH=""
@@ -69,7 +69,7 @@ do
     esac
 done
 
-for required in ruby sdk out obj static-lib ext-lib ruby-include
+for required in ruby sdk arch min-os out obj static-lib ext-lib ruby-include
 do
     name="$(echo "$required" | tr 'a-z-' 'A-Z_')"
     eval "value=\$$name"
@@ -217,17 +217,16 @@ UNEXPORTS="$SCRATCH/ruby${RUBY}-unexports.txt"
 mkdir -p "$OBJ" "$OUT" "$SCRATCH"
 
 echo "[mkxp$RUBY] Compiling binding/*.cpp + hmode7/*.cpp against Ruby $RUBY_VERSION..."
+# Flag lists below are word lists, so they stay unquoted.
+# shellcheck disable=SC2086,SC2090
 for src in "$ENGINE"/binding/*.cpp "$ENGINE"/hmode7/src/*.cpp
 do
-    obj="$OBJ/$(basename "$src" .cpp).o"
-    echo "  -> $(basename "$obj")"
-    # Flag lists below are word lists, so they stay unquoted.
-    # shellcheck disable=SC2086,SC2090
-    $LAUNCHER "$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
+    echo "$src $OBJ/$(basename "$src" .cpp).o"
+done |
+    "$ENGINE/tools/compile-parallel.sh" $LAUNCHER "$CXX" \
+        -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
         -std=c++14 -fdeclspec -fobjc-arc -O3 \
-        $INCLUDES $DEFINES $WARNFLAGS \
-        -c "$src" -o "$obj"
-done
+        $INCLUDES $DEFINES $WARNFLAGS
 
 echo "[mkxp$RUBY] Compiling per-version wrapper..."
 # shellcheck disable=SC2086,SC2090
