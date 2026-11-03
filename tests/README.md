@@ -76,10 +76,11 @@ done
 
 Give `--suite` more than once to run several suites in one launch, in
 that order. `run_suites.rb` runs them, and the script checks the
-result of each suite on its own. On CI, the first launch takes 3 to 5
-minutes, because it boots the simulator and installs the app.
-After that, a launch of short suites takes 3 to 5 seconds. One launch
-for several suites saves that time:
+result of each suite on its own. On CI, the first launch takes 4 to 7
+minutes, because it boots the simulator and installs the app. After
+that, each run of the script takes 10 to 70 seconds. Most of that time
+goes to finding the simulator and checking the installed app, so one
+launch for several suites saves time:
 
 ```sh
 tools/run-engine-tests.sh --ruby 19 --no-build \
