@@ -76,8 +76,8 @@ done
 
 Give `--suite` more than once to run several suites in one launch, in
 that order. `run_suites.rb` runs them, and the script checks the
-result of each suite on its own. On CI, the first launch takes about
-two minutes, because it boots the simulator and installs the app.
+result of each suite on its own. On CI, the first launch takes 3 to 5
+minutes, because it boots the simulator and installs the app.
 After that, a launch of short suites takes 3 to 5 seconds. One launch
 for several suites saves that time:
 
