@@ -114,8 +114,9 @@ jobs:
             ruby "$test"
           done
 
+      # Also when the tests skip, so that the run of a pull request
+      # head holds the artifact that dev takes after the merge.
       - uses: ./.github/actions/deps
-        if: env.BUILD == 'true'
         with:
           sdk: iphonesimulator
 
