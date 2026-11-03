@@ -74,6 +74,11 @@ ANGLE. The `make` line then builds the engine with two scripts:
 | `tools/build-core-ios.sh` | `libmkxpz-core.a`, everything under `src/` | Dependency headers only |
 | `tools/build-binding-ios.sh` | `mkxp<NN>-merged.o`, one per Ruby version | That version's libruby archives |
 
+`tools/build-engine-ios.sh --sdk iphonesimulator` runs the same two
+scripts with the same flags. It reads only the installed dependencies,
+so it works after a CI cache restore, when the source trees are not
+there. The `make` line would build every dependency again then.
+
 Do the same with `iphoneos` for the device and `macosx` for the Mac.
 Then `tools/package-ios.sh` puts the three SDKs into `mkxp-z-ios.tar.gz`. The
 file holds the libraries, the `app_bridge.h` header, the engine
@@ -86,9 +91,10 @@ notices in the app. `tools/build-deps-ios.sh` writes the file from
 `licenses/manifest.json` and the source trees. `tools/package-ios.sh`
 fails when a library in the package has no entry in the manifest.
 
-A push of a `v*` tag runs the release workflow. It builds both SDKs
-and publishes `mkxp-z-ios.tar.gz` as a GitHub release, with its
-sha256 in the release notes.
+A push of a `v*` tag runs the release workflow. It builds the three
+SDKs and waits until the engine tests of the tagged commit pass. Then
+it publishes `mkxp-z-ios.tar.gz` as a GitHub release, with its sha256
+in the release notes and a build provenance attestation.
 
 ### Test on your own
 
