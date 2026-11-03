@@ -14,7 +14,6 @@
 #                             [--suite <file> ...] [--ruby 18|19|31]
 #                             [--fast-forward <n>]
 #                             [--timeout <seconds>] [--keep] [--no-build]
-#   tools/run-engine-tests.sh --boot [--device <name or udid>]
 #
 # --suite names another file in the game folder to run in place of
 # the one mkxp.json points at. The suite must call
@@ -26,9 +25,6 @@
 #
 # --game picks a game folder. With --no-build, the last build must
 # hold a folder of the same name.
-#
-# --boot starts the boot of the simulator that a run would pick. A
-# later run waits until the boot is complete.
 #
 # --ruby picks the interpreter the suite runs on. Without it the
 # engine keeps its own default.
@@ -51,7 +47,6 @@ RUBY=""
 FAST_FORWARD=""
 KEEP=0
 BUILD=1
-BOOT=0
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
 CONSOLE=""
 
@@ -71,7 +66,6 @@ do
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
-        --boot) BOOT=1; shift ;;
         *) echo "run-engine-tests: unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -107,11 +101,6 @@ fi
 
 NAME="$(xcrun simctl list devices | grep "$DEVICE" | sed -e 's/^ *//' -e 's/ *(.*//' | head -n 1)"
 echo "run-engine-tests: using $NAME ($DEVICE)"
-
-if [ "$BOOT" = "1" ]; then
-    xcrun simctl boot "$DEVICE" 2>/dev/null || true
-    exit 0
-fi
 
 # --- Build ------------------------------------------------------------
 GAME="$(cd "$GAME" && pwd)"

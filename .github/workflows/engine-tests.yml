@@ -84,12 +84,6 @@ jobs:
 
       - uses: ./.github/actions/xcode
 
-      # The boot takes minutes, so it runs while the job builds. The
-      # first launch waits until the boot is complete.
-      - name: Start the simulator boot
-        if: env.TEST == 'true'
-        run: nohup tools/run-engine-tests.sh --boot > "$RUNNER_TEMP/boot.log" 2>&1 &
-
       - uses: ./.github/actions/ccache
         with:
           name: engine-tests-iphonesimulator
