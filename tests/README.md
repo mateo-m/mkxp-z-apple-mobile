@@ -215,6 +215,7 @@ Both suites print the same line grammar. Every line starts with a
 
 ```text
 [TEST] SUITE mega-bitmap
+[TEST] INFO game=engine
 [TEST] INFO max_size=2048
 [TEST] ok small: clear empties the whole bitmap
 [TEST] PEND mega: blur softens an edge -- Operation not supported for mega surfaces

@@ -25,7 +25,8 @@
 // Three variables pick what the run covers, all read at launch:
 //
 //   MKXP_TEST_GAME   the folder under Games/. Without it the host
-//                    opens "engine".
+//                    opens "engine" and sets the variable to that, so
+//                    the suite can print the folder it runs in.
 //   MKXP_TEST_RUBY   the interpreter: 18, 19 or 31. Without it the
 //                    engine keeps its own default. A launcher picks
 //                    the version per game, so a suite that covers
@@ -133,8 +134,12 @@ static void engineTestHostStart(void) {
             NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
 
         const char *name = getenv("MKXP_TEST_GAME");
+        if (!name || !*name) {
+            name = "engine";
+            setenv("MKXP_TEST_GAME", name, 1);
+        }
         NSString *bundled = [[resources stringByAppendingPathComponent:@"Games"]
-            stringByAppendingPathComponent:name && *name ? @(name) : @"engine"];
+            stringByAppendingPathComponent:@(name)];
         clearDocuments(documents);
         NSString *game = prepareGameFolder(bundled, documents);
         applyRequestedSuite(game);

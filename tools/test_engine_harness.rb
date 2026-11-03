@@ -178,6 +178,13 @@ System.reset
 EngineTest.suite('demo', 7)
 assert(System::LINES.include?('[TEST] PLAN 7'), 'suite prints the plan')
 
+# --- A suite prints the game folder that the host opened ---
+ENV['MKXP_TEST_GAME'] = 'legacy-methods'
+System.reset
+EngineTest.suite('demo', 1)
+assert(System::LINES.include?('[TEST] INFO game=legacy-methods'), 'suite prints the game folder')
+ENV.delete('MKXP_TEST_GAME')
+
 # --- Running fewer checks than planned is a failure ---
 System.reset
 EngineTest.suite('demo', 3)

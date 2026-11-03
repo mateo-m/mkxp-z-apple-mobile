@@ -21,10 +21,12 @@
 # every "_" written as "-". This script compares the two, so a
 # selection the host dropped cannot pass as a clean run. Give
 # --suite more than once to run several suites in one launch, in that
-# order. The game folder then needs run_suites.rb.
+# order. The game folder then needs run_suites.rb. Each suite can
+# appear only once.
 #
 # --game picks a game folder. With --no-build, the last build must
-# hold a folder of the same name.
+# hold a folder of the same name. The harness prints the folder the
+# host opened, and this script compares it to the one asked for.
 #
 # --ruby picks the interpreter the suite runs on. Without it the
 # engine keeps its own default.
@@ -50,12 +52,25 @@ BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
 CONSOLE=""
 
+# The name a suite file gives to EngineTest.suite.
+suite_name() {
+    printf '%s' "${1%.rb}" | tr '_' '-'
+}
+
 while [ "$#" -gt 0 ]
 do
     case "$1" in
         --device) DEVICE="$2"; shift 2 ;;
         --game) GAME="$2"; shift 2 ;;
-        --suite) SUITES="$SUITES $2"; shift 2 ;;
+        --suite)
+            for seen in $SUITES
+            do
+                if [ "$(suite_name "$seen")" = "$(suite_name "$2")" ]; then
+                    echo "run-engine-tests: --suite $2 is given twice" >&2
+                    exit 2
+                fi
+            done
+            SUITES="$SUITES $2"; shift 2 ;;
         --ruby)
             case "$2" in
                 18|19|31) ;;
@@ -209,6 +224,12 @@ check_suite() {
         return 1
     fi
 
+    SEEN_GAME="$(printf '%s\n' "$2" | sed -n 's/^\[TEST\] INFO game=//p' | head -n 1)"
+    if [ "$SEEN_GAME" != "$GAME_NAME" ]; then
+        echo "run-engine-tests: $label ran in game '$SEEN_GAME', not '$GAME_NAME'." >&2
+        return 1
+    fi
+
     PASSED="$(field passed "$DONE_LINE")"
     FAILED="$(field failed "$DONE_LINE")"
     PENDING="$(field pending "$DONE_LINE")"
@@ -257,7 +278,7 @@ do
     # The host applies --suite to the copy of the game folder it makes
     # at launch. Nothing before this point proves the engine read that
     # copy, so find each suite by the name the harness printed.
-    want="$(printf '%s' "${suite%.rb}" | tr '_' '-')"
+    want="$(suite_name "$suite")"
     block="$(printf '%s\n' "$RESULTS" | awk -v want="$want" '
         /^\[TEST\] SUITE / { inside = ($3 == want) }
         inside')"
