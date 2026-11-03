@@ -217,17 +217,16 @@ UNEXPORTS="$SCRATCH/ruby${RUBY}-unexports.txt"
 mkdir -p "$OBJ" "$OUT" "$SCRATCH"
 
 echo "[mkxp$RUBY] Compiling binding/*.cpp + hmode7/*.cpp against Ruby $RUBY_VERSION..."
+# Flag lists below are word lists, so they stay unquoted.
+# shellcheck disable=SC2086,SC2090
 for src in "$ENGINE"/binding/*.cpp "$ENGINE"/hmode7/src/*.cpp
 do
-    obj="$OBJ/$(basename "$src" .cpp).o"
-    echo "  -> $(basename "$obj")"
-    # Flag lists below are word lists, so they stay unquoted.
-    # shellcheck disable=SC2086,SC2090
-    $LAUNCHER "$CXX" -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
+    echo "$src $OBJ/$(basename "$src" .cpp).o"
+done |
+    "$ENGINE/tools/compile-parallel.sh" $LAUNCHER "$CXX" \
+        -isysroot "$SYSROOT" $TARGET_FLAG -arch "$ARCH" \
         -std=c++14 -fdeclspec -fobjc-arc -O3 \
-        $INCLUDES $DEFINES $WARNFLAGS \
-        -c "$src" -o "$obj"
-done
+        $INCLUDES $DEFINES $WARNFLAGS
 
 echo "[mkxp$RUBY] Compiling per-version wrapper..."
 # shellcheck disable=SC2086,SC2090

@@ -144,34 +144,30 @@ needs_rebuild() {
 }
 
 echo "[mkxpz-core] Compiling engine core for $SDK ($ARCH, min $MIN_OS)..."
-COMPILED=0
-for src in $(list_sources); do
+PENDING="$(for src in $(list_sources); do
     # Flatten the path into a unique object name (src/display/gl/
     # shader.cpp and a hypothetical src/shader.cpp must not collide).
     obj="$OBJ/$(echo "$src" | sed -e 's|^src/||' -e 's|/|__|g' \
         -e 's|\.cpp$|.o|' -e 's|\.mm$|.o|' -e 's|\.c$|.o|')"
-    if ! needs_rebuild "$obj" "$src"; then
-        continue
+    if needs_rebuild "$obj" "$src"; then
+        echo "$ENGINE/$src $obj"
     fi
-    echo "  -> $src"
-    case "$src" in
-        *.c)
-            # shellcheck disable=SC2086,SC2090 # LAUNCHER/COMMON_FLAGS are word lists
-            $LAUNCHER "$CC" $COMMON_FLAGS -c "$ENGINE/$src" -o "$obj"
-            ;;
-        *.mm)
-            # shellcheck disable=SC2086,SC2090
-            $LAUNCHER "$CXX" -std=c++14 -fdeclspec -fobjc-arc $COMMON_FLAGS \
-                -c "$ENGINE/$src" -o "$obj"
-            ;;
-        *)
-            # shellcheck disable=SC2086,SC2090
-            $LAUNCHER "$CXX" -std=c++14 -fdeclspec $COMMON_FLAGS \
-                -c "$ENGINE/$src" -o "$obj"
-            ;;
-    esac
-    COMPILED=$((COMPILED + 1))
-done
+done)"
+COMPILED="$(printf '%s' "$PENDING" | grep -c . || true)"
+
+compile() {
+    # $1 = source extension, the rest = compiler and flags
+    ext="$1"
+    shift
+    printf '%s\n' "$PENDING" | grep "\.$ext " |
+        "$ENGINE/tools/compile-parallel.sh" "$@"
+}
+# shellcheck disable=SC2086,SC2090 # LAUNCHER/COMMON_FLAGS are word lists
+compile c $LAUNCHER "$CC" $COMMON_FLAGS
+# shellcheck disable=SC2086,SC2090
+compile mm $LAUNCHER "$CXX" -std=c++14 -fdeclspec -fobjc-arc $COMMON_FLAGS
+# shellcheck disable=SC2086,SC2090
+compile cpp $LAUNCHER "$CXX" -std=c++14 -fdeclspec $COMMON_FLAGS
 
 LIB="$OUT/libmkxpz-core.a"
 if [ "$COMPILED" -gt 0 ] || [ ! -f "$LIB" ]; then
