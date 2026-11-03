@@ -43,6 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # A job that no runner takes reaches this job with a result that
+      # is neither failure nor cancelled, so ask for success.
       - name: Verify every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
+          jq -c 'map_values(.result)' <<< "$NEEDS"
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null

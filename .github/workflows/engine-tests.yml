@@ -233,9 +233,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # A job that no runner takes reaches this job with a result that
+      # is neither failure nor cancelled, so ask for success. The
+      # pass marker below depends on this step.
       - name: Verify every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          RAN: ${{ needs.changes.outputs.test == 'true' || github.event_name == 'push' }}
         run: |
-          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "false" ]
+          jq -c 'map_values(.result)' <<< "$NEEDS"
+          if [ "$RAN" = true ]; then WANT=success; else WANT=skipped; fi
+          jq -e --arg want "$WANT" \
+            '.changes.result == "success" and .simulator.result == $want and .engine.result == $want' \
+            <<< "$NEEDS" > /dev/null
 
       - name: Write the pass marker
         if: needs.changes.outputs.test == 'true'
