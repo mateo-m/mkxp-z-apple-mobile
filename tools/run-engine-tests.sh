@@ -224,7 +224,8 @@ check_suite() {
         return 1
     fi
 
-    SEEN_GAME="$(printf '%s\n' "$2" | sed -n 's/^\[TEST\] INFO game=//p' | head -n 1)"
+    # The simulator console adds a space at the end of each line.
+    SEEN_GAME="$(printf '%s\n' "$2" | sed -n 's/^\[TEST\] INFO game=\([^ ]*\).*/\1/p' | head -n 1)"
     if [ "$SEEN_GAME" != "$GAME_NAME" ]; then
         echo "run-engine-tests: $label ran in game '$SEEN_GAME', not '$GAME_NAME'." >&2
         return 1
