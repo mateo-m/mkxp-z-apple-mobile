@@ -97,8 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # A job that no runner takes reaches this job with a result that
-      # is neither failure nor cancelled, so ask for success.
+      # A job that no runner takes ends as "abandoned", which is
+      # neither failure nor cancelled, so ask for success.
       - name: Verify every job passed
         env:
           NEEDS: ${{ toJSON(needs) }}
