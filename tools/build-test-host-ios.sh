@@ -21,7 +21,8 @@
 #   tools/build-test-host-ios.sh [--sdk iphonesimulator]
 #                                [--game <dir> ...] [--out <dir>]
 #
-# Without --game, the bundle holds tests/engine.
+# Without --game, the bundle holds tests/engine. deps/<sdk>.make sets
+# the architecture and the minimum OS.
 #
 # Prerequisite: tools/build-deps-ios.sh iphonesimulator
 set -eu
@@ -29,8 +30,6 @@ set -eu
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 
 SDK=iphonesimulator
-ARCH=arm64
-MIN_OS=26.0
 GAMES=""
 OUT="$ENGINE/build"
 
@@ -38,8 +37,6 @@ while [ "$#" -gt 0 ]
 do
     case "$1" in
         --sdk) SDK="$2"; shift 2 ;;
-        --arch) ARCH="$2"; shift 2 ;;
-        --min-os) MIN_OS="$2"; shift 2 ;;
         --game) GAMES="$GAMES $(cd "$2" && pwd)"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         *) echo "build-test-host-ios: unknown argument $1" >&2; exit 2 ;;
@@ -52,6 +49,9 @@ if [ "$SDK" != "iphonesimulator" ]; then
     echo "build-test-host-ios: only --sdk iphonesimulator is supported" >&2
     exit 2
 fi
+
+ARCH=$(sed -n 's/^ARCH := //p' "$ENGINE/deps/$SDK.make")
+MIN_OS=$(sed -n 's/^MINIMUM_REQUIRED := //p' "$ENGINE/deps/$SDK.make")
 
 GAMES="${GAMES:-$ENGINE/tests/engine}"
 for game in $GAMES
@@ -77,9 +77,7 @@ CC="$(xcrun --sdk "$SDK" -f clang)"
 CXX="$(xcrun --sdk "$SDK" -f clang++)"
 TARGET="${ARCH}-apple-ios${MIN_OS}-simulator"
 
-"$ENGINE/tools/build-engine-ios.sh" \
-    --sdk "$SDK" --arch "$ARCH" --min-os "$MIN_OS" \
-    --obj "$OBJ" --out "$LIB"
+"$ENGINE/tools/build-engine-ios.sh" --sdk "$SDK" --obj "$OBJ" --out "$LIB"
 
 # --- Host shim --------------------------------------------------------
 echo "[test-host] Compiling the host shim..."
@@ -119,6 +117,7 @@ mkdir -p "$APP"
 # --- Bundle -----------------------------------------------------------
 echo "[test-host] Assembling the bundle..."
 cp "$ENGINE/tests/host/Info.plist" "$APP/Info.plist"
+plutil -insert MinimumOSVersion -string "$MIN_OS" "$APP/Info.plist"
 
 # Assets.bundle holds everything the engine reads from its host at run
 # time. A launcher assembles the same tree from the same sources.

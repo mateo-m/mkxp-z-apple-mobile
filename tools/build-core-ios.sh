@@ -14,9 +14,9 @@
 #
 # Usage:
 #   tools/build-core-ios.sh --sdk iphoneos|iphonesimulator \
+#       --arch <arch> --min-os <version> \
 #       --out <libdir> --obj <objdir> \
-#       --include <dir> [--include <dir> ...] \
-#       [--arch arm64] [--min-os 26.0]
+#       --include <dir> [--include <dir> ...]
 #
 # Outputs into <libdir>:
 #   libmkxpz-core.a
@@ -30,8 +30,8 @@ set -eu
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 
 SDK=""
-ARCH=arm64
-MIN_OS=26.0
+ARCH=""
+MIN_OS=""
 OUT=""
 OBJ=""
 DEP_INCLUDES=""
@@ -48,8 +48,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "$SDK" ] || [ -z "$OUT" ] || [ -z "$OBJ" ]; then
-    echo "build-core-ios: --sdk, --out and --obj are required" >&2
+if [ -z "$SDK" ] || [ -z "$ARCH" ] || [ -z "$MIN_OS" ] || [ -z "$OUT" ] || [ -z "$OBJ" ]; then
+    echo "build-core-ios: --sdk, --arch, --min-os, --out and --obj are required" >&2
     exit 2
 fi
 

@@ -20,11 +20,11 @@
 # Usage:
 #   tools/build-binding-ios.sh --ruby 18|19|31 \
 #       --sdk iphoneos|iphonesimulator \
+#       --arch <arch> --min-os <version> \
 #       --out <libdir> --obj <objdir> --scratch <dir> \
 #       --static-lib <libruby-static.a> --ext-lib <libruby-ext.a> \
 #       --ruby-include <dir> \
-#       --include <dir> [--include <dir> ...] \
-#       [--arch arm64] [--min-os 26.0]
+#       --include <dir> [--include <dir> ...]
 #
 # Outputs into <libdir>:
 #   mkxp<NN>-merged.o
@@ -41,8 +41,8 @@ ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 
 RUBY=""
 SDK=""
-ARCH=arm64
-MIN_OS=26.0
+ARCH=""
+MIN_OS=""
 OUT=""
 OBJ=""
 SCRATCH=""
@@ -69,7 +69,7 @@ do
     esac
 done
 
-for required in ruby sdk out obj static-lib ext-lib ruby-include
+for required in ruby sdk arch min-os out obj static-lib ext-lib ruby-include
 do
     name="$(echo "$required" | tr 'a-z-' 'A-Z_')"
     eval "value=\$$name"
