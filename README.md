@@ -74,10 +74,11 @@ ANGLE. The `make` line then builds the engine with two scripts:
 | `tools/build-core-ios.sh` | `libmkxpz-core.a`, everything under `src/` | Dependency headers only |
 | `tools/build-binding-ios.sh` | `mkxp<NN>-merged.o`, one per Ruby version | That version's libruby archives |
 
-`tools/build-engine-ios.sh --sdk iphonesimulator` runs the same two
-scripts with the same flags. It reads only the installed dependencies,
-so it works after a CI cache restore, when the source trees are not
-there. The `make` line would build every dependency again then.
+The `make` rules call both scripts through `tools/build-engine-ios.sh`.
+`tools/build-engine-ios.sh --sdk iphonesimulator` builds the whole engine
+for one SDK. It reads only the installed dependencies, so it works after
+a CI cache restore, when the source trees are not there. The `make` line
+would build every dependency again then.
 
 Do the same with `iphoneos` for the device and `macosx` for the Mac.
 Then `tools/package-ios.sh` puts the three SDKs into `mkxp-z-ios.tar.gz`. The
