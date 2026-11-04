@@ -27,6 +27,7 @@ void setEvalReceiver(void *self);
 void runConfigScript(const std::string &path, bool showDialogOnMissing);
 
 void loadRpgModule(int rgssVersion);
+void setLauncherIdentityGlobals();
 void loadEnginePreloads();
 void loadConfigPreloadScripts(const Config &conf);
 void loadConfigPostloadScripts(const Config &conf);

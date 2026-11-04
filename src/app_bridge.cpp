@@ -192,9 +192,11 @@ static std::mutex s_sharedFontsDirMutex;
 static std::string s_sharedFontsDir;
 
 // Launcher identity the host sets once before engine boot. Script
-// bootstrap reads it to define the `$userAgent` / `$<name>` globals.
+// bootstrap reads it to define the `$userAgent` / `$userAgentVersion`
+// / `$<name>` globals.
 static std::mutex s_launcherIdentityMutex;
 static std::string s_launcherIdentity;
+static std::string s_launcherVersion;
 
 // PEM CA bundle used for TLS server verification (native HTTP client
 // + Ruby openssl via SSL_CERT_FILE). Set once before engine boot.
@@ -686,14 +688,20 @@ const char *mkxp_getSharedFontsDirectory(void) {
     return s_sharedFontsDir.c_str();
 }
 
-void mkxp_setLauncherIdentity(const char *name) {
+void mkxp_setLauncherIdentity(const char *name, const char *version) {
     std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
     s_launcherIdentity = (name && *name) ? std::string(name) : std::string();
+    s_launcherVersion = (version && *version) ? std::string(version) : std::string("unknown");
 }
 
 const char *mkxp_getLauncherIdentity(void) {
     std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
     return s_launcherIdentity.c_str();
+}
+
+const char *mkxp_getLauncherVersion(void) {
+    std::lock_guard<std::mutex> lock(s_launcherIdentityMutex);
+    return s_launcherVersion.c_str();
 }
 
 void mkxp_setCABundlePath(const char *path) {
