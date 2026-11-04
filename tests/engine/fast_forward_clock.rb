@@ -20,15 +20,21 @@ EngineTest.suite('fast-forward-clock', 2)
 MULTIPLIER = [(ENV['MKXP_TEST_FAST_FORWARD'] || '1').to_i, 1].max
 EngineTest.info('multiplier', MULTIPLIER)
 
+# Graphics.average_frame_rate averages the last 41 frame times. A slow
+# simulator draws fewer frames than that in 2 seconds, and the average
+# then reaches back into the start-up. So draw at least 41 frames, and
+# compare with the rate over those frames.
+WINDOW = 41
 wall_start = Time.now
 clock_start = System.uptime
-frames = 0
-while Time.now - wall_start < 2.0
+updates = []
+while Time.now - wall_start < 2.0 || updates.size <= WINDOW * MULTIPLIER
   Graphics.update
-  frames += 1
+  updates << Time.now
 end
-clock_rate = (System.uptime - clock_start) / (Time.now - wall_start)
-drawn_frame_rate = frames / (Time.now - wall_start) / MULTIPLIER
+clock_rate = (System.uptime - clock_start) / (updates.last - wall_start)
+window = updates.last((WINDOW * MULTIPLIER) + 1)
+drawn_frame_rate = WINDOW / (window.last - window.first)
 
 EngineTest.test('System.uptime runs at the fast-forward speed') do
   message = format('clock rate %<rate>.2f, expected %<expected>d',

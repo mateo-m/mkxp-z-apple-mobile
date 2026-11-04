@@ -1,0 +1,46 @@
+name: Set up ccache
+description: >
+  Installs ccache, restores the newest cache with the given name, and
+  zeroes its counters. tools/build-core-ios.sh and
+  tools/build-binding-ios.sh use ccache when it is on the PATH.
+
+inputs:
+  name:
+    description: The cache name. The workflow saves it as ccache-<name>-<sha>.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install ccache
+      shell: bash
+      env:
+        VERSION: 4.14.2
+        SHA256: cf240009630b605b775c7c5c7b7105a3b196c79f31af322c1557969aa28003fc
+      run: |
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/ccache.tar.gz" \
+          "https://github.com/ccache/ccache/releases/download/v$VERSION/ccache-$VERSION-darwin.tar.gz"
+        echo "$SHA256  $RUNNER_TEMP/ccache.tar.gz" | shasum -a 256 -c
+        mkdir -p "$RUNNER_TEMP/ccache"
+        tar -xzf "$RUNNER_TEMP/ccache.tar.gz" -C "$RUNNER_TEMP/ccache" --strip-components 1
+        echo "$RUNNER_TEMP/ccache" >> "$GITHUB_PATH"
+        {
+          echo "CCACHE_DIR=$HOME/.ccache"
+          # The job picks the newest Xcode. The default compiler check
+          # reads size and mtime, so a runner image with a new clang
+          # could get objects that the old one built.
+          echo "CCACHE_COMPILERCHECK=content"
+          echo "CCACHE_MAXSIZE=800M"
+        } >> "$GITHUB_ENV"
+
+    - name: Restore the compiler cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.ccache
+        key: ccache-${{ inputs.name }}-${{ github.sha }}
+        restore-keys: ccache-${{ inputs.name }}-
+
+    # The restored cache keeps the counters of the run that saved it.
+    - name: Zero the cache counters
+      shell: bash
+      run: ccache -z

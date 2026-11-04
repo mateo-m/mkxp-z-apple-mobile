@@ -596,10 +596,8 @@ $(SOURCES)/ruby/configure: $(SOURCES)/ruby/configure.ac
 # `-unexported_symbols_list`. Hidden Ruby symbols cannot clash across
 # versions, so each merged .o exposes one entry point to the host.
 #
-# The recipe lives in the engine repo
-# ($(ENGINE)/tools/build-binding-ios.sh), the same way mkxp-core
-# delegates to build-core-ios.sh. This makefile supplies only SDK
-# paths, the libruby archives, and the dependency header dirs. See
+# The recipe lives in $(ENGINE)/tools/build-binding-ios.sh, and
+# $(ENGINE)/tools/build-engine-ios.sh gives it the paths. See
 # $(ENGINE)/docs/multi-ruby.md.
 #
 # Ruby 1.8, 1.9 and 3.1 are built. Native Ruby 3.0 was dropped,
@@ -627,11 +625,16 @@ mkxp-core: init_dirs $(LIBDIR)/libmkxpz-core.a
 
 # ---- Engine core static library --------------------------------------
 # Everything under $(ENGINE)/src compiled into libmkxpz-core.a. The
-# recipe lives in tools/build-core-ios.sh, and this makefile only
-# supplies the SDK and the paths. Compile-only:
+# recipe lives in tools/build-core-ios.sh. Compile-only:
 # dependency headers come from $(INCLUDEDIR) + the ANGLE prebuilt.
 # The script stamps $(LIBDIR)/.mkxp-core-fingerprint, a hash of the
 # engine src tree, the same way as the binding fingerprint above.
+#
+# tools/build-engine-ios.sh holds the header search order for both
+# parts, and reads ARCH and MINIMUM_REQUIRED from this SDK's make file.
+BUILD_ENGINE = $(ENGINE)/tools/build-engine-ios.sh --sdk $(SDK)
+BUILD_ENGINE_DEPS := $(ENGINE)/tools/build-engine-ios.sh $(ENGINE)/deps/$(SDK).make
+
 MKXPZ_CORE_SRC_DEPS := \
     $(wildcard $(ENGINE)/src/*.cpp) \
     $(wildcard $(ENGINE)/src/*.mm) \
@@ -644,20 +647,8 @@ MKXPZ_CORE_SRC_DEPS := \
     $(wildcard $(ENGINE)/src/*/*/*.cpp) \
     $(wildcard $(ENGINE)/src/*/*/*.h)
 
-$(LIBDIR)/libmkxpz-core.a: $(MKXPZ_CORE_SRC_DEPS) $(ENGINE)/tools/build-core-ios.sh | $(ANGLE_STAMP)
-	@$(ENGINE)/tools/build-core-ios.sh \
-	    --sdk $(SDK) \
-	    --arch $(ARCH) \
-	    --min-os $(MINIMUM_REQUIRED) \
-	    --obj $(BUILD_PREFIX)/core-obj \
-	    --out $(LIBDIR) \
-	    --include $(INCLUDEDIR) \
-	    --include $(INCLUDEDIR)/AL \
-	    --include $(INCLUDEDIR)/SDL2 \
-	    --include $(INCLUDEDIR)/pixman-1 \
-	    --include $(INCLUDEDIR)/uchardet \
-	    --include $(INCLUDEDIR)/freetype2 \
-	    --include ${PWD}/ANGLE/$(SDK)/include
+$(LIBDIR)/libmkxpz-core.a: $(MKXPZ_CORE_SRC_DEPS) $(ENGINE)/tools/build-core-ios.sh $(BUILD_ENGINE_DEPS) | $(ANGLE_STAMP)
+	@$(BUILD_ENGINE) --part core
 
 # Every source that compiles into the merged binding objects. Listing
 # them as prerequisites means editing binding-mri.cpp (or any engine
@@ -676,51 +667,20 @@ MKXPZ_BINDING_SRC_DEPS := \
     $(wildcard $(ENGINE)/src/*/*.h) \
     $(ENGINE)/tools/build-binding-ios.sh
 
-# Dependency header dirs the binding needs on top of the engine's own,
-# which build-binding-ios.sh adds by itself. The per-Ruby header dir
-# goes in through --ruby-include, because the script decides where it
-# belongs in the search order.
-MKXPZ_BINDING_INCLUDES := \
-    --include $(INCLUDEDIR)/SDL2 \
-    --include $(INCLUDEDIR)/pixman-1 \
-    --include $(INCLUDEDIR)/uchardet \
-    --include $(INCLUDEDIR)/freetype2 \
-    --include $(INCLUDEDIR) \
-    --include ${PWD}/ANGLE/$(SDK)/include
-
-# One call per Ruby version. Everything that differs between them
-# lives in the engine script, keyed on --ruby.
-BUILD_BINDING = $(ENGINE)/tools/build-binding-ios.sh \
-    --sdk $(SDK) --arch $(ARCH) --min-os $(MINIMUM_REQUIRED) \
-    --out $(LIBDIR) --scratch $(BUILD_PREFIX) \
-    $(MKXPZ_BINDING_INCLUDES)
-
 $(LIBDIR)/mkxp31-merged.o: $(LIBDIR)/libruby.3.1-static.a \
                           $(LIBDIR)/libruby.3.1-ext.a \
-                          $(MKXPZ_BINDING_SRC_DEPS) | $(ANGLE_STAMP)
-	@$(BUILD_BINDING) --ruby 31 \
-	    --obj $(BUILD_PREFIX)/binding31 \
-	    --ruby-include $(INCLUDEDIR)/ruby31 \
-	    --static-lib $(LIBDIR)/libruby.3.1-static.a \
-	    --ext-lib $(LIBDIR)/libruby.3.1-ext.a
+                          $(MKXPZ_BINDING_SRC_DEPS) $(BUILD_ENGINE_DEPS) | $(ANGLE_STAMP)
+	@$(BUILD_ENGINE) --part 31
 
 $(LIBDIR)/mkxp19-merged.o: $(LIBDIR)/libruby19-static.a \
                           $(LIBDIR)/libruby19-ext.a \
-                          $(MKXPZ_BINDING_SRC_DEPS) | $(ANGLE_STAMP)
-	@$(BUILD_BINDING) --ruby 19 \
-	    --obj $(BUILD_PREFIX)/binding19 \
-	    --ruby-include $(INCLUDEDIR)/ruby19 \
-	    --static-lib $(LIBDIR)/libruby19-static.a \
-	    --ext-lib $(LIBDIR)/libruby19-ext.a
+                          $(MKXPZ_BINDING_SRC_DEPS) $(BUILD_ENGINE_DEPS) | $(ANGLE_STAMP)
+	@$(BUILD_ENGINE) --part 19
 
 $(LIBDIR)/mkxp18-merged.o: $(LIBDIR)/libruby18-static.a \
                           $(LIBDIR)/libruby18-ext.a \
-                          $(MKXPZ_BINDING_SRC_DEPS) | $(ANGLE_STAMP)
-	@$(BUILD_BINDING) --ruby 18 \
-	    --obj $(BUILD_PREFIX)/binding18 \
-	    --ruby-include $(INCLUDEDIR)/ruby18 \
-	    --static-lib $(LIBDIR)/libruby18-static.a \
-	    --ext-lib $(LIBDIR)/libruby18-ext.a
+                          $(MKXPZ_BINDING_SRC_DEPS) $(BUILD_ENGINE_DEPS) | $(ANGLE_STAMP)
+	@$(BUILD_ENGINE) --part 18
 
 # Ruby 1.8 (submodule: sources/ruby18)
 ruby18: init_dirs $(LIBDIR)/libruby18-static.a $(LIBDIR)/libruby18-ext.a
