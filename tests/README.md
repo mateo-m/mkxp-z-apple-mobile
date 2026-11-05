@@ -1,10 +1,11 @@
 # Tests
 
-Two suites, split by what they need to run.
+The suites are split by what they need to run.
 
 | Directory | Runs on | Needs |
 | --- | --- | --- |
 | `cpp/` | Your machine, in about a second | A C++ compiler |
+| `midi/` | Your Mac, in about a second | The macosx dependencies |
 | `engine/` | Inside a running engine | A simulator and the dependencies |
 | `legacy-methods/` | Inside a running engine | The same, plus a Ruby on your machine |
 | `host/` | - | It is what runs `engine/` and `legacy-methods/` |
@@ -31,6 +32,17 @@ source to `ENGINE_SOURCES` in the script. `TEST(name)` registers a
 case by itself, so no list needs an edit. Keep out anything that
 pulls in SDL, PhysFS, or the Ruby binding. Those need the full engine
 build, and they belong in `engine/` instead.
+
+## MIDI tests
+
+`midi/` covers the SoundFont that the engine gives to FluidSynth. It
+links the static FluidSynth of the macosx dependencies and loads the
+test SoundFonts in `deps/sources/fluidsynth/sf2`. CI runs it in the
+`Engine for macosx` job.
+
+```sh
+tools/run-midi-tests.sh
+```
 
 ## In-engine tests
 

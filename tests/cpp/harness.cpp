@@ -14,6 +14,10 @@
 #include <string>
 #include <vector>
 
+#ifndef TEST_SUITE
+#define TEST_SUITE "cpp"
+#endif
+
 namespace {
 
 struct Case
@@ -64,7 +68,7 @@ void fail(const char *file, int line, const std::string &detail)
 
 int main()
 {
-    emit("SUITE cpp");
+    emit("SUITE " TEST_SUITE);
 
     int passed = 0;
     int failed = 0;

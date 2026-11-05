@@ -65,9 +65,10 @@ tools/build-deps-ios.sh iphonesimulator
 (cd deps && make -f iphonesimulator.make mkxp-merged mkxp-core)
 ```
 
-`tools/build-deps-ios.sh` builds SDL, OpenAL, the three Rubies and the
-other libraries from the sources under `deps/sources`, and downloads
-ANGLE. The `make` line then builds the engine with two scripts:
+`tools/build-deps-ios.sh` builds SDL, OpenAL, FluidSynth, the three
+Rubies and the other libraries from the sources under `deps/sources`.
+It downloads ANGLE. The `make` line then builds the engine with two
+scripts:
 
 | Script | Builds | Needs |
 | --- | --- | --- |
@@ -85,6 +86,14 @@ Then `tools/package-ios.sh` puts the three SDKs into `mkxp-z-ios.tar.gz`. The
 file holds the libraries, the `app_bridge.h` header, the engine
 assets, the Ruby standard library, and a `LINK` file with the linker
 flags. A host links the libraries into its app with those flags.
+
+The engine plays MIDI with FluidSynth, which reads SoundFont 2 (`.sf2`)
+and DLS files. It does not read SoundFont 3 (`.sf3`), because that
+needs libsndfile. The `midiSoundFont` key of `mkxp.json` names the
+file. When the key is empty, or the file does not load, the engine
+uses `assets/SoundFonts/GeneralUser-GS.sf2` from the package.
+`tools/package-ios.sh` downloads that file with
+`tools/fetch-soundfont.sh`.
 
 The file also holds `licenses.json`, the license notice of each
 library in the package, as `name`, `license` and `text`. Show the

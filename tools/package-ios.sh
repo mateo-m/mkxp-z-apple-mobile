@@ -11,7 +11,8 @@
 #   LINK                 the libraries and frameworks a host links
 #   include/app_bridge.h the interface a host calls
 #   assets/              shaders, fonts, controller mappings, CA roots,
-#                        and the preload and postload scripts
+#                        the default MIDI SoundFont, and the preload
+#                        and postload scripts
 #   <sdk>/lib/           the engine core, the three binding objects and
 #                        every dependency library
 #   <sdk>/ruby-stdlib/   the Ruby stdlib subsets for the three Rubies
@@ -41,7 +42,8 @@ done
 LIBS="libmkxpz-core.a mkxp18-merged.o mkxp19-merged.o mkxp31-merged.o
 libSDL2.a libSDL2_image.a libSDL2_sound.a libSDL2_ttf.a libfreetype.a
 libpixman-1.a libogg.a libvorbis.a libvorbisfile.a libtheora.a
-libtheoradec.a libphysfs.a libuchardet.a libopenal.a libssl.a libcrypto.a"
+libtheoradec.a libphysfs.a libuchardet.a libopenal.a libssl.a libcrypto.a
+libfluidsynth.a"
 
 # shellcheck disable=SC2086
 ruby "$ENGINE/tools/licenses.rb" check $LIBS
@@ -105,12 +107,13 @@ done
 # Bit 1 is RGSS1, bit 2 RGSS2, bit 4 RGSS3 (mkxp_getSupportedRGSSVersionMask).
 if [ "$COMPILED" = yes ]; then RGSS_MASK=7; else RGSS_MASK=3; fi
 
-mkdir -p "$STAGE/include" "$STAGE/assets/Shaders" "$STAGE/assets/Fonts" \
+mkdir -p "$STAGE/include" "$STAGE/assets/Shaders" "$STAGE/assets/Fonts" "$STAGE/assets/SoundFonts" \
     "$STAGE/assets/Preload" "$STAGE/assets/Postload"
 cp "$ENGINE/src/app_bridge.h" "$STAGE/include/"
 cp "$LICENSES" "$STAGE/"
 cp "$ENGINE"/shader/*.frag "$ENGINE"/shader/*.vert "$ENGINE"/shader/*.h "$STAGE/assets/Shaders/"
 cp "$ENGINE"/assets/liberation.ttf "$ENGINE"/assets/wqymicrohei.ttf "$STAGE/assets/Fonts/"
+cp "$("$ENGINE/tools/fetch-soundfont.sh")" "$STAGE/assets/SoundFonts/"
 cp "$ENGINE"/assets/gamecontrollerdb.txt "$ENGINE"/assets/icon.png \
     "$ENGINE"/assets/cacert.pem "$STAGE/assets/"
 cp "$ENGINE"/scripts/preload/*.rb "$STAGE/assets/Preload/"
@@ -124,7 +127,7 @@ cat >"$STAGE/LINK" <<LINK
 -Wl,-force_load,lib/libmkxpz-core.a lib/mkxp18-merged.o lib/mkxp19-merged.o lib/mkxp31-merged.o
 -Llib -lSDL2 -lSDL2_image -lSDL2_sound -lSDL2_ttf -lfreetype -lpixman-1
 -logg -lvorbis -lvorbisfile -ltheora -ltheoradec -lphysfs -luchardet
--lopenal -lssl -lcrypto -lz -lbz2 -liconv
+-lopenal -lfluidsynth -lssl -lcrypto -lz -lbz2 -liconv
 -lANGLE_static -lEGL_static -lGLESv2_static
 -framework Foundation -framework UIKit -framework CoreFoundation
 -framework CoreGraphics -framework CoreVideo -framework CoreAudio
@@ -137,7 +140,7 @@ cat >"$STAGE/macosx/LINK" <<LINK
 -Wl,-force_load,lib/libmkxpz-core.a lib/mkxp18-merged.o lib/mkxp19-merged.o lib/mkxp31-merged.o
 -Llib -lSDL2 -lSDL2_image -lSDL2_sound -lSDL2_ttf -lfreetype -lpixman-1
 -logg -lvorbis -lvorbisfile -ltheora -ltheoradec -lphysfs -luchardet
--lopenal -lssl -lcrypto -lz -lbz2 -liconv
+-lopenal -lfluidsynth -lssl -lcrypto -lz -lbz2 -liconv
 -lANGLE_static -lEGL_static -lGLESv2_static
 -framework Foundation -framework AppKit -framework CoreFoundation
 -framework CoreGraphics -framework CoreVideo -framework CoreAudio

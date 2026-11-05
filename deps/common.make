@@ -418,6 +418,55 @@ $(SOURCES)/openal-soft/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/openal-soft/CMakeL
 	-DALSOFT_BACKEND_WAVE=OFF
 
 
+# FluidSynth (submodule: sources/fluidsynth)
+#
+# The engine renders MIDI with the synth only, so every audio and MIDI
+# driver, file output, the shell and the network server stay off. The
+# build has no option to skip the fluidsynth program, so make builds
+# the library target and installs only its development component.
+# osal=cpp11 removes glib. Native DLS needs C++17, which the cpp11
+# layer turns on. The gentables need the gcem submodule, and CI checks
+# out deps/sources without nested submodules.
+fluidsynth: init_dirs $(LIBDIR)/libfluidsynth.a
+
+$(LIBDIR)/libfluidsynth.a: $(SOURCES)/fluidsynth/$(CMAKE_BUILDDIR)/Makefile
+	cd $(SOURCES)/fluidsynth/$(CMAKE_BUILDDIR) && \
+	make -j$(NPROC) libfluidsynth && \
+	cmake --install . --component fluidsynth_development
+
+$(SOURCES)/fluidsynth/$(CMAKE_BUILDDIR)/Makefile: $(SOURCES)/fluidsynth/CMakeLists.txt
+	cd $(SOURCES)/fluidsynth; \
+	git submodule update --init --depth 1 gcem
+	cd $(SOURCES)/fluidsynth; mkdir -p $(CMAKE_BUILDDIR); cd $(CMAKE_BUILDDIR); \
+	$(CMAKE) \
+	-DBUILD_SHARED_LIBS=OFF \
+	-DCMAKE_MACOSX_BUNDLE=OFF \
+	-Dosal=cpp11 \
+	-Denable-native-dls=ON \
+	-Denable-threads=ON \
+	-Denable-openmp=OFF \
+	-Denable-signalsmith=OFF \
+	-Denable-libsndfile=OFF \
+	-Denable-aufile=OFF \
+	-Denable-readline=OFF \
+	-Denable-network=OFF \
+	-Denable-ipv6=OFF \
+	-Denable-ladspa=OFF \
+	-Denable-dbus=OFF \
+	-Denable-systemd=OFF \
+	-Denable-pulseaudio=OFF \
+	-Denable-pipewire=OFF \
+	-Denable-jack=OFF \
+	-Denable-alsa=OFF \
+	-Denable-oss=OFF \
+	-Denable-portaudio=OFF \
+	-Denable-sdl3=OFF \
+	-Denable-midishare=OFF \
+	-Denable-coreaudio=OFF \
+	-Denable-coremidi=OFF \
+	-Denable-framework=OFF
+
+
 # OpenSSL (static). Ruby's openssl ext is merged into mkxp31-merged.o,
 # and the host links these archives for the engine's own HTTP client.
 # 3.5 is the current OpenSSL LTS (supported until 2030); 1.1.1 went
@@ -1018,7 +1067,7 @@ clean-compiled:
 
 # Clean build artifacts from submodule source trees (configure outputs, object files, etc.)
 clean-sources:
-	@for dir in sdl2 sdl2_image sdl2_ttf sdl_sound freetype ruby ruby18 ruby19 openal-soft; do \
+	@for dir in sdl2 sdl2_image sdl2_ttf sdl_sound freetype ruby ruby18 ruby19 openal-soft fluidsynth; do \
 		rm -rf $(SOURCES)/$$dir/$(CMAKE_BUILDDIR) 2>/dev/null; \
 		rm -f $(SOURCES)/$$dir/.configured-* 2>/dev/null; \
 	done
@@ -1032,7 +1081,7 @@ clean-sources:
 	cd $(SOURCES)/ruby18 && git checkout -- . 2>/dev/null || true
 	cd $(SOURCES)/ruby19 && git checkout -- . 2>/dev/null || true
 
-deps-core: libtheora libvorbis pixman libpng physfs uchardet sdl2 sdl2image sdlsound sdl2ttf freetype openal openssl
+deps-core: libtheora libvorbis pixman libpng physfs uchardet sdl2 sdl2image sdlsound sdl2ttf freetype openal openssl fluidsynth
 
 # Pure-Ruby stdlib subsets for the three VMs, installed into
 # $(BUILD_PREFIX)/ruby-stdlib/{3.1.0,1.9.1,1.8}. A host ships them
