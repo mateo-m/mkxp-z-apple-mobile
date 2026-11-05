@@ -88,7 +88,7 @@ tools/run-engine-tests.sh --ruby 19 --no-build \
 ```
 
 `--config <json>` gives the engine settings on top of `mkxp.json`,
-as a launcher does. Run `file_lookup_order.rb` with and without
+as a launcher does. CI runs `file_lookup_order.rb` with and without
 `--config '{"pathCache":false}'`.
 
 `--fast-forward <n>` starts the engine at that fast-forward

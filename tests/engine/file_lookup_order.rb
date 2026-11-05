@@ -6,8 +6,8 @@
 # and lookup.png (1x1). APFS lists that folder with the .png first, so
 # the check fails when the engine takes the listing order.
 #
-# Run it with and without --config '{"pathCache":false}'. The engine
-# lists folders in a different way in each case.
+# CI runs it with and without --config '{"pathCache":false}'. The
+# engine lists folders in a different way in each case.
 #
 #   tools/run-engine-tests.sh --suite file_lookup_order.rb
 
