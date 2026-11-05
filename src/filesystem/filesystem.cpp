@@ -792,8 +792,10 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
    * pays one readdir on a miss instead of a full-tree reload. The
    * live enumeration uses the caller's original path case, which is
    * correct for the files-written-at-runtime scenario (the game opens
-   * what it just wrote). */
-  if (p->havePathCache && data.matchCount == 0) {
+   * what it just wrote). A cached file with the same name and another
+   * extension can match and fail to read, so a miss is any search in
+   * which no handler took a file. */
+  if (p->havePathCache && !data.stopSearching) {
     char obuffer[512];
     size_t olen = strcpySafe(obuffer, filename_nm.c_str(), sizeof(obuffer), -1);
 

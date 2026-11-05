@@ -9,6 +9,9 @@
 # CI runs it with and without --config '{"pathCache":false}'. The
 # engine lists folders in a different way in each case.
 #
+# Graphics/Lookup/late.txt is there at launch, and the suite writes
+# late.png after the engine has listed the folder.
+#
 #   tools/run-engine-tests.sh --suite file_lookup_order.rb
 
 unless defined?(EngineTest)
@@ -16,7 +19,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('file-lookup-order', 3)
+EngineTest.suite('file-lookup-order', 4)
 
 EngineTest.test('a path without an extension loads the first name in order') do
   EngineTest.assert_equal(2, Bitmap.new('Graphics/Lookup/lookup').width, 'lookup.bmp width')
@@ -35,6 +38,11 @@ EngineTest.test('a folder path raises Errno::ENOENT') do
     error = e
   end
   EngineTest.assert_equal(Errno::ENOENT, error.class, 'error class')
+end
+
+EngineTest.test('a file written after launch loads when an older file has the same name') do
+  File.binwrite('Graphics/Lookup/late.png', File.binread('Graphics/Lookup/lookup.png'))
+  EngineTest.assert_equal(1, Bitmap.new('Graphics/Lookup/late').width, 'late.png width')
 end
 
 EngineTest.finish
