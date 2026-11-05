@@ -117,7 +117,6 @@ struct SharedStatePrivate
 	      eThread(*threadData->ethread),
 	      rtData(*threadData),
 	      config(threadData->config),
-	      midiState(threadData->config),
 	      graphics(threadData),
 	      input(*threadData),
 	      audio(*threadData),

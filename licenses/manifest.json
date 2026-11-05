@@ -203,6 +203,17 @@
     ]
   },
   {
+    "name": "FluidSynth",
+    "license": "LGPL 2.1 or later",
+    "archives": ["libfluidsynth.a"],
+    "files": ["deps/sources/fluidsynth/LICENSE"]
+  },
+  {
+    "name": "GCE-Math",
+    "license": "Apache License 2.0",
+    "files": ["deps/sources/fluidsynth/gcem/LICENSE"]
+  },
+  {
     "name": "OpenSSL",
     "license": "Apache License 2.0",
     "archives": ["libssl.a", "libcrypto.a"],
@@ -225,6 +236,11 @@
     "name": "SDL_GameControllerDB",
     "license": "zlib License",
     "files": ["licenses/gamecontrollerdb.txt"]
+  },
+  {
+    "name": "GeneralUser GS",
+    "license": "GeneralUser GS License v2.0",
+    "files": ["licenses/generaluser-gs.txt"]
   },
   {
     "name": "CA certificates",

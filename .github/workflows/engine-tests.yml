@@ -154,7 +154,8 @@ jobs:
         if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
         run: |
           tools/run-engine-tests.sh --no-build --timeout 300 \
-            --suite fast_forward_clock.rb --suite mega_bitmap.rb --suite file_lookup_order.rb
+            --suite fast_forward_clock.rb --suite mega_bitmap.rb --suite file_lookup_order.rb \
+            --suite midi_playback.rb
 
       - name: File lookup suite without the path cache
         if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
@@ -234,6 +235,11 @@ jobs:
 
       - name: Build the engine
         run: tools/build-engine-ios.sh --sdk "${{ matrix.sdk }}"
+
+      # They link the static FluidSynth of the Mac dependencies.
+      - name: MIDI tests
+        if: matrix.sdk == 'macosx'
+        run: tools/run-midi-tests.sh
 
   # One check for the whole run. The ruleset does not require it. It
   # writes the pass marker that a later run looks for.

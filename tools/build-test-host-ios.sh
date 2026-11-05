@@ -102,7 +102,7 @@ mkdir -p "$APP"
     -lSDL2 -lSDL2main -lSDL2_image -lSDL2_sound -lSDL2_ttf \
     -lfreetype -lpixman-1 -lpng16 \
     -logg -lvorbis -lvorbisfile -ltheora -ltheoradec \
-    -lphysfs -luchardet -lopenal \
+    -lphysfs -luchardet -lopenal -lfluidsynth \
     -lssl -lcrypto \
     -lz -lbz2 -liconv \
     -lANGLE_static -lEGL_static -lGLESv2_static \
@@ -123,9 +123,10 @@ plutil -insert MinimumOSVersion -string "$MIN_OS" "$APP/Info.plist"
 # time. A launcher assembles the same tree from the same sources.
 ASSETS="$APP/Assets.bundle"
 rm -rf "$ASSETS"
-mkdir -p "$ASSETS/Shaders" "$ASSETS/Fonts" "$ASSETS/Preload" "$ASSETS/Postload"
+mkdir -p "$ASSETS/Shaders" "$ASSETS/Fonts" "$ASSETS/SoundFonts" "$ASSETS/Preload" "$ASSETS/Postload"
 cp "$ENGINE"/shader/*.frag "$ENGINE"/shader/*.vert "$ENGINE"/shader/*.h "$ASSETS/Shaders/"
 cp "$ENGINE"/assets/liberation.ttf "$ENGINE"/assets/wqymicrohei.ttf "$ASSETS/Fonts/"
+cp "$("$ENGINE/tools/fetch-soundfont.sh")" "$ASSETS/SoundFonts/"
 cp "$ENGINE"/assets/gamecontrollerdb.txt "$ENGINE"/assets/icon.png \
     "$ENGINE"/assets/cacert.pem "$ASSETS/"
 cp "$ENGINE"/scripts/preload/*.rb "$ASSETS/Preload/"

@@ -24,13 +24,15 @@
 
 #include "config.h"
 #include "debugwriter.h"
-#include "fluid-fun.h"
+#include "exception.h"
+#include "filesystem/filesystemImpl.h"
+
+#include <fluidsynth.h>
 
 #include <assert.h>
 #include <vector>
 #include <string>
 
-#define SYNTH_INIT_COUNT 2
 #define SYNTH_SAMPLERATE 44100
 
 struct Synth
@@ -43,30 +45,30 @@ struct SharedMidiState
 {
 	bool inited;
 	std::vector<Synth> synths;
-	const std::string &soundFont;
+	std::string soundFont;
 	fluid_settings_t *flSettings;
 
-	SharedMidiState(const Config &conf)
-	    : inited(false),
-	      soundFont(conf.midi.soundFont)
+	SharedMidiState()
+	    : inited(false)
 	{}
 
 	~SharedMidiState()
 	{
-		/* We might have initialized, but if the consecutive libfluidsynth
-		 * load failed, no resources will have been allocated */
-		if (!inited || !HAVE_FLUID)
+		if (!inited)
 			return;
 
 		for (size_t i = 0; i < synths.size(); ++i)
 		{
 			assert(!synths[i].inUse);
-			fluid.delete_synth(synths[i].synth);
+			delete_fluid_synth(synths[i].synth);
 		}
 
-		fluid.delete_settings(flSettings);
+		delete_fluid_settings(flSettings);
 	}
 
+	/* Each synth parses its own copy of the SoundFont's instrument
+	 * tables, about 19 MB for GeneralUser GS. FluidSynth shares only
+	 * the sample data between synths, so the pool starts with one. */
 	void initIfNeeded(const Config &conf)
 	{
 		if (inited)
@@ -74,44 +76,60 @@ struct SharedMidiState
 
 		inited = true;
 
-		initFluidFunctions();
+		flSettings = new_fluid_settings();
+		fluid_settings_setnum(flSettings, "synth.gain", 1.0f);
+		fluid_settings_setnum(flSettings, "synth.sample-rate", SYNTH_SAMPLERATE);
+		fluid_settings_setint(flSettings, "synth.chorus.active", conf.midi.chorus);
+		fluid_settings_setint(flSettings, "synth.reverb.active", conf.midi.reverb);
 
-		if (!HAVE_FLUID)
-			return;
+		fluid_synth_t *syn = new_fluid_synth(flSettings);
+		const std::string candidates[] = { conf.midi.soundFont, bundledSoundFont() };
 
-		flSettings = fluid.new_settings();
-		fluid.settings_setnum(flSettings, "synth.gain", 1.0f);
-		fluid.settings_setnum(flSettings, "synth.sample-rate", SYNTH_SAMPLERATE);
-		fluid.settings_setint(flSettings, "synth.chorus.active", conf.midi.chorus);
-		fluid.settings_setint(flSettings, "synth.reverb.active", conf.midi.reverb);
+		for (const std::string &path : candidates)
+		{
+			if (path.empty())
+				continue;
 
-		for (size_t i = 0; i < SYNTH_INIT_COUNT; ++i)
-			addSynth(false);
+			if (fluid_synth_sfload(syn, path.c_str(), 1) != FLUID_FAILED)
+			{
+				soundFont = path;
+				break;
+			}
+
+			Debug() << "Failed to load the MIDI SoundFont" << path;
+		}
+
+		if (soundFont.empty())
+			Debug() << "Warning: No MIDI SoundFont loaded, MIDI is silent";
+		else
+			Debug() << "MIDI SoundFont:" << soundFont;
+
+		synths.push_back({ syn, false });
 	}
 
 	fluid_synth_t *allocateSynth()
 	{
-		assert(HAVE_FLUID);
 		assert(inited);
 
-		size_t i;
-
-		for (i = 0; i < synths.size(); ++i)
-			if (!synths[i].inUse)
-				break;
-
-		if (i < synths.size())
+		for (Synth &s : synths)
 		{
-			fluid_synth_t *syn = synths[i].synth;
-			fluid.synth_system_reset(syn);
-			synths[i].inUse = true;
+			if (s.inUse)
+				continue;
 
-			return syn;
+			fluid_synth_system_reset(s.synth);
+			s.inUse = true;
+
+			return s.synth;
 		}
-		else
-		{
-			return addSynth(true);
-		}
+
+		fluid_synth_t *syn = new_fluid_synth(flSettings);
+
+		if (!soundFont.empty())
+			fluid_synth_sfload(syn, soundFont.c_str(), 1);
+
+		synths.push_back({ syn, true });
+
+		return syn;
 	}
 
 	void releaseSynth(fluid_synth_t *synth)
@@ -128,21 +146,16 @@ struct SharedMidiState
 	}
 
 private:
-	fluid_synth_t *addSynth(bool usedNow)
+	static std::string bundledSoundFont()
 	{
-		fluid_synth_t *syn = fluid.new_synth(flSettings);
-
-		if (!soundFont.empty())
-			fluid.synth_sfload(syn, soundFont.c_str(), 1);
-		else
-			Debug() << "Warning: No soundfont specified, sound might be mute";
-
-		Synth synth;
-		synth.inUse = usedNow;
-		synth.synth = syn;
-		synths.push_back(synth);
-
-		return syn;
+		try
+		{
+			return filesystemImpl::getPathForAsset("SoundFonts/GeneralUser-GS", "sf2");
+		}
+		catch (const Exception &)
+		{
+			return std::string();
+		}
 	}
 };
 
