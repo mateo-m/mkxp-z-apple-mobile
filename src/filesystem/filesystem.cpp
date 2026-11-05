@@ -718,8 +718,18 @@ static void openReadInOrder(OpenReadEnumData &data, const char *dir,
     openReadEnumCB(&data, dir, names[i]);
 }
 
+/* PhysFS opens a folder on disk as a file. The image loader then fails
+ * it with SDLError, which a game's `rescue` does not catch. Pokemon
+ * Insurgence loads "Graphics/Characters/" for an event with no sprite. */
 static PHYSFS_EnumerateCallbackResult
-listEnumCB(void *d, const char *, const char *filename) {
+listEnumCB(void *d, const char *origdir, const char *filename) {
+  std::string path = *origdir ? std::string(origdir) + "/" + filename
+                              : std::string(filename);
+  PHYSFS_Stat stat;
+  if (PHYSFS_stat(path.c_str(), &stat) &&
+      stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+    return PHYSFS_ENUM_OK;
+
   static_cast<std::vector<std::string> *>(d)->push_back(filename);
   return PHYSFS_ENUM_OK;
 }

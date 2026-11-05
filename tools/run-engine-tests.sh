@@ -12,7 +12,7 @@
 # Usage:
 #   tools/run-engine-tests.sh [--device <name or udid>] [--game <dir>]
 #                             [--suite <file> ...] [--ruby 18|19|31]
-#                             [--fast-forward <n>]
+#                             [--fast-forward <n>] [--config <json>]
 #                             [--timeout <seconds>] [--keep] [--no-build]
 #
 # --suite names another file in the game folder to run in place of
@@ -33,6 +33,9 @@
 #
 # --fast-forward sets the engine's fast-forward multiplier.
 #
+# --config gives JSON that the engine reads on top of mkxp.json, for
+# example '{"pathCache":false}'.
+#
 # Exit status:
 #   0  every test passed
 #   1  at least one test failed, or the suite never finished
@@ -47,6 +50,7 @@ TIMEOUT=180
 SUITES=""
 RUBY=""
 FAST_FORWARD=""
+CONFIG=""
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
@@ -78,6 +82,7 @@ do
             esac
             RUBY="$2"; shift 2 ;;
         --fast-forward) FAST_FORWARD="$2"; shift 2 ;;
+        --config) CONFIG="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
@@ -177,6 +182,9 @@ elif [ "$SUITE_COUNT" = 1 ]; then
 fi
 if [ -n "$FAST_FORWARD" ]; then
     export SIMCTL_CHILD_MKXP_TEST_FAST_FORWARD="$FAST_FORWARD"
+fi
+if [ -n "$CONFIG" ]; then
+    export SIMCTL_CHILD_MKXP_TEST_CONFIG="$CONFIG"
 fi
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!

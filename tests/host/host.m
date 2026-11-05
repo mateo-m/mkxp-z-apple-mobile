@@ -22,7 +22,7 @@
 // cache next to the game. tests/engine holds an mkxp.json with a
 // customScript, so the engine runs the suite instead of a game.
 //
-// Three variables pick what the run covers, all read at launch:
+// These variables pick what the run covers, all read at launch:
 //
 //   MKXP_TEST_GAME   the folder under Games/. Without it the host
 //                    opens "engine" and sets the variable to that, so
@@ -33,6 +33,9 @@
 //                    interpreter behaviour needs the same choice here.
 //   MKXP_TEST_SUITE  a file in the game folder to run in place of the
 //                    one mkxp.json names.
+//   MKXP_TEST_FAST_FORWARD  the fast-forward multiplier.
+//   MKXP_TEST_CONFIG JSON that the engine reads on top of mkxp.json,
+//                    as a launcher's settings do.
 //
 // They belong to the launch and not to the build, so one build of
 // this host runs every game and suite on every interpreter.
@@ -151,6 +154,8 @@ static void engineTestHostStart(void) {
         const char *fastForward = getenv("MKXP_TEST_FAST_FORWARD");
         if (fastForward)
             mkxp_setFastForwardMultiplier(atoi(fastForward));
+
+        mkxp_setConfigOverlayJSON(getenv("MKXP_TEST_CONFIG"));
 
         mkxp_setLauncherIdentity("mkxp-z engine tests", NULL);
         mkxp_setUserDataDirectory(documents.fileSystemRepresentation);
