@@ -45,7 +45,7 @@ game, which is the only way to reach the drawing code.
 | `ruby_compat.rb` | Behaviour every bundled interpreter must share. |
 | `legacy_methods_off.rb` | The legacy methods stay away when the transform is off. |
 | `fast_forward_clock.rb` | `System.uptime` runs at the fast-forward speed, and the average frame rate does not. |
-| `file_lookup_order.rb` | A path without an extension loads the first matching file in name order. |
+| `file_lookup_order.rb` | A path without an extension loads the first matching file in name order, and a folder path loads no file. |
 | `win32_wrap_encoding.rb` | Text conversion in the Win32API stand-ins, on Ruby 1.9 and 3.1. |
 | `run_suites.rb` | Runs several suites in one launch. |
 
@@ -86,6 +86,10 @@ launch for several suites saves time:
 tools/run-engine-tests.sh --ruby 19 --no-build \
     --suite ruby_compat.rb --suite win32_wrap_encoding.rb
 ```
+
+`--config <json>` gives the engine settings on top of `mkxp.json`,
+as a launcher does. CI runs `file_lookup_order.rb` with and without
+`--config '{"pathCache":false}'`.
 
 `--fast-forward <n>` starts the engine at that fast-forward
 multiplier. Run `fast_forward_clock.rb` with and without it:

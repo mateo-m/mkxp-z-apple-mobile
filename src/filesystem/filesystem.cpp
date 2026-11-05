@@ -678,6 +678,15 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
   if (data.pathTrans)
     fullPath = (*data.pathTrans)[fullPath].c_str();
 
+  /* Without the path cache, the listing has folders too. PhysFS opens a
+   * folder on disk as a file, and the image loader then fails it with
+   * SDLError, which a game's `rescue` does not catch. Pokemon Insurgence
+   * loads "Graphics/Characters/" for an event with no sprite. */
+  PHYSFS_Stat stat;
+  if (PHYSFS_stat(fullPath, &stat) &&
+      stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
+    return PHYSFS_ENUM_OK;
+
   PHYSFS_File *phys = PHYSFS_openRead(fullPath);
 
   if (!phys) {
