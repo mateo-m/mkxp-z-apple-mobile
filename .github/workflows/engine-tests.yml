@@ -30,7 +30,7 @@ permissions:
 jobs:
   simulator:
     name: Engine tests
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
     outputs:
       fingerprint: ${{ steps.pass.outputs.fingerprint }}
@@ -213,7 +213,7 @@ jobs:
   # The release builds these two. A break here shows before a tag.
   engine:
     name: Engine for ${{ matrix.sdk }}
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
     strategy:
       fail-fast: false

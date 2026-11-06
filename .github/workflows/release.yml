@@ -86,7 +86,7 @@ jobs:
   build:
     name: Build ${{ matrix.sdk }}
     needs: gate
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 120
     permissions:
       contents: read
@@ -126,7 +126,7 @@ jobs:
     name: Package and publish
     needs: [gate, build]
     # tools/package-ios.sh checks each library with otool and nm.
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     permissions:
       contents: write
