@@ -55,6 +55,7 @@ KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
 CONSOLE=""
+STAMP=""
 
 # The name a suite file gives to EngineTest.suite.
 suite_name() {
@@ -93,6 +94,7 @@ done
 cleanup() {
     [ "$KEEP" = "1" ] && return 0
     [ -n "$CONSOLE" ] && rm -f "$CONSOLE"
+    [ -n "$STAMP" ] && rm -f "$STAMP"
     return 0
 }
 trap cleanup EXIT INT TERM
@@ -168,6 +170,8 @@ fi
 
 # --- Run --------------------------------------------------------------
 CONSOLE="$(mktemp "${TMPDIR:-/tmp}/mkxpz-engine-tests.XXXXXX")"
+STAMP="$(mktemp "${TMPDIR:-/tmp}/mkxpz-engine-tests-start.XXXXXX")"
+STARTED="$(date '+%Y-%m-%d %H:%M:%S')"
 
 echo "run-engine-tests: launching $GAME_NAME${SUITES:+ with$SUITES}${RUBY:+ on Ruby $RUBY}..."
 export SIMCTL_CHILD_MKXP_TEST_GAME="$GAME_NAME"
@@ -302,5 +306,29 @@ done
 if [ "$STATUS" != "0" ]; then
     echo "Last 20 console lines:" >&2
     tail -n 20 "$CONSOLE" >&2
+
+    # A simulator app that crashes leaves its report on the Mac. macOS
+    # writes it a few seconds after the crash and sends no signal when
+    # it is done, so look again for a short time.
+    EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+    REPORT=""
+    LOOKED=0
+    while [ -z "$REPORT" ] && [ "$LOOKED" -lt 15 ]
+    do
+        REPORT="$(find "$HOME/Library/Logs/DiagnosticReports" -name "$EXECUTABLE*.ips" -newer "$STAMP" 2>/dev/null | head -n 1)"
+        [ -n "$REPORT" ] && break
+        sleep 1
+        LOOKED=$((LOOKED + 1))
+    done
+    if [ -n "$REPORT" ]; then
+        echo "Crash report $REPORT:" >&2
+        cat "$REPORT" >&2
+        echo >&2
+    else
+        echo "No crash report for $EXECUTABLE since the launch." >&2
+    fi
+    echo "Last 60 system log lines of $EXECUTABLE:" >&2
+    xcrun simctl spawn "$DEVICE" log show --style compact --start "$STARTED" \
+        --predicate "process == \"$EXECUTABLE\"" 2>&1 | tail -n 60 >&2 || true
     exit 1
 fi
