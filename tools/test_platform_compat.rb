@@ -38,8 +38,7 @@ Object.const_set(:System, Module.new do
   module_function
 
   define_method(:data_directory) { USERDATA }
-  define_method(:puts) { |*_args| nil }
-  define_method(:debug_log) { |line| LOGGED.push(line) }
+  define_method(:puts) { |line| LOGGED.push(line) }
   define_method(:debug_log?) { DEBUG_LOG_ON[0] }
 end)
 LOGGED = []
@@ -208,4 +207,72 @@ if defined?(BasicObject)
   assert_eq(LOGGED.length, 1, "a BasicObject value still gets a line: #{LOGGED.inspect}")
 end
 
-test_passed('test_platform_compat', 18)
+def logged_for(value)
+  LOGGED.clear
+  begin
+    Marshal.dump(value)
+  rescue TypeError, ArgumentError, RuntimeError
+    nil
+  end
+  LOGGED.join("\n")
+end
+
+module Tag
+  def tag; end
+end
+line = logged_for({ :list => [1, proc {}].extend(Tag) })
+assert_eq(line.include?('Hash[:list][1] = a Proc'), true, "an extended value is walked: #{line}")
+
+line = logged_for([RuntimeError.new(proc {})])
+assert_eq(line.include?('Could not find which value fails.'), true, "a missed value is not blamed on a stream: #{line}")
+
+class HookRaises
+  def marshal_dump
+    raise 'broken hook'
+  end
+end
+line = logged_for([1, HookRaises.new])
+assert_eq(line.include?('Array[1] = a HookRaises'), true, "a marshal_dump that raises is named: #{line}")
+
+Pair = Struct.new(:a, :b)
+line = logged_for(Pair.new(1, proc {}))
+assert_eq(line.include?('Pair.b = a Proc'), true, "a Struct member is named: #{line}")
+
+single = Object.new
+def single.extra; end
+line = logged_for([single])
+assert_eq(line.include?('Array[0] = an Object'), true, "a singleton is named with the right article: #{line}")
+
+class NestedDump
+  def _dump(_limit)
+    begin
+      Marshal.dump(proc {})
+    rescue TypeError
+      nil
+    end
+    raise TypeError, 'outer'
+  end
+end
+logged_for([NestedDump.new])
+assert_eq(LOGGED.length, 1, "a _dump that calls Marshal.dump gives one line: #{LOGGED.inspect}")
+
+deep = []
+cur = deep
+100_000.times do
+  n = []
+  cur << n
+  cur = n
+end
+overflow = begin
+  Marshal.dump(deep)
+  nil
+rescue SystemStackError => e
+  e
+end
+if overflow && overflow.backtrace && !overflow.backtrace.empty?
+  assert_eq(overflow.backtrace[0].start_with?(MKXPMarshalTrace::FILE_PREFIX), false,
+            "a stack overflow names the caller: #{overflow.backtrace[0]}")
+end
+assert_eq(Thread.current[:mkxp_marshal_dump], nil, 'the dump flag is cleared after an error')
+
+test_passed('test_platform_compat', 25)

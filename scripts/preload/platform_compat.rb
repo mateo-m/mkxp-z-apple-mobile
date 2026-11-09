@@ -621,8 +621,8 @@ unless defined?(MKXPMarshalTrace)
         return if @reports >= MAX_REPORTS
         return unless logging?
 
-        log("Marshal.dump failed: #{error.class}: #{error.message}. #{explain(obj, args)}")
         @reports += 1
+        log("Marshal.dump failed: #{error.class}: #{error.message}. #{explain(obj, args)}")
       rescue Exception
         nil
       end
@@ -647,8 +647,8 @@ unless defined?(MKXPMarshalTrace)
       end
 
       def log(line)
-        if defined?(System) && System.respond_to?(:debug_log)
-          System.debug_log(line)
+        if defined?(System) && System.respond_to?(:puts)
+          System.puts(line)
         else
           warn(line)
         end
@@ -664,7 +664,12 @@ unless defined?(MKXPMarshalTrace)
           return "The value is nested deeper than the depth limit of #{limit}."
         end
 
-        'A second dump of the same value worked, so the write to the stream failed.'
+        return 'Could not find which value fails.' unless dumps?(obj)
+
+        stream = args.any? { |a| !a.is_a?(Integer) }
+        return 'A second dump to memory worked, so the write to the stream failed.' if stream
+
+        'A second dump worked, so the error did not repeat.'
       end
 
       def dumps?(obj, limit = -1)
@@ -679,6 +684,7 @@ unless defined?(MKXPMarshalTrace)
       # a parent never fails, and the first value that fails on its own
       # is the one Marshal stopped at.
       def locate(root)
+        @shell_cache = {}
         seen = {}
         stack = [[root, describe_root(root)]]
         until stack.empty?
@@ -707,6 +713,8 @@ unless defined?(MKXPMarshalTrace)
         false
       end
 
+      # This calls a game's own marshal_dump or _dump once more. That is
+      # the only way to find a hook that fails.
       def children(obj)
         return opaque_children(obj) if opaque?(obj)
         return [['.marshal_dump', marshal_data(obj)]] if obj.respond_to?(:marshal_dump, true)
@@ -761,10 +769,12 @@ unless defined?(MKXPMarshalTrace)
       # Proc, an IO, a singleton, an anonymous class, or a hash with a
       # default proc cannot.
       def shell_dumps?(obj)
-        return false unless obj.singleton_methods.empty?
+        return false unless obj.singleton_methods(false).empty?
         return false if obj.is_a?(Hash) && obj.default_proc
 
-        dumps?(obj.class.allocate)
+        klass = obj.class
+        @shell_cache[klass] = dumps?(klass.allocate) unless @shell_cache.key?(klass)
+        @shell_cache[klass]
       rescue Exception
         false
       end
@@ -776,14 +786,22 @@ unless defined?(MKXPMarshalTrace)
       end
 
       def describe(obj)
+        # rubocop:disable Style/CaseEquality -- a BasicObject has no is_a?.
+        return 'a BasicObject' unless Object === obj
+        # rubocop:enable Style/CaseEquality
+
         case obj
-        when Module then "#{obj.inspect} (a #{obj.class})"
+        when Module then "#{obj.inspect} (#{with_article(obj.class.name.to_s)})"
         when nil, true, false, Numeric, Symbol then obj.inspect
         when String then obj.length > 40 ? "#{obj[0, 40].inspect}..." : obj.inspect
-        else "a #{obj.class}"
+        else with_article(obj.class.name.to_s)
         end
       rescue Exception
         'a value that cannot be shown'
+      end
+
+      def with_article(name)
+        name =~ /\A[AEIOU]/ ? "an #{name}" : "a #{name}"
       end
     end
     # rubocop:enable Lint/RescueException
@@ -792,12 +810,24 @@ unless defined?(MKXPMarshalTrace)
   class << Marshal
     alias mkxp_untraced_dump dump
 
+    # A game's _dump hook and the search both call Marshal.dump again.
+    # Only the outer call reports, so one failed save gives one line.
     def dump(obj, *args)
-      mkxp_untraced_dump(obj, *args)
-    rescue StandardError => e
-      MKXPMarshalTrace.report(obj, args, e)
-      MKXPMarshalTrace.trim_backtrace(e)
-      raise e
+      return mkxp_untraced_dump(obj, *args) if Thread.current[:mkxp_marshal_dump]
+
+      Thread.current[:mkxp_marshal_dump] = true
+      begin
+        mkxp_untraced_dump(obj, *args)
+      rescue StandardError => e
+        MKXPMarshalTrace.report(obj, args, e)
+        MKXPMarshalTrace.trim_backtrace(e)
+        raise e
+      rescue Exception => e # rubocop:disable Lint/RescueException -- a stack overflow needs the trim too.
+        MKXPMarshalTrace.trim_backtrace(e)
+        raise e
+      ensure
+        Thread.current[:mkxp_marshal_dump] = nil
+      end
     end
   end
 end
