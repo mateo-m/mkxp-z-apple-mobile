@@ -656,7 +656,7 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
     return PHYSFS_ENUM_STOP;
 
   /* If there's not even a partial match, continue searching */
-  if (strncmp(filename, data.filename, data.filenameN) != 0)
+  if (strncasecmp(filename, data.filename, data.filenameN) != 0)
     return PHYSFS_ENUM_OK;
 
   if (!*dirpath) {
@@ -717,7 +717,7 @@ static void openReadInOrder(OpenReadEnumData &data, const char *dir,
                             const std::vector<std::string> &fileList) {
   std::vector<const char *> names;
   for (size_t i = 0; i < fileList.size(); ++i)
-    if (strncmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
+    if (strncasecmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
       names.push_back(fileList[i].c_str());
 
   std::sort(names.begin(), names.end(),
@@ -731,6 +731,42 @@ static PHYSFS_EnumerateCallbackResult
 listEnumCB(void *d, const char *, const char *filename) {
   static_cast<std::vector<std::string> *>(d)->push_back(filename);
   return PHYSFS_ENUM_OK;
+}
+
+/* PhysFS finds archive entries, and files on an iOS device, only by
+ * exact case. Windows games often ask for another case: Pokemon
+ * Insurgence's Game.rgssad holds "Data/map150.rxdata" and the game
+ * loads "Data/Map150.rxdata". Without the path cache, match each part
+ * of the path against a live listing of its folder. */
+static bool liveCaseWalk(const std::string &path, std::string &out) {
+  out.clear();
+  size_t start = 0;
+  for (;;) {
+    size_t slash = path.find('/', start);
+    std::string part = path.substr(
+        start, slash == std::string::npos ? std::string::npos : slash - start);
+
+    std::vector<std::string> names;
+    PHYSFS_enumerate(out.c_str(), listEnumCB, &names);
+
+    const std::string *match = 0;
+    for (size_t i = 0; i < names.size() && !match; ++i)
+      if (names[i] == part)
+        match = &names[i];
+    for (size_t i = 0; i < names.size() && !match; ++i)
+      if (strcasecmp(names[i].c_str(), part.c_str()) == 0)
+        match = &names[i];
+    if (!match)
+      return false;
+
+    if (!out.empty())
+      out += '/';
+    out += *match;
+
+    if (slash == std::string::npos)
+      return true;
+    start = slash + 1;
+  }
 }
 
 void FileSystem::openRead(OpenHandler &handler, const char *filename) {
@@ -777,6 +813,10 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
      * and manually iterate over them */
     openReadInOrder(data, dir, p->fileLists[dir]);
   } else {
+    std::string liveDir;
+    if (*dir && liveCaseWalk(dir, liveDir))
+      dir = liveDir.c_str();
+
     std::vector<std::string> fileList;
     PHYSFS_enumerate(dir, listEnumCB, &fileList);
     openReadInOrder(data, dir, fileList);
@@ -1055,7 +1095,14 @@ const char *FileSystem::desensitize(const char *filename) {
   std::transform(fn_lower.begin(), fn_lower.end(), fn_lower.begin(), [](unsigned char c){
       return std::tolower(c);
   });
-  if (p->havePathCache && p->pathCache.contains(fn_lower))
-    return p->pathCache[fn_lower].c_str();
+  if (p->havePathCache) {
+    if (p->pathCache.contains(fn_lower))
+      return p->pathCache[fn_lower].c_str();
+    return filename;
+  }
+
+  static thread_local std::string live;
+  if (liveCaseWalk(filename, live) && live != filename)
+    return live.c_str();
   return filename;
 }
