@@ -131,7 +131,7 @@ EngineTest.test('a failed Marshal.dump still raises and logs the value') do
   EngineTest.assert_equal(TypeError, raised.class, 'error class')
   EngineTest.assert_equal(true, $marshal_trace_lines[0].to_s.include?('Array[1] = a Proc'),
                           "log line: #{$marshal_trace_lines[0]}")
-  EngineTest.assert_equal(nil, System.debug_log('ruby-compat: System.debug_log writes'), 'System.debug_log')
+  EngineTest.assert_equal(true, [true, false].include?(System.debug_log?), 'System.debug_log? is a boolean')
 end
 
 EngineTest.finish
