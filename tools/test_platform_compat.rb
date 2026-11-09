@@ -30,6 +30,7 @@ end
 
 require 'tmpdir'
 require 'fileutils'
+require 'stringio'
 USERDATA = Dir.mktmpdir('test_platform_compat')
 at_exit { FileUtils.rm_rf(USERDATA) }
 
@@ -38,7 +39,9 @@ Object.const_set(:System, Module.new do
 
   define_method(:data_directory) { USERDATA }
   define_method(:puts) { |*_args| nil }
+  define_method(:debug_log) { |line| LOGGED.push(line) }
 end)
+LOGGED = []
 
 module Input
   @in_window = true
@@ -72,4 +75,57 @@ assert_eq(System.mouse_in_window, false, 'System.mouse_in_window follows Input.m
 
 assert_eq(ENV['TEMP'], "#{USERDATA}/tmp", 'ENV TEMP is the app temp folder from TMPDIR')
 
-test_passed('test_platform_compat', 4)
+# --- A failed save names the value that stopped it ---
+class Game_Variables
+  def initialize
+    @data = [nil, 5, 'text']
+  end
+
+  def []=(index, value)
+    @data[index] = value
+  end
+end
+
+vars = Game_Variables.new
+assert_eq(Marshal.load(Marshal.dump(vars)).instance_variable_get(:@data), [nil, 5, 'text'],
+          'Marshal.dump still dumps a value that can be dumped')
+assert_eq(LOGGED, [], 'a dump that works writes nothing to the log')
+
+vars[3] = proc { nil }
+err = begin
+  Marshal.dump(vars)
+  nil
+rescue TypeError => e
+  e
+end
+assert_eq(err.class, TypeError, 'the game still gets the dump error')
+assert_eq(LOGGED.length, 1, 'a failed dump writes one log line')
+assert_eq(LOGGED[0].include?('Game_Variables@data[3] = a Proc'), true,
+          "the log line names the value: #{LOGGED[0]}")
+
+LOGGED.clear
+bad_hash = Hash.new { |h, k| h[k] = 0 }
+begin
+  Marshal.dump([1, { :ok => bad_hash }])
+rescue TypeError
+  nil
+end
+assert_eq(LOGGED[0].include?('Array[1][:ok] = a Hash'), true,
+          "a hash with a default proc is the value named: #{LOGGED[0]}")
+
+LOGGED.clear
+io = StringIO.new
+Marshal.dump(vars.instance_variable_get(:@data)[0, 3], io)
+assert_eq(Marshal.load(io.string), [nil, 5, 'text'], 'Marshal.dump to a stream still works')
+
+closed = StringIO.new
+closed.close_write
+begin
+  Marshal.dump([1], closed)
+rescue IOError
+  nil
+end
+assert_eq(LOGGED[0].include?('the write to the file failed'), true,
+          "a failed write is told apart from a value that cannot be dumped: #{LOGGED[0]}")
+
+test_passed('test_platform_compat', 11)

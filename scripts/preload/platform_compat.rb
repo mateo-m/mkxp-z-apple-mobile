@@ -592,6 +592,115 @@ class Module
   end
 end
 
+# --- Log the value that stops a save ---
+# Essentials' pbSave rescues every error and returns false, so a save
+# that fails leaves a cut-short Game.rxdata and no trace. When
+# Marshal.dump raises, find the first value inside the object that
+# cannot be dumped and write its path to the debug log.
+unless defined?(MKXPMarshalTrace)
+  module MKXPMarshalTrace
+    MAX_DEPTH = 12
+    # Some scripts call Marshal.dump in a rescue on purpose, to test
+    # a value. Stop the search after this many failures.
+    MAX_REPORTS = 10
+
+    @reports = 0
+
+    # The search runs while the game's own error is in flight. An
+    # error here must not replace it.
+    # rubocop:disable Lint/RescueException
+    class << self
+      def report(obj, error)
+        return if @reports >= MAX_REPORTS
+
+        @reports += 1
+        head = "Marshal.dump failed: #{error.class}: #{error.message}"
+        if dumps?(obj)
+          log("#{head}. #{describe(obj)} dumps in memory, so the write to the file failed.")
+        else
+          path, bad = locate(obj, describe_root(obj), {}, 0)
+          log("#{head}. First value that cannot be dumped: #{path} = #{describe(bad)}")
+        end
+      rescue Exception
+        nil
+      end
+
+      def log(line)
+        if defined?(System) && System.respond_to?(:debug_log)
+          System.debug_log(line)
+        else
+          warn(line)
+        end
+      end
+
+      def dumps?(obj)
+        Marshal.mkxp_untraced_dump(obj)
+        true
+      rescue Exception
+        false
+      end
+
+      def locate(obj, path, seen, depth)
+        return [path, obj] if depth >= MAX_DEPTH || obj.is_a?(Module)
+
+        seen[obj.__id__] = true
+        children(obj).each do |label, child|
+          next if seen[child.__id__] || dumps?(child)
+
+          return locate(child, "#{path}#{label}", seen, depth + 1)
+        end
+        [path, obj]
+      end
+
+      def children(obj)
+        list = []
+        case obj
+        when Array
+          obj.each_with_index { |v, i| list.push(["[#{i}]", v]) }
+        when Hash
+          obj.each_pair do |k, v|
+            list.push([" key #{describe(k)}", k])
+            list.push(["[#{describe(k)}]", v])
+          end
+        when Struct
+          obj.each_pair { |k, v| list.push([".#{k}", v]) }
+        end
+        obj.instance_variables.each do |name|
+          list.push([name.to_s, obj.instance_variable_get(name)])
+        end
+        list
+      end
+
+      def describe_root(obj)
+        obj.is_a?(Module) ? 'the value' : obj.class.name.to_s
+      end
+
+      def describe(obj)
+        case obj
+        when Module then "#{obj.inspect} (a #{obj.class})"
+        when nil, true, false, Numeric, Symbol then obj.inspect
+        when String then obj.length > 40 ? "#{obj[0, 40].inspect}..." : obj.inspect
+        else "a #{obj.class}"
+        end
+      rescue Exception
+        'a value that cannot be shown'
+      end
+    end
+    # rubocop:enable Lint/RescueException
+  end
+
+  class << Marshal
+    alias mkxp_untraced_dump dump
+
+    def dump(obj, *args)
+      mkxp_untraced_dump(obj, *args)
+    rescue StandardError => e
+      MKXPMarshalTrace.report(obj, e)
+      raise e
+    end
+  end
+end
+
 # --- DL / DL::CFunc legacy fake module ---
 # Older Pokemon Essentials forks and a few community plugins use
 # Ruby 1.8's `require 'dl'` + `DL::CFunc` to call user32 / kernel32
