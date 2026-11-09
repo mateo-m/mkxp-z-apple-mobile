@@ -40,8 +40,10 @@ Object.const_set(:System, Module.new do
   define_method(:data_directory) { USERDATA }
   define_method(:puts) { |*_args| nil }
   define_method(:debug_log) { |line| LOGGED.push(line) }
+  define_method(:debug_log?) { DEBUG_LOG_ON[0] }
 end)
 LOGGED = []
+DEBUG_LOG_ON = [true]
 
 module Input
   @in_window = true
@@ -125,7 +127,85 @@ begin
 rescue IOError
   nil
 end
-assert_eq(LOGGED[0].include?('the write to the file failed'), true,
+assert_eq(LOGGED[0].include?('the write to the stream failed'), true,
           "a failed write is told apart from a value that cannot be dumped: #{LOGGED[0]}")
 
-test_passed('test_platform_compat', 11)
+# A link back to a parent dumps fine, so it must not be blamed.
+class Node
+  attr_accessor :parent
+end
+LOGGED.clear
+MKXPMarshalTrace.reset
+node = Node.new
+tree = [node, proc {}]
+node.parent = tree
+begin
+  Marshal.dump(tree)
+rescue TypeError
+  nil
+end
+assert_eq(LOGGED[0].include?('Array[1] = a Proc'), true,
+          "a link back to the parent is skipped: #{LOGGED[0]}")
+
+# A crash alert names the first line of the backtrace.
+trace = begin
+  Marshal.dump(proc {})
+  []
+rescue TypeError => e
+  e.backtrace
+end
+assert_eq(trace[0].start_with?("#{__FILE__}:"), true,
+          "the backtrace starts at the caller: #{trace[0]}")
+
+LOGGED.clear
+begin
+  Marshal.dump([[[1]]], 1)
+rescue ArgumentError
+  nil
+end
+assert_eq(LOGGED[0].include?('deeper than the depth limit of 1'), true,
+          "a depth limit error says so: #{LOGGED[0]}")
+
+LOGGED.clear
+MKXPMarshalTrace.reset
+12.times do
+  begin
+    Marshal.dump(proc {})
+  rescue TypeError
+    nil
+  end
+end
+assert_eq(LOGGED.length, 10, 'one game writes at most 10 lines')
+MKXPMarshalTrace.reset
+begin
+  Marshal.dump(proc {})
+rescue TypeError
+  nil
+end
+assert_eq(LOGGED.length, 11, 'the next game writes lines again')
+
+LOGGED.clear
+MKXPMarshalTrace.reset
+DEBUG_LOG_ON[0] = false
+begin
+  Marshal.dump(proc {})
+rescue TypeError
+  nil
+end
+DEBUG_LOG_ON[0] = true
+assert_eq(LOGGED, [], 'with debug logs off there is no search and no line')
+
+if defined?(BasicObject)
+  LOGGED.clear
+  bare = BasicObject.new
+  bad = proc {}
+  bare.instance_eval { @bad = bad }
+  begin
+    Marshal.dump([bare])
+  rescue TypeError
+    nil
+  end
+  assert_eq(LOGGED.length, 1, "a BasicObject value still gets a line: #{LOGGED.inspect}")
+end
+
+test_passed('test_platform_compat', 18)

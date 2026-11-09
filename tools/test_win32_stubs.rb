@@ -262,6 +262,9 @@ assert_eq(loaded[0], 1, 'save with the stub keeps the other values')
 assert_eq(loaded[1], IOS::NullStub, 'stub class loads back as the stub class')
 assert_eq(loaded[2].class, IOS::NullStub, 'stub instance loads back as a stub instance')
 assert_true(IOS::NullStub.respond_to?(:anything_else), 'stub still answers other calls')
+# Saves written before the fix hold the stub object in the marshal_dump form.
+old_save = "\x04\b[\aU:\x12IOS::NullStub0i\x06"
+assert_eq(Marshal.load(old_save)[0].class, IOS::NullStub, 'an older save that holds a stub object loads')
 
 # --- const_missing split stays intact ---
 module TestHost; end

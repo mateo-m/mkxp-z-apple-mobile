@@ -106,8 +106,13 @@ EngineTest.test('a failed Marshal.dump still raises and logs the value') do
   $marshal_trace_lines = []
   class << MKXPMarshalTrace
     alias_method :engine_test_log, :log
+    alias_method :engine_test_logging?, :logging?
     def log(line)
       $marshal_trace_lines.push(line)
+    end
+
+    def logging?
+      true
     end
   end
   begin
@@ -120,6 +125,7 @@ EngineTest.test('a failed Marshal.dump still raises and logs the value') do
   ensure
     class << MKXPMarshalTrace
       alias_method :log, :engine_test_log
+      alias_method :logging?, :engine_test_logging?
     end
   end
   EngineTest.assert_equal(TypeError, raised.class, 'error class')
