@@ -20,7 +20,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('ruby-compat', 9)
+EngineTest.suite('ruby-compat', 10)
 
 # A path with no per-cent sign in it, and a spare argument after it.
 # Pokemon Essentials writes many calls in this shape.
@@ -93,6 +93,13 @@ end
 EngineTest.test('$userAgentVersion is a frozen "unknown" when the launcher passes no version') do
   EngineTest.assert_equal('unknown', $userAgentVersion, '$userAgentVersion')
   EngineTest.assert_equal(true, $userAgentVersion.frozen?, '$userAgentVersion.frozen?')
+end
+
+# Essentials writes $game_variables with Marshal.dump. A missing
+# constant turns into IOS::NullStub, and a variable can hold it.
+EngineTest.test('a save that holds the null stub dumps and loads') do
+  loaded = Marshal.load(Marshal.dump([1, IOS::NullStub]))
+  EngineTest.assert_equal([1, IOS::NullStub], loaded, 'loaded values')
 end
 
 EngineTest.finish

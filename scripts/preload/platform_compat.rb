@@ -446,8 +446,15 @@ module IOS
       self
     end
 
-    def self.respond_to_missing?(_name, _include_private = false)
-      true
+    # Marshal calls a hook when respond_to? says it exists. A save
+    # that holds the stub then fails ("marshal_dump returned same
+    # class instance"), and the game saves only part of the file.
+    # rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
+    MARSHAL_HOOKS = [:marshal_dump, :_dump, :marshal_load, :_load].freeze
+    # rubocop:enable Style/SymbolArray
+
+    def self.respond_to_missing?(name, _include_private = false)
+      !MARSHAL_HOOKS.include?(name.to_sym)
     end
 
     def self.const_missing(_name)
@@ -484,8 +491,8 @@ module IOS
       nil
     end
 
-    def respond_to_missing?(_name, _include_private = false)
-      true
+    def respond_to_missing?(name, _include_private = false)
+      !MARSHAL_HOOKS.include?(name.to_sym)
     end
   end
 
