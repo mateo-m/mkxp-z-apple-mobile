@@ -34,6 +34,7 @@
 #include <physfs.h>
 
 #include <algorithm>
+#include <functional>
 #include <stack>
 #include <stdio.h>
 #include <string.h>
@@ -656,7 +657,7 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
     return PHYSFS_ENUM_STOP;
 
   /* If there's not even a partial match, continue searching */
-  if (strncmp(filename, data.filename, data.filenameN) != 0)
+  if (strncasecmp(filename, data.filename, data.filenameN) != 0)
     return PHYSFS_ENUM_OK;
 
   if (!*dirpath) {
@@ -717,11 +718,24 @@ static void openReadInOrder(OpenReadEnumData &data, const char *dir,
                             const std::vector<std::string> &fileList) {
   std::vector<const char *> names;
   for (size_t i = 0; i < fileList.size(); ++i)
-    if (strncmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
+    if (strncasecmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
       names.push_back(fileList[i].c_str());
 
-  std::sort(names.begin(), names.end(),
-            [](const char *a, const char *b) { return strcasecmp(a, b) < 0; });
+  /* Without the path cache, "Twin.png" and "twin.png" can both match.
+   * The name in the case the game asked for goes first. */
+  const char *want = data.filename;
+  const size_t wantN = data.filenameN;
+  std::stable_sort(names.begin(), names.end(),
+                   [want, wantN](const char *a, const char *b) {
+                     int c = strcasecmp(a, b);
+                     if (c != 0)
+                       return c < 0;
+                     bool aExact = strncmp(a, want, wantN) == 0;
+                     bool bExact = strncmp(b, want, wantN) == 0;
+                     if (aExact != bExact)
+                       return aExact;
+                     return strcmp(a, b) < 0;
+                   });
 
   for (size_t i = 0; i < names.size() && !data.stopSearching; ++i)
     openReadEnumCB(&data, dir, names[i]);
@@ -731,6 +745,41 @@ static PHYSFS_EnumerateCallbackResult
 listEnumCB(void *d, const char *, const char *filename) {
   static_cast<std::vector<std::string> *>(d)->push_back(filename);
   return PHYSFS_ENUM_OK;
+}
+
+/* PhysFS finds archive entries, and files on an iOS device, only by
+ * exact case. Windows games often ask for another case: Pokemon
+ * Insurgence's Game.rgssad holds "Data/map150.rxdata" and the game
+ * loads "Data/Map150.rxdata". Without the path cache, match each part
+ * of the path against a live listing of its folder. "Data" and "data"
+ * can both exist, so each match is tried, the exact case first.
+ * `visit` gets each full path that exists and stops the walk when it
+ * returns true. */
+static bool liveCaseWalk(const std::string &path, size_t start,
+                         const std::string &prefix,
+                         const std::function<bool(const std::string &)> &visit) {
+  size_t slash = path.find('/', start);
+  std::string part = path.substr(
+      start, slash == std::string::npos ? std::string::npos : slash - start);
+
+  std::vector<std::string> names;
+  PHYSFS_enumerate(prefix.c_str(), listEnumCB, &names);
+
+  std::vector<const std::string *> matches;
+  for (size_t i = 0; i < names.size(); ++i)
+    if (names[i] == part)
+      matches.push_back(&names[i]);
+  for (size_t i = 0; i < names.size(); ++i)
+    if (names[i] != part && strcasecmp(names[i].c_str(), part.c_str()) == 0)
+      matches.push_back(&names[i]);
+
+  for (size_t i = 0; i < matches.size(); ++i) {
+    std::string full = prefix.empty() ? *matches[i] : prefix + '/' + *matches[i];
+    if (slash == std::string::npos ? visit(full)
+                                   : liveCaseWalk(path, slash + 1, full, visit))
+      return true;
+  }
+  return false;
 }
 
 void FileSystem::openRead(OpenHandler &handler, const char *filename) {
@@ -780,6 +829,16 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
     std::vector<std::string> fileList;
     PHYSFS_enumerate(dir, listEnumCB, &fileList);
     openReadInOrder(data, dir, fileList);
+
+    if (*dir && !data.stopSearching)
+      liveCaseWalk(dir, 0, "", [&](const std::string &liveDir) {
+        if (liveDir == dir)
+          return false;
+        std::vector<std::string> liveList;
+        PHYSFS_enumerate(liveDir.c_str(), listEnumCB, &liveList);
+        openReadInOrder(data, liveDir.c_str(), liveList);
+        return data.stopSearching;
+      });
   }
 
   if (data.physfsError)
@@ -852,9 +911,9 @@ void FileSystem::openReadRaw(SDL_RWops &ops, const char *filename,
   PHYSFS_File *handle = PHYSFS_openRead(normalized.c_str());
 
   /* If the exact case missed, fall back to a case-insensitive
-   * lookup via the path cache. `desensitize` lowercases the query
-   * and returns the original-case entry registered at path-cache
-   * build time, if any; otherwise returns its input unchanged, in
+   * lookup. `desensitize` returns the entry in its stored case, from
+   * the path cache or, with the cache off, from live folder listings;
+   * otherwise it returns its input unchanged, in
    * which case the second PHYSFS_openRead simply repeats the
    * first miss and we throw the same ENOENT the caller would have
    * seen without this fix. No behavioural regression for games
@@ -1055,7 +1114,20 @@ const char *FileSystem::desensitize(const char *filename) {
   std::transform(fn_lower.begin(), fn_lower.end(), fn_lower.begin(), [](unsigned char c){
       return std::tolower(c);
   });
-  if (p->havePathCache && p->pathCache.contains(fn_lower))
-    return p->pathCache[fn_lower].c_str();
+  if (p->havePathCache) {
+    if (p->pathCache.contains(fn_lower))
+      return p->pathCache[fn_lower].c_str();
+    return filename;
+  }
+
+  if (PHYSFS_exists(filename))
+    return filename;
+
+  static thread_local std::string live;
+  if (liveCaseWalk(filename, 0, "", [](const std::string &found) {
+        live = found;
+        return true;
+      }))
+    return live.c_str();
   return filename;
 }
