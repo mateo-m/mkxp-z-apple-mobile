@@ -82,6 +82,7 @@ end
 
 EngineTest.test('a bitmap looks in each folder whose name differs only in case') do
   EngineTest.assert_equal(2, Bitmap.new('Branch/two').width, 'branch/two.png width')
+  EngineTest.assert_equal(1, Bitmap.new('Branch/hero').width, 'branch/hero.png after Branch/hero.txt')
 end
 
 EngineTest.finish

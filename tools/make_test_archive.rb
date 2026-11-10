@@ -32,7 +32,9 @@ ENTRIES = [
   ['Branch\\first.rxdata', Marshal.dump('first')],
   ['branch\\second.rxdata', Marshal.dump('second')],
   ['Branch\\one.png', png(1)],
-  ['branch\\two.png', png(2)]
+  ['branch\\two.png', png(2)],
+  ['Branch\\hero.txt', 'not an image'],
+  ['branch\\hero.png', png(1)]
 ].freeze
 
 key = 0xDEADCAFE
