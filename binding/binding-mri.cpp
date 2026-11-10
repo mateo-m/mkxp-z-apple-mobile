@@ -1170,7 +1170,8 @@ RB_METHOD(mkxpFileExists) {
 }
 
 /* System.resolve_case_path(path) - resolves a game-relative path
-   against the PhysFS path cache (case-insensitively) and returns
+   case-insensitively, through the path cache or, with the cache
+   off, through live folder listings, and returns
    the actual on-disk spelling, or nil when nothing matches. Lets
    Ruby-side wrappers retry raw file APIs (File.open etc.) that
    fail on iOS's case-sensitive filesystem with a name whose case
