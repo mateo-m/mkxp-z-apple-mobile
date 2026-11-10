@@ -685,6 +685,12 @@ unless defined?(MKXPMarshalTrace)
       # is the one Marshal stopped at.
       def locate(root)
         @shell_cache = {}
+        @budget = MAX_VALUES
+        catch(:mkxp_too_big) { walk(root) }
+      end
+
+      # Returns [path, value], or nil when every value dumps.
+      def walk(root)
         seen = {}
         stack = [[root, describe_root(root)]]
         until stack.empty?
@@ -698,7 +704,6 @@ unless defined?(MKXPMarshalTrace)
           kids.reverse_each do |label, child|
             stack.push([child, "#{path}#{label}"]) unless seen[child.__id__]
           end
-          return :too_big if seen.size + stack.size > MAX_VALUES
         end
         nil
       end
@@ -707,7 +712,7 @@ unless defined?(MKXPMarshalTrace)
       # cannot be written.
       def immediate?(obj)
         case obj
-        when nil, true, false, Numeric, Symbol then true
+        when nil, true, false, Integer, Float, Symbol then true
         else false
         end
       rescue Exception
@@ -761,7 +766,11 @@ unless defined?(MKXPMarshalTrace)
 
       # A plain value always dumps, so it is left out of the search.
       def add_child(list, value)
-        list.push([yield, value]) unless immediate?(value)
+        return if immediate?(value)
+
+        @budget -= 1
+        throw(:mkxp_too_big, :too_big) if @budget < 0
+        list.push([yield, value])
       end
 
       def marshal_data(obj)

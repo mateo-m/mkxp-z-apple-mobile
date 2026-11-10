@@ -209,6 +209,7 @@ end
 
 def logged_for(value)
   LOGGED.clear
+  MKXPMarshalTrace.reset
   begin
     Marshal.dump(value)
   rescue TypeError, ArgumentError, RuntimeError
@@ -293,4 +294,16 @@ assert_eq(line.include?('Array[0] = a Proc'), true, "plain values do not fill th
 line = logged_for([Class.new.new])
 assert_eq(line.include?('Array[0] = a value of a class with no name'), true, "an unnamed class is named: #{line}")
 
-test_passed('test_platform_compat', 28)
+class NumberLike < Numeric
+  def initialize
+    super
+    @bad = proc {}
+  end
+end
+line = logged_for([NumberLike.new, proc {}])
+assert_eq(line.include?('Array[0]@bad = a Proc'), true, "a Numeric subclass is walked: #{line}")
+
+line = logged_for([proc {}] + Array.new(300_000) { |i| i.to_s })
+assert_eq(line.include?('too many to search'), true, "a huge value stops the search: #{line}")
+
+test_passed('test_platform_compat', 30)
