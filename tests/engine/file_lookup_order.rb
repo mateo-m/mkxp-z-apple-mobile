@@ -22,7 +22,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('file-lookup-order', 6)
+EngineTest.suite('file-lookup-order', 10)
 
 EngineTest.test('a path without an extension loads the first name in order') do
   EngineTest.assert_equal(2, Bitmap.new('Graphics/Lookup/lookup').width, 'lookup.bmp width')
@@ -56,6 +56,32 @@ end
 
 EngineTest.test('a bitmap loads from an archive file in another case') do
   EngineTest.assert_equal(1, Bitmap.new('Graphics/LOOKUP/ArchCase').width, 'archcase.png width')
+end
+
+EngineTest.test('a name that only shares a prefix does not load') do
+  EngineTest.assert_raises('ArchCas', 'Graphics/Lookup/ArchCas') { Bitmap.new('Graphics/Lookup/ArchCas') }
+end
+
+# The path cache keeps one name for each spelling, so only a run
+# without it can tell Twin.png from twin.png.
+EngineTest.test('the name in the asked case loads first') do
+  path_cache = CFG['pathCache']
+  EngineTest.info('pathCache', path_cache.inspect)
+  if path_cache == false
+    EngineTest.assert_equal(1, Bitmap.new('Graphics/Lookup/Twin').width, 'Twin.png width')
+    EngineTest.assert_equal(2, Bitmap.new('Graphics/Lookup/twin').width, 'twin.png width')
+  else
+    EngineTest.assert_equal(true, [1, 2].include?(Bitmap.new('Graphics/Lookup/Twin').width), 'Twin.png loads')
+  end
+end
+
+EngineTest.test('load_data looks in each folder whose name differs only in case') do
+  EngineTest.assert_equal('second', load_data('Branch/second.rxdata'), 'branch/second.rxdata')
+  EngineTest.assert_equal('first', load_data('BRANCH/FIRST.rxdata'), 'Branch/first.rxdata')
+end
+
+EngineTest.test('a bitmap looks in each folder whose name differs only in case') do
+  EngineTest.assert_equal(2, Bitmap.new('Branch/two').width, 'branch/two.png width')
 end
 
 EngineTest.finish
