@@ -155,6 +155,19 @@ module EngineTest
     resource.dispose unless resource.disposed?
   end
 
+  # A game that boots from "customScript" gets no engine preloads, so
+  # a suite loads the ones it needs from the host's asset bundle, in
+  # the order of loadEnginePreloads(). The host runs the suite from a
+  # copy in Documents, and the only app bundle path Ruby can see is
+  # the stdlib folder on $LOAD_PATH.
+  def self.load_preloads(names)
+    app = $LOAD_PATH.map { |dir| dir[/\A.*\.app/] }.compact.first
+    names.each do |name|
+      path = File.join(app, 'Assets.bundle', 'Preload', "#{name}.rb")
+      eval(File.read(path), TOPLEVEL_BINDING, name) # rubocop:disable Security/Eval
+    end
+  end
+
   # The common case: a bitmap of a given size, filled or left clear.
   def self.bitmap(width, height, colour = nil)
     owning(Bitmap.new(width, height)) do |bitmap|

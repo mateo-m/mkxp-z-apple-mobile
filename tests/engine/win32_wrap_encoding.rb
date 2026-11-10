@@ -15,16 +15,7 @@ end
 
 EngineTest.suite('win32-wrap-encoding', 4)
 
-# A game that boots from "customScript" gets no engine preloads, so
-# the suite loads them from the host's asset bundle, in the order of
-# loadEnginePreloads(). The host runs the suite from a copy in
-# Documents, and the only app bundle path Ruby can see is the stdlib
-# folder on $LOAD_PATH.
-app = $LOAD_PATH.map { |dir| dir[/\A.*\.app/] }.compact.first
-%w[windows_fs platform_compat pokemon_compat win32_wrap win32_wrap_encoding].each do |name|
-  path = File.join(app, 'Assets.bundle', 'Preload', "#{name}.rb")
-  eval(File.read(path), TOPLEVEL_BINDING, name) # rubocop:disable Security/Eval
-end
+EngineTest.load_preloads(%w[windows_fs platform_compat pokemon_compat win32_wrap win32_wrap_encoding])
 
 KERNEL32 = Win32API_Impl::Kernel32
 
