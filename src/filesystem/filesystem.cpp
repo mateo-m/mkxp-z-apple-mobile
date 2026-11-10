@@ -830,14 +830,14 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
     PHYSFS_enumerate(dir, listEnumCB, &fileList);
     openReadInOrder(data, dir, fileList);
 
-    if (*dir && data.matchCount == 0 && !data.physfsError)
+    if (*dir && !data.stopSearching)
       liveCaseWalk(dir, 0, "", [&](const std::string &liveDir) {
         if (liveDir == dir)
           return false;
         std::vector<std::string> liveList;
         PHYSFS_enumerate(liveDir.c_str(), listEnumCB, &liveList);
         openReadInOrder(data, liveDir.c_str(), liveList);
-        return data.matchCount > 0 || data.physfsError != 0;
+        return data.stopSearching;
       });
   }
 
