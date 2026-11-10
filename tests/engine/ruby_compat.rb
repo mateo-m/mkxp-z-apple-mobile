@@ -20,7 +20,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('ruby-compat', 9)
+EngineTest.suite('ruby-compat', 11)
 
 # A path with no per-cent sign in it, and a spare argument after it.
 # Pokemon Essentials writes many calls in this shape.
@@ -93,6 +93,47 @@ end
 EngineTest.test('$userAgentVersion is a frozen "unknown" when the launcher passes no version') do
   EngineTest.assert_equal('unknown', $userAgentVersion, '$userAgentVersion')
   EngineTest.assert_equal(true, $userAgentVersion.frozen?, '$userAgentVersion.frozen?')
+end
+
+EngineTest.load_preloads(%w[windows_fs platform_compat])
+
+# Essentials writes $game_variables with Marshal.dump. A missing
+# constant turns into IOS::NullStub, and a variable can hold it.
+EngineTest.test('a save that holds the null stub dumps and loads') do
+  loaded = Marshal.load(Marshal.dump([1, IOS::NullStub]))
+  EngineTest.assert_equal([1, IOS::NullStub], loaded, 'loaded values')
+end
+
+EngineTest.test('a failed Marshal.dump still raises and logs the value') do
+  $marshal_trace_lines = []
+  class << MKXPMarshalTrace
+    alias_method :engine_test_log, :log
+    alias_method :engine_test_logging?, :logging?
+    def log(line)
+      $marshal_trace_lines.push(line)
+    end
+
+    def logging?
+      true
+    end
+  end
+  begin
+    raised = begin
+      Marshal.dump([1, proc {}])
+      nil
+    rescue TypeError => e
+      e
+    end
+  ensure
+    class << MKXPMarshalTrace
+      alias_method :log, :engine_test_log
+      alias_method :logging?, :engine_test_logging?
+    end
+  end
+  EngineTest.assert_equal(TypeError, raised.class, 'error class')
+  EngineTest.assert_equal(true, $marshal_trace_lines[0].to_s.include?('Array[1] = a Proc'),
+                          "log line: #{$marshal_trace_lines[0]}")
+  EngineTest.assert_equal(true, [true, false].include?(System.debug_log?), 'System.debug_log? is a boolean')
 end
 
 EngineTest.finish

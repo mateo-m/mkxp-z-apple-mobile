@@ -167,6 +167,7 @@ RB_METHOD(mkxpIsReallyWindowsHost);
 RB_METHOD(mkxpCheatsEnabled);
 RB_METHOD(mkxpUseInGameKeyboard);
 RB_METHOD(mkxpJoiplayCompat);
+RB_METHOD(mkxpSystemDebugLogEnabled);
 RB_METHOD(mkxpNetworkEnabled);
 RB_METHOD(mkxpManagedConfigDir);
 RB_METHOD(mkxpSyntaxTransformTarget);
@@ -561,6 +562,7 @@ static void mriBindingInit() {
     _rb_define_module_function(mod, "cheats_enabled?", mkxpCheatsEnabled);
     _rb_define_module_function(mod, "use_in_game_keyboard?", mkxpUseInGameKeyboard);
     _rb_define_module_function(mod, "joiplay_compat?", mkxpJoiplayCompat);
+    _rb_define_module_function(mod, "debug_log?", mkxpSystemDebugLogEnabled);
     _rb_define_module_function(mod, "network_enabled?", mkxpNetworkEnabled);
     _rb_define_module_function(mod, "managed_config_dir", mkxpManagedConfigDir);
     _rb_define_module_function(mod, "apply_overrides", mkxpApplyOverrides);
@@ -1585,6 +1587,11 @@ extern "C" void mkxp_debugLog(const char *tag, const char *source, const char *m
 
 static void logRubyError(const char *type, const char *detail) {
     mkxp_debugLog(type, "binding-mri.cpp [C++]", detail);
+}
+
+RB_METHOD(mkxpSystemDebugLogEnabled) {
+    RB_UNUSED_PARAM;
+    return rb_bool_new(mkxp_debugLogEnabled());
 }
 
 /* Counts script sections that ran to completion without error during

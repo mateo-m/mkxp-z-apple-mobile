@@ -446,8 +446,17 @@ module IOS
       self
     end
 
-    def self.respond_to_missing?(_name, _include_private = false)
-      true
+    # Marshal calls a dump hook when respond_to? says it exists. A save
+    # that holds the stub then fails ("marshal_dump returned same
+    # class instance"), and the game saves only part of the file. The
+    # load hooks still answer, so an older save that holds a stub
+    # object still loads.
+    # rubocop:disable Style/SymbolArray -- `%i` does not parse on Ruby 1.8.
+    MARSHAL_HOOKS = [:marshal_dump, :_dump].freeze
+    # rubocop:enable Style/SymbolArray
+
+    def self.respond_to_missing?(name, _include_private = false)
+      !MARSHAL_HOOKS.include?(name.to_sym)
     end
 
     def self.const_missing(_name)
@@ -484,8 +493,8 @@ module IOS
       nil
     end
 
-    def respond_to_missing?(_name, _include_private = false)
-      true
+    def respond_to_missing?(name, _include_private = false)
+      !MARSHAL_HOOKS.include?(name.to_sym)
     end
   end
 
@@ -584,6 +593,263 @@ class Module
     end
   end
 end
+
+# --- Log the value that stops a save ---
+# Essentials' pbSave rescues every error and returns false, so a save
+# that fails leaves a cut-short Game.rxdata and no trace. When
+# Marshal.dump raises, find the value that Marshal could not write and
+# put its path in the debug log.
+unless defined?(MKXPMarshalTrace)
+  module MKXPMarshalTrace
+    # Some scripts call Marshal.dump in a rescue on purpose, to test
+    # a value. Stop after this many lines in one game.
+    MAX_REPORTS = 10
+    MAX_VALUES = 200_000
+    FILE_PREFIX = "#{__FILE__}:".freeze
+
+    @reports = 0
+
+    # The search runs while the game's own error is in flight. An
+    # error here must not replace it.
+    # rubocop:disable Lint/RescueException
+    class << self
+      def reset
+        @reports = 0
+      end
+
+      def report(obj, args, error)
+        return if @reports >= MAX_REPORTS
+        return unless logging?
+
+        @reports += 1
+        log("Marshal.dump failed: #{error.class}: #{error.message}. #{explain(obj, args)}")
+      rescue Exception
+        nil
+      end
+
+      # Without this, a crash alert names this file, not the game script
+      # that called Marshal.dump.
+      def trim_backtrace(error)
+        trace = error.backtrace
+        return unless trace
+
+        i = 0
+        i += 1 while trace[i] && trace[i][0, FILE_PREFIX.length] == FILE_PREFIX
+        error.set_backtrace(trace[i..-1]) if i > 0 && i < trace.length
+      rescue Exception
+        nil
+      end
+
+      def logging?
+        return true unless defined?(System) && System.respond_to?(:debug_log?)
+
+        System.debug_log?
+      end
+
+      def log(line)
+        if defined?(System) && System.respond_to?(:puts)
+          System.puts(line)
+        else
+          warn(line)
+        end
+      end
+
+      def explain(obj, args)
+        found = locate(obj)
+        return "The value holds more than #{MAX_VALUES} objects, too many to search." if found == :too_big
+        return "First value that cannot be dumped: #{found[0]} = #{describe(found[1])}" if found
+
+        limit = args.find { |a| a.is_a?(Integer) }
+        if limit && limit >= 0 && !dumps?(obj, limit)
+          return "The value is nested deeper than the depth limit of #{limit}."
+        end
+
+        return 'Could not find which value fails.' unless dumps?(obj)
+
+        stream = args.any? { |a| !a.is_a?(Integer) }
+        return 'A second dump to memory worked, so the write to the stream failed.' if stream
+
+        'A second dump worked, so the error did not repeat.'
+      end
+
+      def dumps?(obj, limit = -1)
+        Marshal.mkxp_untraced_dump(obj, limit)
+        true
+      rescue Exception
+        false
+      end
+
+      # Walks the value in the order Marshal writes it and skips values
+      # already walked. Marshal writes those as links, so a link back to
+      # a parent never fails, and the first value that fails on its own
+      # is the one Marshal stopped at.
+      def locate(root)
+        @shell_cache = {}
+        @budget = MAX_VALUES
+        catch(:mkxp_too_big) { walk(root) }
+      end
+
+      # Returns [path, value], or nil when every value dumps.
+      def walk(root)
+        seen = {}
+        stack = [[root, describe_root(root)]]
+        until stack.empty?
+          obj, path = stack.pop
+          next if seen[obj.__id__]
+
+          seen[obj.__id__] = true
+          kids = children(obj)
+          return [path, obj] unless kids
+
+          kids.reverse_each do |label, child|
+            stack.push([child, "#{path}#{label}"]) unless seen[child.__id__]
+          end
+        end
+        nil
+      end
+
+      # The values Marshal writes inside obj, or nil when obj itself
+      # cannot be written.
+      def immediate?(obj)
+        case obj
+        when nil, true, false, Integer, Float, Symbol then true
+        else false
+        end
+      rescue Exception
+        false
+      end
+
+      # This calls a game's own marshal_dump or _dump once more. That is
+      # the only way to find a hook that fails.
+      def children(obj)
+        return opaque_children(obj) if opaque?(obj)
+        return [['.marshal_dump', marshal_data(obj)]] if obj.respond_to?(:marshal_dump, true)
+        return nil unless shell_dumps?(obj) || dumps?(obj)
+
+        own_children(obj)
+      rescue Exception
+        nil
+      end
+
+      # Marshal writes these whole, so their insides are not walked.
+      def opaque?(obj)
+        # rubocop:disable Style/CaseEquality -- a BasicObject has no is_a?.
+        return true unless Object === obj
+        # rubocop:enable Style/CaseEquality
+
+        obj.is_a?(Module) || obj.respond_to?(:_dump, true)
+      end
+
+      def opaque_children(obj)
+        dumps?(obj) ? [] : nil
+      end
+
+      def own_children(obj)
+        list = []
+        case obj
+        when Array
+          obj.each_with_index { |v, i| add_child(list, v) { "[#{i}]" } }
+        when Hash
+          obj.each_pair do |k, v|
+            add_child(list, k) { " key #{describe(k)}" }
+            add_child(list, v) { "[#{describe(k)}]" }
+          end
+          add_child(list, obj.default) { '.default' }
+        when Struct
+          obj.each_pair { |k, v| add_child(list, v) { ".#{k}" } }
+        end
+        obj.instance_variables.each do |name|
+          add_child(list, obj.instance_variable_get(name)) { name.to_s }
+        end
+        list
+      end
+
+      # A plain value always dumps, so it is left out of the search.
+      def add_child(list, value)
+        return if immediate?(value)
+
+        @budget -= 1
+        throw(:mkxp_too_big, :too_big) if @budget < 0
+        list.push([yield, value])
+      end
+
+      def marshal_data(obj)
+        data = obj.__send__(:marshal_dump)
+        raise TypeError if data.instance_of?(obj.class)
+
+        data
+      end
+
+      # Can Marshal write obj with every value inside it left out? A
+      # Proc, an IO, a singleton, an anonymous class, or a hash with a
+      # default proc cannot.
+      def shell_dumps?(obj)
+        return false unless obj.singleton_methods(false).empty?
+        return false if obj.is_a?(Hash) && obj.default_proc
+
+        klass = obj.class
+        @shell_cache[klass] = dumps?(klass.allocate) unless @shell_cache.key?(klass)
+        @shell_cache[klass]
+      rescue Exception
+        false
+      end
+
+      def describe_root(obj)
+        obj.is_a?(Module) ? 'the value' : obj.class.name.to_s
+      rescue Exception
+        'the value'
+      end
+
+      def describe(obj)
+        # rubocop:disable Style/CaseEquality -- a BasicObject has no is_a?.
+        return 'a BasicObject' unless Object === obj
+        # rubocop:enable Style/CaseEquality
+
+        case obj
+        when Module then "#{obj.inspect} (#{with_article(obj.class.name.to_s)})"
+        when nil, true, false, Numeric, Symbol then obj.inspect
+        when String then obj.length > 40 ? "#{obj[0, 40].inspect}..." : obj.inspect
+        else with_article(obj.class.name.to_s)
+        end
+      rescue Exception
+        'a value that cannot be shown'
+      end
+
+      def with_article(name)
+        return 'a value of a class with no name' if name.empty?
+
+        name =~ /\A[AEIOU]/ ? "an #{name}" : "a #{name}"
+      end
+    end
+    # rubocop:enable Lint/RescueException
+  end
+
+  class << Marshal
+    alias mkxp_untraced_dump dump
+
+    # A game's _dump hook and the search both call Marshal.dump again.
+    # Only the outer call reports, so one failed save gives one line.
+    def dump(obj, *args)
+      return mkxp_untraced_dump(obj, *args) if Thread.current[:mkxp_marshal_dump]
+
+      Thread.current[:mkxp_marshal_dump] = true
+      begin
+        mkxp_untraced_dump(obj, *args)
+      rescue StandardError => e
+        MKXPMarshalTrace.report(obj, args, e)
+        MKXPMarshalTrace.trim_backtrace(e)
+        raise e
+      rescue Exception => e # rubocop:disable Lint/RescueException -- a stack overflow needs the trim too.
+        MKXPMarshalTrace.trim_backtrace(e)
+        raise e
+      ensure
+        Thread.current[:mkxp_marshal_dump] = nil
+      end
+    end
+  end
+end
+# The Ruby VM outlives a game, and each game loads this file again.
+MKXPMarshalTrace.reset
 
 # --- DL / DL::CFunc legacy fake module ---
 # Older Pokemon Essentials forks and a few community plugins use
