@@ -275,4 +275,22 @@ if overflow && overflow.backtrace && !overflow.backtrace.empty?
 end
 assert_eq(Thread.current[:mkxp_marshal_dump], nil, 'the dump flag is cleared after an error')
 
-test_passed('test_platform_compat', 25)
+class PrivateHook
+  def marshal_load(_data); end
+
+  private
+
+  def marshal_dump
+    [1]
+  end
+end
+line = logged_for([PrivateHook.new, proc {}])
+assert_eq(line.include?('Array[1] = a Proc'), true, "a private marshal_dump is followed: #{line}")
+
+line = logged_for([proc {}] + Array.new(300_000, nil))
+assert_eq(line.include?('Array[0] = a Proc'), true, "plain values do not fill the search: #{line}")
+
+line = logged_for([Class.new.new])
+assert_eq(line.include?('Array[0] = a value of a class with no name'), true, "an unnamed class is named: #{line}")
+
+test_passed('test_platform_compat', 28)

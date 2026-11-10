@@ -688,16 +688,17 @@ unless defined?(MKXPMarshalTrace)
         seen = {}
         stack = [[root, describe_root(root)]]
         until stack.empty?
-          return :too_big if seen.size > MAX_VALUES
-
           obj, path = stack.pop
-          next if immediate?(obj) || seen[obj.__id__]
+          next if seen[obj.__id__]
 
           seen[obj.__id__] = true
           kids = children(obj)
           return [path, obj] unless kids
 
-          kids.reverse_each { |label, child| stack.push([child, "#{path}#{label}"]) }
+          kids.reverse_each do |label, child|
+            stack.push([child, "#{path}#{label}"]) unless seen[child.__id__]
+          end
+          return :too_big if seen.size + stack.size > MAX_VALUES
         end
         nil
       end
@@ -742,24 +743,29 @@ unless defined?(MKXPMarshalTrace)
         list = []
         case obj
         when Array
-          obj.each_with_index { |v, i| list.push(["[#{i}]", v]) }
+          obj.each_with_index { |v, i| add_child(list, v) { "[#{i}]" } }
         when Hash
           obj.each_pair do |k, v|
-            list.push([" key #{describe(k)}", k])
-            list.push(["[#{describe(k)}]", v])
+            add_child(list, k) { " key #{describe(k)}" }
+            add_child(list, v) { "[#{describe(k)}]" }
           end
-          list.push(['.default', obj.default]) unless obj.default.nil?
+          add_child(list, obj.default) { '.default' }
         when Struct
-          obj.each_pair { |k, v| list.push([".#{k}", v]) }
+          obj.each_pair { |k, v| add_child(list, v) { ".#{k}" } }
         end
         obj.instance_variables.each do |name|
-          list.push([name.to_s, obj.instance_variable_get(name)])
+          add_child(list, obj.instance_variable_get(name)) { name.to_s }
         end
         list
       end
 
+      # A plain value always dumps, so it is left out of the search.
+      def add_child(list, value)
+        list.push([yield, value]) unless immediate?(value)
+      end
+
       def marshal_data(obj)
-        data = obj.marshal_dump
+        data = obj.__send__(:marshal_dump)
         raise TypeError if data.instance_of?(obj.class)
 
         data
@@ -801,6 +807,8 @@ unless defined?(MKXPMarshalTrace)
       end
 
       def with_article(name)
+        return 'a value of a class with no name' if name.empty?
+
         name =~ /\A[AEIOU]/ ? "an #{name}" : "a #{name}"
       end
     end
