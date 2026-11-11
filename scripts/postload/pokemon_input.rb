@@ -126,6 +126,38 @@ unless $PokemonSystem.nil?
       scope.send(:remove_const, name) if already
       scope.const_set(name, false)
     end
+
+    # Pokemon Xenoverse replaces `PokemonEntryScene#pbStartScene` with one
+    # that never builds the letter grid ("entry2"), so `pbEntry2` crashed on
+    # nil. The scene fades in from inside `pbStartScene`, so the check runs
+    # before that fade. A scene without a grid is built again in typing mode,
+    # and the game keeps typing mode for the rest of the session.
+    if defined?(PokemonEntryScene)
+      class PokemonEntryScene
+        unless method_defined?(:mkxp_grid_pbStartScene)
+          alias mkxp_grid_pbStartScene pbStartScene
+
+          def pbStartScene(*args)
+            built = catch(:mkxp_no_letter_grid) do
+              mkxp_grid_pbStartScene(*args)
+              true
+            end
+            return if built && (USEKEYBOARD || @sprites['entry2'])
+
+            pbDisposeSpriteHash(@sprites)
+            @viewport.dispose
+            PokemonEntryScene.send(:remove_const, :USEKEYBOARD)
+            PokemonEntryScene.const_set(:USEKEYBOARD, true)
+            mkxp_grid_pbStartScene(*args)
+          end
+
+          def pbFadeInAndShow(sprites, *args, &block)
+            throw :mkxp_no_letter_grid unless USEKEYBOARD || sprites['entry2']
+            super
+          end
+        end
+      end
+    end
   end
 
   module Input
