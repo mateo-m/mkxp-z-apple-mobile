@@ -107,52 +107,66 @@ unless $PokemonSystem.nil?
     # that takes precedence over the top-level name. Belt-and-
     # braces all three: the right one for the game wins, the
     # others are no-ops.
-    [
-      [Object, :USEKEYBOARDTEXTENTRY],
-      [Object.const_defined?(:Settings) ? Settings : nil, :USEKEYBOARDTEXTENTRY],
-      [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD]
-    ].each do |scope, name|
-      next unless scope
+    force_text_entry = lambda do |value|
+      [
+        [Object, :USEKEYBOARDTEXTENTRY],
+        [Object.const_defined?(:Settings) ? Settings : nil, :USEKEYBOARDTEXTENTRY],
+        [defined?(PokemonEntryScene) ? PokemonEntryScene : nil, :USEKEYBOARD]
+      ].each do |scope, name|
+        next unless scope
 
-      # `const_defined?(name, false)` 2-arg form (skip-inheritance)
-      # is Ruby 1.9+. On 1.8 the 1-arg form already only checks
-      # the receiver's own constant table, so we just always pass
-      # the inherit flag on 1.9+ and omit it on 1.8.
-      already = if RUBY_VERSION >= '1.9'
-                  scope.const_defined?(name, false)
-                else
-                  scope.const_defined?(name)
-                end
-      scope.send(:remove_const, name) if already
-      scope.const_set(name, false)
+        # `const_defined?(name, false)` 2-arg form (skip-inheritance)
+        # is Ruby 1.9+. On 1.8 the 1-arg form already only checks
+        # the receiver's own constant table, so we just always pass
+        # the inherit flag on 1.9+ and omit it on 1.8.
+        already = if RUBY_VERSION >= '1.9'
+                    scope.const_defined?(name, false)
+                  else
+                    scope.const_defined?(name)
+                  end
+        scope.send(:remove_const, name) if already
+        scope.const_set(name, value)
+      end
     end
+    force_text_entry.call(false)
 
     # Pokemon Xenoverse replaces `PokemonEntryScene#pbStartScene` with one
     # that never builds the letter grid ("entry2"), so `pbEntry2` crashed on
     # nil. The scene fades in from inside `pbStartScene`, so the check runs
     # before that fade. A scene without a grid is built again in typing mode,
     # and the game keeps typing mode for the rest of the session.
-    if defined?(PokemonEntryScene)
-      class PokemonEntryScene
-        unless method_defined?(:mkxp_grid_pbStartScene)
-          alias mkxp_grid_pbStartScene pbStartScene
-
-          def pbStartScene(*args)
-            built = catch(:mkxp_no_letter_grid) do
-              mkxp_grid_pbStartScene(*args)
-              true
+    # F12 runs the game scripts again in the same VM, which puts the game's
+    # `pbStartScene` back, so the wrapper goes on again when it is gone.
+    if defined?(PokemonEntryScene) && PokemonEntryScene.method_defined?(:pbStartScene)
+      PokemonEntryScene.class_eval do
+        wrapper = @mkxp_grid_wrapper
+        unless wrapper && instance_method(:pbStartScene) == wrapper
+          game_start_scene = instance_method(:pbStartScene)
+          define_method(:pbStartScene) do |*args|
+            begin
+              @mkxp_grid_check = true
+              built = catch(:mkxp_no_letter_grid) do
+                game_start_scene.bind(self).call(*args)
+                true
+              end
+            ensure
+              @mkxp_grid_check = false
             end
-            return if built && (USEKEYBOARD || @sprites['entry2'])
+            return if built && (self.class::USEKEYBOARD || @sprites['entry2'])
 
             pbDisposeSpriteHash(@sprites)
-            @viewport.dispose
-            PokemonEntryScene.send(:remove_const, :USEKEYBOARD)
-            PokemonEntryScene.const_set(:USEKEYBOARD, true)
-            mkxp_grid_pbStartScene(*args)
+            @viewport.dispose if @viewport
+            force_text_entry.call(true)
+            game_start_scene.bind(self).call(*args)
           end
+          @mkxp_grid_wrapper = instance_method(:pbStartScene)
+        end
+
+        unless @mkxp_grid_fade
+          @mkxp_grid_fade = true
 
           def pbFadeInAndShow(sprites, *args, &block)
-            throw :mkxp_no_letter_grid unless USEKEYBOARD || sprites['entry2']
+            throw :mkxp_no_letter_grid if @mkxp_grid_check && !(self.class::USEKEYBOARD || sprites['entry2'])
             super
           end
         end

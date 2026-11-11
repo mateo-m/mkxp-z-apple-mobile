@@ -116,4 +116,33 @@ assert_eq(scene.pbEntry, :grid, 'a stock scene keeps the letter grid')
 assert_eq($fades, [%w[entry entry2]], 'a stock scene fades in once, with the grid')
 assert_eq(PokemonEntryScene::USEKEYBOARD, false, 'a stock scene stays in grid mode')
 
-test_passed('test_pokemon_input', 10)
+# F12 runs the game scripts again, which puts the game's pbStartScene
+# back, then runs this script again.
+Object.class_eval(XENOVERSE_SCENE)
+load SCRIPT
+$fades = []
+scene = PokemonEntryScene.new
+scene.pbStartScene('Your name?', 1, 7, '', 1)
+assert_eq(scene.pbEntry, :typed, 'after a reset, a scene without a letter grid takes typed text')
+assert_eq($fades.length, 1, 'after a reset, the screen fades in once')
+
+load SCRIPT
+$fades = []
+scene = PokemonEntryScene.new
+scene.pbStartScene('Your name?', 1, 7, '', 1)
+assert_eq($fades.length, 1, 'a second load of the script does not wrap the scene twice')
+
+$fades = []
+scene.pbFadeInAndShow({})
+assert_eq($fades.length, 1, 'a fade outside the name screen goes through')
+
+scene = load_game(XENOVERSE_SCENE.sub(/^.*Viewport\.new.*\n/, ''))
+scene.pbStartScene('Your name?', 1, 7, '', 1)
+assert_eq(scene.pbEntry, :typed, 'a scene with no viewport takes typed text')
+
+scene = load_game(XENOVERSE_SCENE.sub(/^.*USEKEYBOARD = true.*\n/, ''))
+scene.pbStartScene('Your name?', 1, 7, '', 1)
+assert_eq(scene.pbEntry, :typed, 'a scene with no USEKEYBOARD of its own takes typed text')
+assert_eq(USEKEYBOARDTEXTENTRY, true, 'the top-level setting also goes to typing mode')
+
+test_passed('test_pokemon_input', 17)
