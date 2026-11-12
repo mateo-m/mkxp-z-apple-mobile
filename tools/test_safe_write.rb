@@ -286,6 +286,52 @@ File.open(game_file('Fresh Case.rxdata'), 'wb') do |file|
   file.write('fresh')
 end
 assert_true(File.exist?(game_file('fresh case.rxdata')), 'a case lookup after the save finds the new file')
+# --- A name that starts with ~ is not a home folder ---
+Dir.chdir(USERDATA)
+File.open('~autosave.rxdata', 'wb') { |file| file.write('tilde') }
+Dir.chdir(start_dir)
+assert_eq(File.binread(game_file('~autosave.rxdata')), 'tilde', 'a name that starts with ~ saves in the folder')
+
+# --- Keyword options ---
+File.open(game, mode: File::WRONLY | File::TRUNC) { |file| file.write('keyword flags') }
+assert_eq(File.binread(game), 'keyword flags', 'a mode keyword with flags without CREAT writes the file')
+assert_raises(Errno::EEXIST, 'a flags keyword with EXCL still fails for a file that exists') do
+  File.open(game, 'w', flags: File::EXCL) { |file| file.write('x') }
+end
+assert_eq(File.binread(game), 'keyword flags', 'the EXCL open keeps the file')
+assert_raises(ArgumentError, 'an empty mode string fails as a direct open does') do
+  File.open(game, '') { |file| file.write('x') }
+end
+
+# --- Two opens of one save at the same time ---
+File.open(game, 'wb') do |file|
+  file.write('outer')
+  File.open(game.sub('Game', 'GAME'), 'wb') { |inner| inner.write('inner') }
+end
+assert_eq(File.binread(game), 'outer', 'an open of the same save in another case does not break the outer save')
+File.delete(game.sub('Game', 'GAME')) if raw_entries(USERDATA).include?('GAME.rxdata')
+threads = Array.new(2) do |n|
+  Thread.new { 200.times { File.open(game, 'wb') { |file| file.write("t#{n}") } } }
+end
+threads.each(&:join)
+assert_true(%w[t0 t1].include?(File.binread(game)), 'two threads that save one file both finish')
+assert_eq(temp_files, [], 'two threads leave no hidden file')
+
+# --- Names and links the hidden file cannot use ---
+long = game_file("#{'L' * 240}.rxdata")
+File.open(long, 'wb') { |file| file.write('long') }
+assert_eq(File.binread(long), 'long', 'a long name writes directly')
+other = game_file('Other Name.rxdata')
+File.link(game, other)
+File.open(other, 'wb') { |file| file.write('hard link') }
+assert_eq(File.binread(game), 'hard link', 'a save through a hard link writes the shared file')
+
+# --- The hidden file stays out of the game view ---
+File.open(game, 'wb') do |file|
+  file.write('listed')
+  assert_eq(Dir.entries(USERDATA).grep(/mkxp-/), [], 'a folder list during a save hides the hidden file')
+  assert_eq(file.to_path, game, 'to_path gives the save name')
+end
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 53)
+test_passed('test_safe_write', 65)
