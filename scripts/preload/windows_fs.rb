@@ -913,12 +913,12 @@ unless defined?(MKXPSafeWrite)
 
     def use?(target, mode)
       return false unless target.is_a?(String) && truncate_mode?(mode)
-      return false if @active && @active[target]
+      return false if @active && @active[File.expand_path(target)]
 
       dir = File.dirname(target)
       return false unless File._mkxp_orig_directory(dir) && File.writable?(dir)
       return false if File.symlink?(target)
-      return true unless File._mkxp_orig_exist(target)
+      return create_mode?(mode) unless File._mkxp_orig_exist(target)
 
       File._mkxp_orig_file(target) && File.writable?(target)
     end
@@ -934,6 +934,27 @@ unless defined?(MKXPSafeWrite)
       else
         false
       end
+    end
+
+    def flags(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
+      mode if mode.is_a?(Integer)
+    end
+
+    def create_mode?(mode)
+      bits = flags(mode)
+      bits.nil? || (bits & File::CREAT) != 0
+    end
+
+    # Integer flags without File::CREAT open the target only if it
+    # exists. The hidden file never exists yet.
+    def temp_args(args)
+      bits = flags(args[0])
+      return args if bits.nil? || (bits & File::CREAT) != 0
+
+      args = args.dup
+      args[0] = args[0].is_a?(Hash) ? args[0].merge(:mode => bits | File::CREAT) : bits | File::CREAT
+      args
     end
 
     def temp_path(target, kind = 'tmp')
@@ -1007,7 +1028,9 @@ unless defined?(MKXPSafeWrite)
       end
     end
 
-    def open(target, args)
+    def open(asked, args)
+      # A Dir.chdir inside the block must not move the final rename.
+      target = File.expand_path(asked)
       keep_renamed_file(target)
       temp = temp_path(target)
       remove(temp)
@@ -1015,9 +1038,9 @@ unless defined?(MKXPSafeWrite)
       (@active ||= {})[target] = true
       failed = false
       begin
-        File._mkxp_orig_open(temp, *args) do |file|
+        File._mkxp_orig_open(temp, *temp_args(args)) do |file|
           File.chmod(mode, temp) if mode
-          show_target_path(file, target)
+          show_target_path(file, asked)
           result = yield file
           finish(file)
           result
@@ -1027,10 +1050,16 @@ unless defined?(MKXPSafeWrite)
         raise
       ensure
         @active.delete(target)
-        if failed
-          remove(temp)
-        else
-          File._mkxp_orig_rename(temp, target)
+        begin
+          if failed
+            remove(temp)
+          else
+            File._mkxp_orig_rename(temp, target)
+          end
+        ensure
+          # A case lookup inside the block can list the folder before
+          # the target is there.
+          MKXPSaveFS.bump_fs_generation!
         end
       end
     end

@@ -262,6 +262,30 @@ assert_raises(Errno::ENOENT, 'the game error reaches the game') do
 end
 assert_eq(runs, 1, 'the block runs once')
 assert_eq(temp_files, [], 'the hidden files are gone at the end')
+# --- Integer flags without File::CREAT ---
+File.open(game, 'wb') { |file| file.write('old flags') }
+File.open(game, File::WRONLY | File::TRUNC) { |file| file.write('new flags') }
+assert_eq(File.binread(game), 'new flags', 'flags without CREAT write a file that exists')
+assert_raises(Errno::ENOENT, 'flags without CREAT still fail for a missing file') do
+  File.open(game_file('Missing.rxdata'), File::WRONLY | File::TRUNC) { |file| file.write('x') }
+end
+
+# --- A folder change inside the block ---
+start_dir = Dir.pwd
+Dir.chdir(USERDATA)
+File.open('Relative.rxdata', 'wb') do |file|
+  file.write('relative')
+  Dir.chdir('/')
+end
+Dir.chdir(start_dir)
+assert_eq(File.binread(game_file('Relative.rxdata')), 'relative', 'a folder change inside the block keeps the save in place')
+
+# --- A case lookup inside the block sees the new file after it ---
+File.open(game_file('Fresh Case.rxdata'), 'wb') do |file|
+  File.exist?(game_file('fresh case.rxdata'))
+  file.write('fresh')
+end
+assert_true(File.exist?(game_file('fresh case.rxdata')), 'a case lookup after the save finds the new file')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 49)
+test_passed('test_safe_write', 53)
