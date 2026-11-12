@@ -928,6 +928,7 @@ unless defined?(MKXPSafeWrite)
       dir = File.dirname(target)
       return false unless File._mkxp_orig_directory(dir) && File.writable?(dir)
       return false if File._mkxp_orig_directory(temp_path(target))
+      return false if File._mkxp_orig_directory(temp_path(target, 'restore'))
       return false if File.symlink?(target)
       return create_mode?(mode) unless File._mkxp_orig_exist(target)
 
@@ -991,18 +992,37 @@ unless defined?(MKXPSafeWrite)
       absolute(path).downcase
     end
 
+    # A write that stops in a Fiber that never resumes keeps its claim.
+    # Later saves of that file then write directly.
     def claim(target)
-      take = lambda do
+      name = key(target)
+      locked do
         @active ||= {}
-        return false if @active[key(target)]
-
-        @active[key(target)] = true
+        taken = @active[name]
+        @active[name] = true
+        !taken
       end
-      LOCK ? LOCK.synchronize(&take) : take.call
+    rescue ThreadError
+      # A Mutex refuses to lock inside a Signal.trap handler.
+      false
     end
 
     def release(target)
-      LOCK ? LOCK.synchronize { @active.delete(key(target)) } : @active.delete(key(target))
+      name = key(target)
+      locked { @active.delete(name) }
+    end
+
+    # Ruby 1.8 has no Mutex until a script requires 'thread'.
+    def locked(&block)
+      return LOCK.synchronize(&block) if LOCK
+      return yield unless Thread.respond_to?(:critical=)
+
+      begin
+        Thread.critical = true
+        yield
+      ensure
+        Thread.critical = false
+      end
     end
 
     # Pokemon Insurgence renames Game.rxdata to Save_0_Backup_1.rxdata
@@ -1059,6 +1079,24 @@ unless defined?(MKXPSafeWrite)
       nil
     end
 
+    def finish_rename(temp, target)
+      File._mkxp_orig_rename(temp, target)
+    rescue Errno::ENOENT
+      # The block deleted the folder. A direct write loses the file too.
+      raise if File._mkxp_orig_directory(File.dirname(target))
+    end
+
+    # A Pathname names a file. An open File also has to_path.
+    def name_of(target)
+      return target if target.is_a?(String)
+      return nil if target.is_a?(IO) || !target.respond_to?(:to_path)
+
+      target.to_path
+    end
+
+    # A game that renames file.path inside the block moves the old file.
+    # The new data still lands at the name it opened. Windows refuses to
+    # rename an open file, so games made for it do not do this.
     def show_target_path(file, target)
       file.instance_variable_set(:@mkxp_target_path, target)
       class << file
@@ -1109,7 +1147,7 @@ unless defined?(MKXPSafeWrite)
           if failed
             remove(temp)
           else
-            File._mkxp_orig_rename(temp, target)
+            finish_rename(temp, target)
           end
         ensure
           # A case lookup inside the block can list the folder before
@@ -1148,8 +1186,9 @@ class << File
     begin
       return _mkxp_orig_open(target, *args) unless block_given?
 
-      if MKXPSafeWrite.use?(target, args)
-        MKXPSafeWrite.open(target, args) do |file|
+      name = MKXPSafeWrite.name_of(target)
+      if MKXPSafeWrite.use?(name, args)
+        MKXPSafeWrite.open(name, args) do |file|
           started = true
           yield file
         end

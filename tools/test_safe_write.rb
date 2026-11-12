@@ -7,6 +7,7 @@
 # Run: ruby mkxp-z-apple-mobile/tools/test_safe_write.rb
 
 require 'English'
+require 'pathname'
 require_relative 'save_fs_harness'
 
 # The tests write the way games do: File.open with a block, a delete
@@ -332,6 +333,41 @@ File.open(game, 'wb') do |file|
   assert_eq(Dir.entries(USERDATA).grep(/mkxp-/), [], 'a folder list during a save hides the hidden file')
   assert_eq(file.to_path, game, 'to_path gives the save name')
 end
+# --- A Pathname save is safe too ---
+File.delete(other)
+File.open(game, 'wb') { |file| file.write('before path') }
+assert_raises(RuntimeError, 'a Pathname save that raises reaches the game') do
+  File.open(Pathname.new(game), 'wb') do |file|
+    file.write('H')
+    raise 'stop'
+  end
+end
+assert_eq(File.binread(game), 'before path', 'a Pathname save that raises keeps the old file')
+
+# --- A save from a signal handler ---
+trapped = nil
+old_trap = Signal.trap('USR1') { File.open(game, 'wb') { |file| file.write('trap') } && (trapped = true) }
+Process.kill('USR1', Process.pid)
+sleep 0.01 until trapped
+Signal.trap('USR1', old_trap)
+assert_eq(File.binread(game), 'trap', 'a save from a signal handler writes the file')
+
+# --- The block deletes its own folder ---
+gone = game_file('Gone')
+Dir.mkdir(gone)
+File.open(File.join(gone, 'Game.rxdata'), 'wb') do |file|
+  file.write('x')
+  File._mkxp_orig_delete(MKXPSafeWrite.temp_path(File.join(gone, 'Game.rxdata')))
+  Dir.rmdir(gone)
+end
+assert_true(!File.directory?(gone), 'a save whose block deletes the folder ends without an error')
+
+# --- A leftover folder with the restore name ---
+stuck = MKXPSafeWrite.temp_path(game, 'restore')
+Dir.mkdir(stuck)
+File.open(game, 'wb') { |file| file.write('past folder') }
+Dir.rmdir(stuck)
+assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 65)
+test_passed('test_safe_write', 70)
