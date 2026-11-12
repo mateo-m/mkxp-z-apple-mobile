@@ -1098,9 +1098,9 @@ unless defined?(MKXPSafeWrite)
 
     # Some file systems refuse fsync. A full or failing disk must
     # still fail the save, so the old file stays.
-    NO_FSYNC = [Errno::EINVAL, NotImplementedError] +
-               %w[ENOTSUP EOPNOTSUPP].select { |name| Errno.const_defined?(name) }
-                                     .map { |name| Errno.const_get(name) }
+    NO_FSYNC = [Errno::EINVAL, NotImplementedError].concat(
+      %w[ENOTSUP EOPNOTSUPP].select { |name| Errno.const_defined?(name) }.map { |name| Errno.const_get(name) }
+    ).freeze
 
     def sync(file)
       file.fsync
