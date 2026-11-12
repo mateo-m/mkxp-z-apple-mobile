@@ -389,6 +389,23 @@ Thread.new do
   end
 end.join
 assert_eq(File.binread(game), 'before exit', 'a save on a thread that calls Thread.exit keeps the old file')
+File.open(game, 'wb') { |file| file.write('before deferred') }
+ready = Queue.new
+go = Queue.new
+deferred = Thread.new do
+  Thread.handle_interrupt(Object => :never) do
+    File.open(game, 'wb') do |file|
+      ready << true
+      go.pop
+      file.write('deferred')
+    end
+  end
+end
+ready.pop
+deferred.kill
+go << true
+deferred.join
+assert_eq(File.binread(game), 'deferred', 'a save that ends before a deferred kill takes effect writes the new file')
 
 # --- Names and links the temp file cannot use ---
 long = game_file("#{'L' * 240}.rxdata")
@@ -472,4 +489,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 95)
+test_passed('test_safe_write', 96)

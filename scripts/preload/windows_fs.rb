@@ -921,29 +921,33 @@ end
 # target changes only when the block ends without an exception.
 unless defined?(MKXPSafeWrite)
   # Ruby 1.9 gives a killed thread back its old status while its
-  # ensure blocks run, so a kill leaves a mark on the thread too.
-  class Thread
-    alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
-
-    def kill
-      self[:mkxp_killed] = true
-      _mkxp_orig_kill
-    end
-    alias exit kill
-    alias terminate kill
-
-    class << self
+  # ensure blocks run, so a kill leaves a mark on the thread there.
+  # Later Rubies can defer a kill with Thread.handle_interrupt, and a
+  # mark would then drop a save that ends normally.
+  if RUBY_VERSION.start_with?('1.9')
+    class Thread
       alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
-      alias _mkxp_orig_exit exit unless method_defined?(:_mkxp_orig_exit)
 
-      def kill(thread)
-        thread[:mkxp_killed] = true
-        _mkxp_orig_kill(thread)
+      def kill
+        self[:mkxp_killed] = true
+        _mkxp_orig_kill
       end
+      alias exit kill
+      alias terminate kill
 
-      def exit
-        Thread.current[:mkxp_killed] = true
-        _mkxp_orig_exit
+      class << self
+        alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
+        alias _mkxp_orig_exit exit unless method_defined?(:_mkxp_orig_exit)
+
+        def kill(thread)
+          thread[:mkxp_killed] = true
+          _mkxp_orig_kill(thread)
+        end
+
+        def exit
+          Thread.current[:mkxp_killed] = true
+          _mkxp_orig_exit
+        end
       end
     end
   end

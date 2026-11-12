@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('safe-write', 6)
+EngineTest.suite('safe-write', 7)
 
 EngineTest.load_preloads(%w[windows_fs])
 
@@ -81,6 +81,31 @@ EngineTest.test('a save on a stopped thread keeps the old file') do
   stopped_save(:kill)
   stopped_save(:class_kill)
   stopped_save(:exit)
+end
+
+EngineTest.test('a save that ends before a deferred kill writes the new file') do
+  if Thread.respond_to?(:handle_interrupt)
+    safe_save('before deferred')
+    ready = false
+    go = false
+    saver = Thread.new do
+      Thread.handle_interrupt(Object => :never) do
+        File.open(SAFE_GAME, 'wb') do |file|
+          ready = true
+          Thread.pass until go
+          file.write('deferred')
+        end
+      end
+    end
+    Thread.pass until ready
+    saver.kill
+    go = true
+    saver.join
+    EngineTest.assert_equal('deferred', safe_read, 'save after a deferred kill')
+  else
+    EngineTest.assert_equal(false, Thread.respond_to?(:handle_interrupt),
+                            'no handle_interrupt before Ruby 2.0')
+  end
 end
 
 EngineTest.test('the Dir class lists hide the temp file') do
