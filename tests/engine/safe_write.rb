@@ -77,7 +77,13 @@ def stopped_save(how)
   when :kill, :fiber then saver.kill
   when :class_kill then Thread.kill(saver)
   end
-  saver.join
+  begin
+    saver.join
+  rescue RuntimeError => e
+    # Ruby 1.9 ends a thread killed inside a fiber with an empty
+    # RuntimeError, and join raises it.
+    raise unless how == :fiber && e.message.empty?
+  end
   EngineTest.assert_equal('before kill', safe_read, "save after #{how}")
   EngineTest.assert_equal([], safe_temp_files, "temp files after #{how}")
 end
