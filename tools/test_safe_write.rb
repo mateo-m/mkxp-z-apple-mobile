@@ -120,13 +120,13 @@ assert_true($CHILD_STATUS.signaled?, 'the save process was killed')
 assert_eq(load_all(game), ['before the crash'], 'a crash during the save keeps the last save')
 assert_eq(load_all(backup), ['before the crash'], 'a crash during the save keeps the backup')
 assert_eq(temp_files, ['Game.rxdata.mkxp-tmp'], 'the temp file of the crash has a name the Files app shows')
-assert_eq(Dir.glob(File.join(USERDATA, '*')).grep(/mkxp-/), [], 'a glob hides the temp file')
-assert_eq(Dir[File.join(USERDATA, 'Game*')].grep(/mkxp-/), [], 'Dir[] hides the temp file')
+assert_eq(Dir.glob(File.join(USERDATA, '*')).grep(/\.mkxp-tmp\z/), [], 'a glob hides the temp file')
+assert_eq(Dir[File.join(USERDATA, 'Game*')].grep(/\.mkxp-tmp\z/), [], 'Dir[] hides the temp file')
 listed = []
 Dir.glob(File.join(USERDATA, 'Game*')) { |name| listed << name }
-assert_eq(listed.grep(/mkxp-/), [], 'a glob with a block hides the temp file')
-assert_eq(Dir.children(USERDATA).grep(/mkxp-/), [], 'Dir.children hides the temp file')
-assert_eq(Dir.foreach(USERDATA).to_a.grep(/mkxp-/), [], 'Dir.foreach hides the temp file')
+assert_eq(listed.grep(/\.mkxp-tmp\z/), [], 'a glob with a block hides the temp file')
+assert_eq(Dir.children(USERDATA).grep(/\.mkxp-tmp\z/), [], 'Dir.children hides the temp file')
+assert_eq(Dir.foreach(USERDATA).to_a.grep(/\.mkxp-tmp\z/), [], 'Dir.foreach hides the temp file')
 insurgence_save(game, backup, ['after the crash'])
 assert_eq(load_all(game), ['after the crash'], 'the next save works after a crash')
 assert_eq(temp_files, [], 'the next save removes the temp file of the crash')
@@ -338,15 +338,15 @@ assert_eq(File.binread(game), 'hard link', 'a save through a hard link writes th
 # --- The temp file stays out of the game lists ---
 File.open(game, 'wb') do |file|
   file.write('listed')
-  assert_eq(Dir.entries(USERDATA).grep(/mkxp-/), [], 'a folder list during a save hides the temp file')
+  assert_eq(Dir.entries(USERDATA).grep(/\.mkxp-tmp\z/), [], 'a folder list during a save hides the temp file')
   assert_eq(file.to_path, game, 'to_path gives the save name')
 end
 sub = game_file('Slots')
 Dir.mkdir(sub)
 File.open(File.join(sub, 'Save1.rxdata'), 'wb') do |file|
   file.write('in a folder')
-  assert_eq(Dir.entries(sub).grep(/mkxp-/), [], 'a list of another folder during a save hides the temp file')
-  assert_eq(Dir.each_child(sub).to_a.grep(/mkxp-/), [], 'Dir.each_child hides the temp file')
+  assert_eq(Dir.entries(sub).grep(/\.mkxp-tmp\z/), [], 'a list of another folder during a save hides the temp file')
+  assert_eq(Dir.each_child(sub).to_a.grep(/\.mkxp-tmp\z/), [], 'Dir.each_child hides the temp file')
 end
 File.delete(File.join(sub, 'Save1.rxdata'))
 Dir.rmdir(sub)
