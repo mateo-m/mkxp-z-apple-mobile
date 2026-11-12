@@ -95,7 +95,8 @@ unless defined?(MKXPSaveFS)
     # stranded saves.
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
     PORTABLE_PREFIX = "#{PORTABLE_SAVE_DIR}/".freeze
-    ENGINE_DIR_ENTRY_RE = /\A(?:keybindings\.mkxp\d+|\..+\.mkxp-(?:tmp|restore))\z/.freeze
+    ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
+    SAFE_WRITE_ENTRY_RE = /\A.+\.mkxp-(?:tmp|restore)\z/.freeze
     # Rooted path: "/...", "\...", or a Windows drive prefix.
     ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
 
@@ -177,13 +178,27 @@ unless defined?(MKXPSaveFS)
     def engine_internal_entry?(name)
       return false unless name.is_a?(String)
 
-      name =~ ENGINE_DIR_ENTRY_RE
+      name =~ ENGINE_DIR_ENTRY_RE || safe_write_entry?(name)
+    end
+
+    def safe_write_entry?(path)
+      path.is_a?(String) && File.basename(path) =~ SAFE_WRITE_ENTRY_RE
     end
 
     def filter_dir_entries(entries)
       return entries unless entries.respond_to?(:reject)
 
       entries.reject { |entry| engine_internal_entry?(entry) }
+    end
+
+    def filter_safe_write_entries(entries)
+      return entries unless entries.respond_to?(:reject)
+
+      entries.reject { |entry| safe_write_entry?(entry) }
+    end
+
+    def list_entries(target, entries)
+      save_root_target?(target) ? filter_dir_entries(entries) : filter_safe_write_entries(entries)
     end
 
     # Bare working-directory save filenames - the shape decade-old
@@ -908,9 +923,8 @@ unless defined?(MKXPSafeWrite)
   module MKXPSafeWrite
     MODE_BITS = 0xFFF
     CHUNK = 65_536
-    # The longest hidden name adds ".mkxp-restore" and a dot. Most
-    # file systems stop at 255 bytes in one name.
-    NAME_MAX = 255 - '..mkxp-restore'.length
+    # Most file systems stop at 255 bytes in one name.
+    NAME_MAX = 255 - '.mkxp-restore'.length
     LOCK = defined?(Mutex) ? Mutex.new : nil
 
     module_function
@@ -976,7 +990,9 @@ unless defined?(MKXPSafeWrite)
     end
 
     def temp_path(target, kind = 'tmp')
-      File.join(File.dirname(target), ".#{File.basename(target)}.mkxp-#{kind}")
+      # The iOS Files app hides a name that starts with a dot. The
+      # player must see a file that a crash leaves.
+      File.join(File.dirname(target), "#{File.basename(target)}.mkxp-#{kind}")
     end
 
     def remove(path)
@@ -1403,7 +1419,6 @@ class << Dir
   alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_entries entries unless method_defined?(:_mkxp_orig_entries)
-  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
   if (method_defined?(:exist?) || private_method_defined?(:exist?)) && !method_defined?(:_mkxp_orig_exist)
     alias _mkxp_orig_exist exist?
   end
@@ -1415,7 +1430,11 @@ class << Dir
   # enumeration and the open that follows see the same folder.
   def glob(pattern, *args, &block)
     MKXPSaveFS.recover_saves_for_glob(pattern)
-    _mkxp_orig_glob(pattern, *args, &block)
+    found = MKXPSaveFS.filter_safe_write_entries(_mkxp_orig_glob(pattern, *args))
+    return found unless block
+
+    found.each(&block)
+    nil
   end
   # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
   # this) flowing through the *args wrapper. See the File note above.
@@ -1424,7 +1443,7 @@ class << Dir
   # Dir[] shares glob's recovery. Ancient slot pickers use both.
   def [](*patterns)
     MKXPSaveFS.recover_saves_for_glob(patterns)
-    _mkxp_orig_brackets(*patterns)
+    MKXPSaveFS.filter_safe_write_entries(_mkxp_orig_brackets(*patterns))
   end
   ruby2_keywords :[] if respond_to?(:ruby2_keywords, true)
 
@@ -1451,29 +1470,14 @@ class << Dir
     # else passes through.
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
-    result = _mkxp_orig_entries(target, *args)
-    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
-
-    result
+    MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args))
   end
   ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
 
   def foreach(path = '.', *args, &block)
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
-    unless block
-      if MKXPSaveFS.save_root_target?(target)
-        return MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each
-      end
-
-      return _mkxp_orig_foreach(target, *args)
-    end
-
-    if MKXPSaveFS.save_root_target?(target)
-      MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each(&block)
-    else
-      _mkxp_orig_foreach(target, *args, &block)
-    end
+    MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args)).each(&block)
   end
   ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
 
@@ -1485,33 +1489,16 @@ class << Dir
     def children(path, *args)
       MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
-      result = _mkxp_orig_children(target, *args)
-      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
-
-      result
+      MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args))
     end
     ruby2_keywords :children if respond_to?(:ruby2_keywords, true)
   end
 
   if method_defined?(:each_child) || private_method_defined?(:each_child)
-    alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
-
     def each_child(path, *args, &block)
       MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
-      unless block
-        if MKXPSaveFS.save_root_target?(target)
-          return MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each
-        end
-
-        return _mkxp_orig_each_child(target, *args)
-      end
-
-      if MKXPSaveFS.save_root_target?(target)
-        MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each(&block)
-      else
-        _mkxp_orig_each_child(target, *args, &block)
-      end
+      MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args)).each(&block)
     end
     ruby2_keywords :each_child if respond_to?(:ruby2_keywords, true)
   end

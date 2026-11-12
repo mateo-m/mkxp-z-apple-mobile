@@ -60,7 +60,7 @@ backup = game_file('Save_0_Backup_1.rxdata')
 File.open(game, 'wb') { |f| Marshal.dump(%w[trainer old], f) }
 File.open(game, 'wb') { |f| Marshal.dump(%w[trainer new], f) }
 assert_eq(load_all(game), [%w[trainer new]], 'a finished write replaces the file')
-assert_eq(temp_files, [], 'a finished write leaves no hidden file')
+assert_eq(temp_files, [], 'a finished write leaves no temp file')
 
 # --- The block's value comes back ---
 assert_eq(File.open(game, 'wb') { |f| f.write('x') && :done }, :done, 'File.open returns the block value')
@@ -78,7 +78,7 @@ rescue RuntimeError
 end
 assert_true(raised, 'the error still reaches the game')
 assert_eq(load_all(game), ['whole save'], 'a write that raises keeps the old file')
-assert_eq(temp_files, [], 'a write that raises leaves no hidden file')
+assert_eq(temp_files, [], 'a write that raises leaves no temp file')
 
 # --- Insurgence: a save that fails after the switches ---
 # This is the broken save from the player: the file ended right after
@@ -95,7 +95,7 @@ assert_false(saved, 'the failed dump still raises')
 last_save = ['trainer', 1000, 'switches', 'variables']
 assert_eq(load_all(game), last_save, 'Insurgence keeps the last save to continue')
 assert_eq(load_all(backup), last_save, 'Insurgence keeps its backup')
-assert_eq(temp_files, [], 'the failed save leaves no hidden file')
+assert_eq(temp_files, [], 'the failed save leaves no temp file')
 
 # --- Insurgence: a save that ends gives two separate files ---
 insurgence_save(game, backup, ['trainer', 3000])
@@ -119,9 +119,17 @@ Process.wait(pid)
 assert_true($CHILD_STATUS.signaled?, 'the save process was killed')
 assert_eq(load_all(game), ['before the crash'], 'a crash during the save keeps the last save')
 assert_eq(load_all(backup), ['before the crash'], 'a crash during the save keeps the backup')
+assert_eq(temp_files, ['Game.rxdata.mkxp-tmp'], 'the temp file of the crash has a name the Files app shows')
+assert_eq(Dir.glob(File.join(USERDATA, '*')).grep(/mkxp-/), [], 'a glob hides the temp file')
+assert_eq(Dir[File.join(USERDATA, 'Game*')].grep(/mkxp-/), [], 'Dir[] hides the temp file')
+listed = []
+Dir.glob(File.join(USERDATA, 'Game*')) { |name| listed << name }
+assert_eq(listed.grep(/mkxp-/), [], 'a glob with a block hides the temp file')
+assert_eq(Dir.children(USERDATA).grep(/mkxp-/), [], 'Dir.children hides the temp file')
+assert_eq(Dir.foreach(USERDATA).to_a.grep(/mkxp-/), [], 'Dir.foreach hides the temp file')
 insurgence_save(game, backup, ['after the crash'])
 assert_eq(load_all(game), ['after the crash'], 'the next save works after a crash')
-assert_eq(temp_files, [], 'the next save removes the hidden file of the crash')
+assert_eq(temp_files, [], 'the next save removes the temp file of the crash')
 
 # --- A rename that the game does not write back is not undone ---
 File.open(game_file('Old.rxdata'), 'wb') { |f| f.write('old') }
@@ -149,7 +157,7 @@ def save_and_return(path)
 end
 save_and_return(game)
 assert_eq(File.binread(game), 'returned', 'a return from the block keeps the write')
-assert_eq(temp_files, [], 'a return from the block leaves no hidden file')
+assert_eq(temp_files, [], 'a return from the block leaves no temp file')
 
 # --- Other opens do not change ---
 f = File.open(game, 'wb')
@@ -163,7 +171,7 @@ File.open(game, 'r+b') { |file| file.write('NO') }
 assert_eq(File.binread(game), 'NO block and more', 'update mode writes to the file itself')
 File.open(game, File::WRONLY | File::TRUNC | File::CREAT) { |file| file.write('flags') }
 assert_eq(File.binread(game), 'flags', 'a mode given as flags with TRUNC writes')
-assert_eq(temp_files, [], 'the flag write leaves no hidden file')
+assert_eq(temp_files, [], 'the flag write leaves no temp file')
 assert_eq(File.open(game, 'rb', &:read), 'flags', 'a read still works')
 # --- The game closes the file inside the block ---
 File.open(game, 'wb') do |file|
@@ -178,7 +186,7 @@ File.open(game, 'wb') do |outer|
   outer.write('outer')
 end
 assert_eq(File.binread(game), 'outer', 'a nested open of the same file does not fail')
-assert_eq(temp_files, [], 'a nested open leaves no hidden file')
+assert_eq(temp_files, [], 'a nested open leaves no temp file')
 
 # --- The path of the open file is the name the game asked for ---
 File.open(game, 'wb') { |file| assert_eq(file.path, game, 'file.path is the target name') }
@@ -248,7 +256,7 @@ leftover = MKXPSafeWrite.temp_path(game)
 File._mkxp_orig_open(leftover, 'wb') { |file| file.write('left over') }
 File.chmod(0o444, leftover)
 File.open(game, 'wb') { |file| file.write('after leftover') }
-assert_eq(File.binread(game), 'after leftover', 'a read-only hidden file from a crash does not stop the save')
+assert_eq(File.binread(game), 'after leftover', 'a read-only temp file from a crash does not stop the save')
 fd = IO.sysopen(game, 'w')
 File.open(fd, 'w') { |file| file.write('fd') }
 assert_eq(File.binread(game), 'fd', 'an open of a file descriptor still writes')
@@ -262,7 +270,7 @@ assert_raises(Errno::ENOENT, 'the game error reaches the game') do
   end
 end
 assert_eq(runs, 1, 'the block runs once')
-assert_eq(temp_files, [], 'the hidden files are gone at the end')
+assert_eq(temp_files, [], 'the temp files are gone at the end')
 # --- Integer flags without File::CREAT ---
 File.open(game, 'wb') { |file| file.write('old flags') }
 File.open(game, File::WRONLY | File::TRUNC) { |file| file.write('new flags') }
@@ -316,9 +324,9 @@ threads = Array.new(2) do |n|
 end
 threads.each(&:join)
 assert_true(%w[t0 t1].include?(File.binread(game)), 'two threads that save one file both finish')
-assert_eq(temp_files, [], 'two threads leave no hidden file')
+assert_eq(temp_files, [], 'two threads leave no temp file')
 
-# --- Names and links the hidden file cannot use ---
+# --- Names and links the temp file cannot use ---
 long = game_file("#{'L' * 240}.rxdata")
 File.open(long, 'wb') { |file| file.write('long') }
 assert_eq(File.binread(long), 'long', 'a long name writes directly')
@@ -327,12 +335,21 @@ File.link(game, other)
 File.open(other, 'wb') { |file| file.write('hard link') }
 assert_eq(File.binread(game), 'hard link', 'a save through a hard link writes the shared file')
 
-# --- The hidden file stays out of the game view ---
+# --- The temp file stays out of the game lists ---
 File.open(game, 'wb') do |file|
   file.write('listed')
-  assert_eq(Dir.entries(USERDATA).grep(/mkxp-/), [], 'a folder list during a save hides the hidden file')
+  assert_eq(Dir.entries(USERDATA).grep(/mkxp-/), [], 'a folder list during a save hides the temp file')
   assert_eq(file.to_path, game, 'to_path gives the save name')
 end
+sub = game_file('Slots')
+Dir.mkdir(sub)
+File.open(File.join(sub, 'Save1.rxdata'), 'wb') do |file|
+  file.write('in a folder')
+  assert_eq(Dir.entries(sub).grep(/mkxp-/), [], 'a list of another folder during a save hides the temp file')
+  assert_eq(Dir.each_child(sub).to_a.grep(/mkxp-/), [], 'Dir.each_child hides the temp file')
+end
+File.delete(File.join(sub, 'Save1.rxdata'))
+Dir.rmdir(sub)
 # --- A Pathname save is safe too ---
 File.delete(other)
 File.open(game, 'wb') { |file| file.write('before path') }
@@ -370,4 +387,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 70)
+test_passed('test_safe_write', 78)

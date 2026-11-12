@@ -60,7 +60,7 @@ def assert_case_resolution
   )
 end
 
-# A safe write renames its hidden file onto the full path.
+# A safe write renames its temp file onto the full path.
 def raw_write?(records, path)
   records.include?(path) || records.include?(File.expand_path(path))
 end
