@@ -899,6 +899,79 @@ unless defined?(MKXPTextMode)
   end
 end
 
+# A save that stops half way, from a crash or from a value that
+# Marshal cannot dump, leaves a cut-short file, and the next load
+# fails with "end of file reached". A File.open that truncates and
+# takes a block writes to a hidden file next to the target. The
+# target changes only when the block ends without an exception.
+unless defined?(MKXPSafeWrite)
+  module MKXPSafeWrite
+    module_function
+
+    def truncate_mode?(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
+      case mode
+      when Integer
+        (mode & File::TRUNC) != 0
+      when String, Symbol
+        mode.to_s.split(':', 2)[0].start_with?('w')
+      else
+        false
+      end
+    end
+
+    def temp_path(target)
+      File.join(File.dirname(target), ".#{File.basename(target)}.mkxp-tmp")
+    end
+
+    # Pokemon Insurgence renames Game.rxdata to Save_0_Backup_1.rxdata
+    # and then writes a new Game.rxdata. Without the old file at the
+    # target name, a failed write leaves no save to continue from.
+    def note_rename(from, to)
+      @renamed ||= {}
+      @renamed[File.expand_path(from)] = [to, File.stat(to).ino]
+    rescue StandardError
+      nil
+    end
+
+    def keep_renamed_file(target)
+      return unless defined?(@renamed) && @renamed
+
+      to, ino = @renamed.delete(File.expand_path(target))
+      return unless to
+      return if File._mkxp_orig_exist(target)
+      return unless File.stat(to).ino == ino
+
+      File.link(to, target)
+    rescue StandardError
+      nil
+    end
+
+    def open(target, args)
+      keep_renamed_file(target)
+      temp = temp_path(target)
+      failed = false
+      begin
+        File._mkxp_orig_open(temp, *args) do |file|
+          result = yield file
+          file.flush
+          file.fsync
+          result
+        end
+      rescue Exception # rubocop:disable Lint/RescueException -- an Interrupt or an exit must not replace the save either
+        failed = true
+        raise
+      ensure
+        if failed
+          File._mkxp_orig_delete(temp) if File._mkxp_orig_exist(temp)
+        else
+          File._mkxp_orig_rename(temp, target)
+        end
+      end
+    end
+  end
+end
+
 # --- File API front: legacy-save recovery + case resolution ---
 # Paths resolve literally. path_for only performs the one-time
 # legacy-save recovery side effect. The case helpers keep destructive
@@ -920,12 +993,18 @@ class << File
 
   def open(path, *args, &block)
     args = MKXPTextMode.read_args(args)
-    _mkxp_orig_open(MKXPSaveFS.open_target(path, args[0]), *args, &block)
+    target = MKXPSaveFS.open_target(path, args[0])
+    return MKXPSafeWrite.open(target, args, &block) if block && MKXPSafeWrite.truncate_mode?(args[0])
+
+    _mkxp_orig_open(target, *args, &block)
   rescue Errno::ENOENT
     fixed = MKXPSaveFS.read_fallback_target(path)
     raise unless fixed
 
-    _mkxp_orig_open(MKXPSaveFS.refuse_directory(fixed), *args, &block)
+    fixed = MKXPSaveFS.refuse_directory(fixed)
+    return MKXPSafeWrite.open(fixed, args, &block) if block && MKXPSafeWrite.truncate_mode?(args[0])
+
+    _mkxp_orig_open(fixed, *args, &block)
   end
 
   def new(path, *args)
@@ -946,7 +1025,11 @@ class << File
   alias unlink delete
 
   def rename(from, to)
-    _mkxp_orig_rename(MKXPSaveFS.change_target(from), MKXPSaveFS.change_target(to))
+    from = MKXPSaveFS.change_target(from)
+    to = MKXPSaveFS.change_target(to)
+    result = _mkxp_orig_rename(from, to)
+    MKXPSafeWrite.note_rename(from, to)
+    result
   end
 
   def exist?(path)
