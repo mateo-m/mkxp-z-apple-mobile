@@ -596,7 +596,7 @@ end
 
 # --- Log the value that stops a save ---
 # Essentials' pbSave rescues every error and returns false, so a save
-# that fails leaves a cut-short Game.rxdata and no trace. When
+# that fails leaves no trace. When
 # Marshal.dump raises, find the value that Marshal could not write and
 # put its path in the debug log.
 unless defined?(MKXPMarshalTrace)
