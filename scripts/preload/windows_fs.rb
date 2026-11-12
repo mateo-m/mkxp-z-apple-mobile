@@ -920,6 +920,34 @@ end
 # takes a block writes to a temp file next to the target. The
 # target changes only when the block ends without an exception.
 unless defined?(MKXPSafeWrite)
+  # Ruby 1.9 gives a killed thread back its old status while its
+  # ensure blocks run, so a kill leaves a mark on the thread too.
+  class Thread
+    alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
+
+    def kill
+      self[:mkxp_killed] = true
+      _mkxp_orig_kill
+    end
+    alias exit kill
+    alias terminate kill
+
+    class << self
+      alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
+      alias _mkxp_orig_exit exit unless method_defined?(:_mkxp_orig_exit)
+
+      def kill(thread)
+        thread[:mkxp_killed] = true
+        _mkxp_orig_kill(thread)
+      end
+
+      def exit
+        Thread.current[:mkxp_killed] = true
+        _mkxp_orig_exit
+      end
+    end
+  end
+
   module MKXPSafeWrite
     MODE_BITS = 0xFFF
     CHUNK = 65_536
@@ -1034,6 +1062,10 @@ unless defined?(MKXPSafeWrite)
     end
 
     # Ruby 1.8 has no Mutex until a script requires 'thread'.
+    def killed?
+      Thread.current.status == 'aborting' || Thread.current[:mkxp_killed] ? true : false
+    end
+
     def locked
       if LOCK
         # Ruby 1.9 defines Mutex#synchronize in the thread library,
@@ -1185,7 +1217,7 @@ unless defined?(MKXPSafeWrite)
         begin
           # Thread#kill and an exit from another thread raise nothing
           # in this thread.
-          if failed || Thread.current.status == 'aborting'
+          if failed || MKXPSafeWrite.killed?
             remove(temp)
           else
             finish_rename(temp, target)

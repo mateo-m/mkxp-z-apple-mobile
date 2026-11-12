@@ -59,21 +59,28 @@ EngineTest.test('a save that raises keeps the old file') do
   EngineTest.assert_equal([], safe_temp_files, 'temp files after the error')
 end
 
-EngineTest.test('a save on a stopped thread keeps the old file') do
+def stopped_save(how)
   safe_save('before kill')
   started = false
   saver = Thread.new do
     File.open(SAFE_GAME, 'wb') do |file|
       file.write('HALF')
       started = true
-      sleep
+      how == :exit ? Thread.exit : sleep
     end
   end
   Thread.pass until started
-  saver.kill
+  saver.kill if how == :kill
+  Thread.kill(saver) if how == :class_kill
   saver.join
-  EngineTest.assert_equal('before kill', safe_read, 'save after the kill')
-  EngineTest.assert_equal([], safe_temp_files, 'temp files after the kill')
+  EngineTest.assert_equal('before kill', safe_read, "save after #{how}")
+  EngineTest.assert_equal([], safe_temp_files, "temp files after #{how}")
+end
+
+EngineTest.test('a save on a stopped thread keeps the old file') do
+  stopped_save(:kill)
+  stopped_save(:class_kill)
+  stopped_save(:exit)
 end
 
 EngineTest.test('the Dir class lists hide the temp file') do

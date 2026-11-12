@@ -381,6 +381,14 @@ saver.kill
 saver.join
 assert_eq(File.binread(game), 'before kill', 'a save on a stopped thread keeps the old file')
 assert_eq(temp_files, [], 'a save on a stopped thread leaves no temp file')
+File.open(game, 'wb') { |file| file.write('before exit') }
+Thread.new do
+  File.open(game, 'wb') do |file|
+    file.write('HALF')
+    Thread.exit
+  end
+end.join
+assert_eq(File.binread(game), 'before exit', 'a save on a thread that calls Thread.exit keeps the old file')
 
 # --- Names and links the temp file cannot use ---
 long = game_file("#{'L' * 240}.rxdata")
@@ -464,4 +472,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 94)
+test_passed('test_safe_write', 95)
