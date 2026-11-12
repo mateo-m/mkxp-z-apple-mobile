@@ -127,6 +127,13 @@ Dir.glob(File.join(USERDATA, 'Game*')) { |name| listed << name }
 assert_eq(listed.grep(/\.mkxp-tmp\z/), [], 'a glob with a block hides the temp file')
 assert_eq(Dir.children(USERDATA).grep(/\.mkxp-tmp\z/), [], 'Dir.children hides the temp file')
 assert_eq(Dir.foreach(USERDATA).to_a.grep(/\.mkxp-tmp\z/), [], 'Dir.foreach hides the temp file')
+assert_eq(Dir.new(USERDATA).to_a.grep(/\.mkxp-tmp\z/), [], 'Dir.new hides the temp file')
+assert_eq(Dir.open(USERDATA) { |dir| dir.children }.grep(/\.mkxp-tmp\z/), [], 'Dir#children hides the temp file')
+read = []
+Dir.open(USERDATA) { |dir| while (name = dir.read) do read << name end }
+assert_eq(read.grep(/\.mkxp-tmp\z/), [], 'Dir#read hides the temp file')
+assert_true(read.include?('Game.rxdata'), 'Dir#read still gives the save')
+assert_eq(Dir.foreach(USERDATA) { |_name| nil }, nil, 'Dir.foreach with a block returns nil')
 insurgence_save(game, backup, ['after the crash'])
 assert_eq(load_all(game), ['after the crash'], 'the next save works after a crash')
 assert_eq(temp_files, [], 'the next save removes the temp file of the crash')
@@ -348,6 +355,22 @@ threads.each(&:join)
 assert_true(%w[t0 t1].include?(File.binread(game)), 'two threads that save one file both finish')
 assert_eq(temp_files, [], 'two threads leave no temp file')
 
+# --- A thread that is stopped during the save ---
+File.open(game, 'wb') { |file| file.write('before kill') }
+started = Queue.new
+saver = Thread.new do
+  File.open(game, 'wb') do |file|
+    file.write('HALF')
+    started << true
+    sleep
+  end
+end
+started.pop
+saver.kill
+saver.join
+assert_eq(File.binread(game), 'before kill', 'a save on a stopped thread keeps the old file')
+assert_eq(temp_files, [], 'a save on a stopped thread leaves no temp file')
+
 # --- Names and links the temp file cannot use ---
 long = game_file("#{'L' * 240}.rxdata")
 File.open(long, 'wb') { |file| file.write('long') }
@@ -400,6 +423,27 @@ File.open(File.join(gone, 'Game.rxdata'), 'wb') do |file|
   Dir.rmdir(gone)
 end
 assert_true(!File.directory?(gone), 'a save whose block deletes the folder ends without an error')
+gone_link = game_file('GoneLink')
+Dir.mkdir(gone)
+File.symlink(gone, gone_link)
+linked_save = File.join(gone_link, 'Game.rxdata')
+File.open(linked_save, 'wb') do |file|
+  file.write('x')
+  File._mkxp_orig_delete(MKXPSafeWrite.temp_path(File.join(gone, 'Game.rxdata')))
+  Dir.rmdir(gone)
+end
+Dir.mkdir(gone)
+File.open(linked_save, 'wb') { |file| file.write('kept') }
+assert_raises(RuntimeError, 'a later save through the link that raises reaches the game') do
+  File.open(linked_save, 'wb') do |file|
+    file.write('HA')
+    raise 'stop'
+  end
+end
+assert_eq(File.binread(linked_save), 'kept', 'a save through a link after the folder came back is still safe')
+File.delete(linked_save)
+File.delete(gone_link)
+Dir.rmdir(gone)
 
 # --- A leftover folder with the restore name ---
 stuck = MKXPSafeWrite.temp_path(game, 'restore')
@@ -409,4 +453,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 83)
+test_passed('test_safe_write', 92)

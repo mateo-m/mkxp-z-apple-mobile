@@ -917,7 +917,7 @@ end
 # A save that stops half way, from a crash or from a value that
 # Marshal cannot dump, leaves a cut-short file, and the next load
 # fails with "end of file reached". A File.open that truncates and
-# takes a block writes to a hidden file next to the target. The
+# takes a block writes to a temp file next to the target. The
 # target changes only when the block ends without an exception.
 unless defined?(MKXPSafeWrite)
   module MKXPSafeWrite
@@ -973,7 +973,7 @@ unless defined?(MKXPSafeWrite)
     end
 
     # Integer flags without File::CREAT open the target only if it
-    # exists. The hidden file never exists yet.
+    # exists. The temp file never exists yet.
     def temp_args(args)
       bits = flags(args[0])
       return args if bits.nil? || (bits & File::CREAT) != 0
@@ -1017,8 +1017,7 @@ unless defined?(MKXPSafeWrite)
 
     # A write that stops in a Fiber that never resumes keeps its claim.
     # Later saves of that file then write directly.
-    def claim(target)
-      name = key(target)
+    def claim(name)
       locked do
         @active ||= {}
         taken = @active[name]
@@ -1030,8 +1029,7 @@ unless defined?(MKXPSafeWrite)
       false
     end
 
-    def release(target)
-      name = key(target)
+    def release(name)
       locked { @active.delete(name) }
     end
 
@@ -1142,12 +1140,15 @@ unless defined?(MKXPSafeWrite)
     def open(asked, args, &block)
       # A Dir.chdir inside the block must not move the final rename.
       target = absolute(asked)
-      return File._mkxp_orig_open(asked, *args, &block) unless claim(target)
+      # The block can delete the folder, and the key of a path through
+      # a link then changes.
+      name = key(target)
+      return File._mkxp_orig_open(asked, *args, &block) unless claim(name)
 
       begin
         write(target, asked, args, &block)
       ensure
-        release(target)
+        release(name)
       end
     end
 
@@ -1173,7 +1174,9 @@ unless defined?(MKXPSafeWrite)
         # A throw, a break, or a return in the block raises nothing.
         # The new file then replaces the target, as a direct write does.
         begin
-          if failed
+          # Thread#kill and an exit from another thread raise nothing
+          # in this thread.
+          if failed || Thread.current.status == 'aborting'
             remove(temp)
           else
             finish_rename(temp, target)
@@ -1490,7 +1493,11 @@ class << Dir
   def foreach(path = '.', *args, &block)
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
-    MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args)).each(&block)
+    found = MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args))
+    return found.each unless block
+
+    found.each(&block)
+    nil
   end
   ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
 
@@ -1511,7 +1518,11 @@ class << Dir
     def each_child(path, *args, &block)
       MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
-      MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args)).each(&block)
+      found = MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args))
+      return found.each unless block
+
+      found.each(&block)
+      nil
     end
     ruby2_keywords :each_child if respond_to?(:ruby2_keywords, true)
   end
@@ -1582,6 +1593,43 @@ end
 
 # --- Dir.chdir nil/empty-safety ---
 # Pokemon Essentials and some plugin scripts pass nil or "" to
+# A Dir object lists the folder through its own reader, past the
+# class methods above.
+class Dir
+  alias _mkxp_orig_read read unless method_defined?(:_mkxp_orig_read)
+  alias _mkxp_orig_each each unless method_defined?(:_mkxp_orig_each)
+
+  def read
+    name = _mkxp_orig_read
+    name = _mkxp_orig_read while name && MKXPSaveFS.safe_write_entry?(name)
+    name
+  end
+
+  def each
+    return enum_for(:each) unless block_given?
+
+    _mkxp_orig_each { |name| yield name unless MKXPSaveFS.safe_write_entry?(name) }
+    self
+  end
+
+  if method_defined?(:children)
+    alias _mkxp_orig_children children unless method_defined?(:_mkxp_orig_children)
+
+    def children
+      MKXPSaveFS.filter_safe_write_entries(_mkxp_orig_children)
+    end
+  end
+
+  if method_defined?(:each_child)
+    def each_child(&block)
+      return children.each unless block
+
+      children.each(&block)
+      self
+    end
+  end
+end
+
 # Dir.chdir. nil crashes Ruby pre-2.0 outright. "" raises
 # Errno::ENOENT on every Ruby version. Both are no-ops in spirit
 # (the script wants "stay where you are") so we route them through
