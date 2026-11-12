@@ -134,6 +134,17 @@ Dir.open(USERDATA) { |dir| while (name = dir.read) do read << name end }
 assert_eq(read.grep(/\.mkxp-tmp\z/), [], 'Dir#read hides the temp file')
 assert_true(read.include?('Game.rxdata'), 'Dir#read still gives the save')
 assert_eq(Dir.foreach(USERDATA) { |_name| nil }, nil, 'Dir.foreach with a block returns nil')
+if Dir.method_defined?(:each_child)
+  Dir.open(USERDATA) do |dir|
+    first = nil
+    dir.each_child do |name|
+      first = name
+      break
+    end
+    assert_true(!first.nil? && !dir.read.nil?, 'Dir#each_child stops where the block breaks')
+  end
+  assert_eq(Dir.open(USERDATA) { |dir| dir.each_child.to_a.grep(/\.mkxp-tmp\z/) }, [], 'Dir#each_child hides the temp file')
+end
 insurgence_save(game, backup, ['after the crash'])
 assert_eq(load_all(game), ['after the crash'], 'the next save works after a crash')
 assert_eq(temp_files, [], 'the next save removes the temp file of the crash')
@@ -453,4 +464,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 92)
+test_passed('test_safe_write', 94)

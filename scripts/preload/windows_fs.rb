@@ -1621,10 +1621,12 @@ class Dir
   end
 
   if method_defined?(:each_child)
-    def each_child(&block)
-      return children.each unless block
+    alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
 
-      children.each(&block)
+    def each_child
+      return enum_for(:each_child) unless block_given?
+
+      _mkxp_orig_each_child { |name| yield name unless MKXPSaveFS.safe_write_entry?(name) }
       self
     end
   end
