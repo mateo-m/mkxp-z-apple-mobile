@@ -1034,8 +1034,17 @@ unless defined?(MKXPSafeWrite)
     end
 
     # Ruby 1.8 has no Mutex until a script requires 'thread'.
-    def locked(&block)
-      return LOCK.synchronize(&block) if LOCK
+    def locked
+      if LOCK
+        # Ruby 1.9 defines Mutex#synchronize in the thread library,
+        # which games do not load.
+        LOCK.lock
+        begin
+          return yield
+        ensure
+          LOCK.unlock
+        end
+      end
       return yield unless Thread.respond_to?(:critical=)
 
       begin
