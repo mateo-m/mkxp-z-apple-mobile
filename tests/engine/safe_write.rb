@@ -63,15 +63,20 @@ def stopped_save(how)
   safe_save('before kill')
   started = false
   saver = Thread.new do
-    File.open(SAFE_GAME, 'wb') do |file|
-      file.write('HALF')
-      started = true
-      how == :exit ? Thread.exit : sleep
+    save = lambda do
+      File.open(SAFE_GAME, 'wb') do |file|
+        file.write('HALF')
+        started = true
+        how == :exit ? Thread.exit : sleep
+      end
     end
+    how == :fiber ? Fiber.new { save.call }.resume : save.call
   end
   Thread.pass until started
-  saver.kill if how == :kill
-  Thread.kill(saver) if how == :class_kill
+  case how
+  when :kill, :fiber then saver.kill
+  when :class_kill then Thread.kill(saver)
+  end
   saver.join
   EngineTest.assert_equal('before kill', safe_read, "save after #{how}")
   EngineTest.assert_equal([], safe_temp_files, "temp files after #{how}")
@@ -81,6 +86,7 @@ EngineTest.test('a save on a stopped thread keeps the old file') do
   stopped_save(:kill)
   stopped_save(:class_kill)
   stopped_save(:exit)
+  stopped_save(:fiber) if defined?(Fiber)
 end
 
 EngineTest.test('a save that ends before a deferred kill writes the new file') do

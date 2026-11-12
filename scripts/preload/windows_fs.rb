@@ -922,6 +922,7 @@ end
 unless defined?(MKXPSafeWrite)
   # Ruby 1.9 gives a killed thread back its old status while its
   # ensure blocks run, so a kill leaves a mark on the thread there.
+  # Thread#[] is per fiber, so the mark is an instance variable.
   # Later Rubies can defer a kill with Thread.handle_interrupt, and a
   # mark would then drop a save that ends normally.
   if RUBY_VERSION.start_with?('1.9')
@@ -929,7 +930,7 @@ unless defined?(MKXPSafeWrite)
       alias _mkxp_orig_kill kill unless method_defined?(:_mkxp_orig_kill)
 
       def kill
-        self[:mkxp_killed] = true
+        @mkxp_killed = true
         _mkxp_orig_kill
       end
       alias exit kill
@@ -940,12 +941,12 @@ unless defined?(MKXPSafeWrite)
         alias _mkxp_orig_exit exit unless method_defined?(:_mkxp_orig_exit)
 
         def kill(thread)
-          thread[:mkxp_killed] = true
+          thread.instance_variable_set(:@mkxp_killed, true)
           _mkxp_orig_kill(thread)
         end
 
         def exit
-          Thread.current[:mkxp_killed] = true
+          Thread.current.instance_variable_set(:@mkxp_killed, true)
           _mkxp_orig_exit
         end
       end
@@ -1067,7 +1068,8 @@ unless defined?(MKXPSafeWrite)
 
     # Ruby 1.8 has no Mutex until a script requires 'thread'.
     def killed?
-      Thread.current.status == 'aborting' || Thread.current[:mkxp_killed] ? true : false
+      thread = Thread.current
+      thread.status == 'aborting' || thread.instance_variable_get(:@mkxp_killed) ? true : false
     end
 
     def locked
