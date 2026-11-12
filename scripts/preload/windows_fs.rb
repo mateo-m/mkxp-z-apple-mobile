@@ -1004,8 +1004,15 @@ unless defined?(MKXPSafeWrite)
       File.expand_path(path.start_with?('/') ? path : "./#{path}")
     end
 
+    # On iOS, /var is a link to /private/var. Two names of one folder
+    # must give one key.
     def key(path)
-      absolute(path).downcase
+      full = absolute(path)
+      dir = File.dirname(full)
+      dir = File.realpath(dir) if File.respond_to?(:realpath)
+      File.join(dir, File.basename(full)).downcase
+    rescue SystemCallError
+      full.downcase
     end
 
     # A write that stops in a Fiber that never resumes keeps its claim.
@@ -1089,9 +1096,15 @@ unless defined?(MKXPSafeWrite)
       end
     end
 
+    # Some file systems refuse fsync. A full or failing disk must
+    # still fail the save, so the old file stays.
+    NO_FSYNC = [Errno::EINVAL, NotImplementedError] +
+               %w[ENOTSUP EOPNOTSUPP].select { |name| Errno.const_defined?(name) }
+                                     .map { |name| Errno.const_get(name) }
+
     def sync(file)
       file.fsync
-    rescue SystemCallError, NotImplementedError
+    rescue *NO_FSYNC
       nil
     end
 

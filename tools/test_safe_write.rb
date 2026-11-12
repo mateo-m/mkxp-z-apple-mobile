@@ -227,6 +227,19 @@ File.class_eval do
   remove_method :_test_fsync
 end
 assert_eq(File.binread(game), 'no fsync', 'a save on a disk without fsync is written')
+File.class_eval do
+  alias_method :_test_fsync, :fsync
+  define_method(:fsync) { raise Errno::ENOSPC }
+end
+assert_raises(Errno::ENOSPC, 'a full disk during the save reaches the game') do
+  File.open(game, 'wb') { |file| file.write('full disk') }
+end
+File.class_eval do
+  alias_method :fsync, :_test_fsync
+  remove_method :_test_fsync
+end
+assert_eq(File.binread(game), 'no fsync', 'a full disk during the save keeps the old file')
+assert_eq(temp_files, [], 'a full disk during the save leaves no temp file')
 
 # --- Modes and files that the safe write leaves to the system ---
 assert_raises(Errno::EEXIST, 'an exclusive open of a file that exists still fails') do
@@ -319,6 +332,15 @@ File.open(game, 'wb') do |file|
 end
 assert_eq(File.binread(game), 'outer', 'an open of the same save in another case does not break the outer save')
 File.delete(game.sub('Game', 'GAME')) if raw_entries(USERDATA).include?('GAME.rxdata')
+alias_dir = game_file('Alias')
+File.symlink(USERDATA, alias_dir)
+File.open(game, 'wb') do |file|
+  file.write('outer')
+  File.open(File.join(alias_dir, 'Game.rxdata'), 'wb') { |inner| inner.write('inner') }
+end
+File.delete(alias_dir)
+assert_eq(File.binread(game), 'outer', 'an open of the same save through a folder link does not break the outer save')
+assert_eq(temp_files, [], 'an open through a folder link leaves no temp file')
 threads = Array.new(2) do |n|
   Thread.new { 200.times { File.open(game, 'wb') { |file| file.write("t#{n}") } } }
 end
@@ -387,4 +409,4 @@ Dir.rmdir(stuck)
 assert_eq(File.binread(game), 'past folder', 'a folder with the restore name does not stop the save')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 78)
+test_passed('test_safe_write', 83)
