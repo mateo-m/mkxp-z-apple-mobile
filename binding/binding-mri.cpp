@@ -1803,6 +1803,15 @@ static void runRMXPScripts(BacktraceData &btData) {
     if (expanded != Qnil) {
         // $RGSS_SCRIPTS keeps the packed sections: the Essentials
         // translation tool inflates each one's [2].
+        // No Ruby object holds the split array. Without a root, the
+        // GC can free it while the postloads run.
+        static VALUE splitSections = Qnil;
+        static bool splitSectionsRooted = false;
+        if (!splitSectionsRooted) {
+            rb_gc_register_address(&splitSections);
+            splitSectionsRooted = true;
+        }
+        splitSections = expanded;
         scriptArray = expanded;
         scriptCount = RARRAY_LEN(scriptArray);
         mainIndex = lastCodeSection(scriptArray);

@@ -96,6 +96,7 @@ unless defined?(MKXPSaveFS)
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
     PORTABLE_PREFIX = "#{PORTABLE_SAVE_DIR}/".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
+    SAFE_WRITE_ENTRY_RE = /\A.+\.mkxp-(?:tmp|restore)\z/.freeze
     # Rooted path: "/...", "\...", or a Windows drive prefix.
     ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
 
@@ -177,13 +178,27 @@ unless defined?(MKXPSaveFS)
     def engine_internal_entry?(name)
       return false unless name.is_a?(String)
 
-      name =~ ENGINE_DIR_ENTRY_RE
+      name =~ ENGINE_DIR_ENTRY_RE || safe_write_entry?(name)
+    end
+
+    def safe_write_entry?(path)
+      path.is_a?(String) && File.basename(path) =~ SAFE_WRITE_ENTRY_RE
     end
 
     def filter_dir_entries(entries)
       return entries unless entries.respond_to?(:reject)
 
       entries.reject { |entry| engine_internal_entry?(entry) }
+    end
+
+    def filter_safe_write_entries(entries)
+      return entries unless entries.respond_to?(:reject)
+
+      entries.reject { |entry| safe_write_entry?(entry) }
+    end
+
+    def list_entries(target, entries)
+      save_root_target?(target) ? filter_dir_entries(entries) : filter_safe_write_entries(entries)
     end
 
     # Bare working-directory save filenames - the shape decade-old
@@ -899,6 +914,280 @@ unless defined?(MKXPTextMode)
   end
 end
 
+# A save that stops half way, from a crash or from a value that
+# Marshal cannot dump, leaves a cut-short file, and the next load
+# fails with "end of file reached". A File.open that truncates and
+# takes a block writes to a hidden file next to the target. The
+# target changes only when the block ends without an exception.
+unless defined?(MKXPSafeWrite)
+  module MKXPSafeWrite
+    MODE_BITS = 0xFFF
+    CHUNK = 65_536
+    # Most file systems stop at 255 bytes in one name.
+    NAME_MAX = 255 - '.mkxp-restore'.length
+    LOCK = defined?(Mutex) ? Mutex.new : nil
+
+    module_function
+
+    def use?(target, args)
+      return false unless target.is_a?(String) && truncate_mode?(args[0])
+      return false if args.any? { |arg| arg.is_a?(Hash) && arg.key?(:flags) }
+
+      safe_place?(target, args[0])
+    end
+
+    def safe_place?(target, mode)
+      return false if File.basename(target).bytesize > NAME_MAX
+
+      dir = File.dirname(target)
+      return false unless File._mkxp_orig_directory(dir) && File.writable?(dir)
+      return false if File._mkxp_orig_directory(temp_path(target))
+      return false if File._mkxp_orig_directory(temp_path(target, 'restore'))
+      return false if File.symlink?(target)
+      return create_mode?(mode) unless File._mkxp_orig_exist(target)
+
+      File._mkxp_orig_file(target) && File.writable?(target) && File.stat(target).nlink == 1
+    end
+
+    def truncate_mode?(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
+      case mode
+      when Integer
+        (mode & File::TRUNC) != 0 && (mode & File::EXCL).zero?
+      when String
+        flags = mode.split(':', 2)[0].to_s
+        flags.start_with?('w') && !flags.include?('x')
+      else
+        false
+      end
+    end
+
+    def flags(mode)
+      mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
+      mode if mode.is_a?(Integer)
+    end
+
+    def create_mode?(mode)
+      bits = flags(mode)
+      bits.nil? || (bits & File::CREAT) != 0
+    end
+
+    # Integer flags without File::CREAT open the target only if it
+    # exists. The hidden file never exists yet.
+    def temp_args(args)
+      bits = flags(args[0])
+      return args if bits.nil? || (bits & File::CREAT) != 0
+
+      args = args.dup
+      args[0] = args[0].is_a?(Hash) ? keywords(args[0].merge(:mode => bits | File::CREAT)) : bits | File::CREAT
+      args
+    end
+
+    # Ruby 3 reads a splat Hash as keywords only with this flag, and
+    # Hash#merge drops it.
+    def keywords(hash)
+      Hash.respond_to?(:ruby2_keywords_hash) ? Hash.ruby2_keywords_hash(hash) : hash
+    end
+
+    def temp_path(target, kind = 'tmp')
+      # The iOS Files app hides a name that starts with a dot. The
+      # player must see a file that a crash leaves.
+      File.join(File.dirname(target), "#{File.basename(target)}.mkxp-#{kind}")
+    end
+
+    def remove(path)
+      File._mkxp_orig_delete(path) if File._mkxp_orig_exist(path)
+    end
+
+    # File.expand_path reads a leading "~" as a home folder.
+    def absolute(path)
+      File.expand_path(path.start_with?('/') ? path : "./#{path}")
+    end
+
+    # On iOS, /var is a link to /private/var. Two names of one folder
+    # must give one key.
+    def key(path)
+      full = absolute(path)
+      dir = File.dirname(full)
+      dir = File.realpath(dir) if File.respond_to?(:realpath)
+      File.join(dir, File.basename(full)).downcase
+    rescue SystemCallError
+      full.downcase
+    end
+
+    # A write that stops in a Fiber that never resumes keeps its claim.
+    # Later saves of that file then write directly.
+    def claim(target)
+      name = key(target)
+      locked do
+        @active ||= {}
+        taken = @active[name]
+        @active[name] = true
+        !taken
+      end
+    rescue ThreadError
+      # A Mutex refuses to lock inside a Signal.trap handler.
+      false
+    end
+
+    def release(target)
+      name = key(target)
+      locked { @active.delete(name) }
+    end
+
+    # Ruby 1.8 has no Mutex until a script requires 'thread'.
+    def locked(&block)
+      return LOCK.synchronize(&block) if LOCK
+      return yield unless Thread.respond_to?(:critical=)
+
+      begin
+        Thread.critical = true
+        yield
+      ensure
+        Thread.critical = false
+      end
+    end
+
+    # Pokemon Insurgence renames Game.rxdata to Save_0_Backup_1.rxdata
+    # and then writes a new Game.rxdata. Without the old file at the
+    # target name, a failed write leaves no save to continue from.
+    def note_rename(from, to)
+      @renamed ||= {}
+      @renamed[key(from)] = [absolute(to), File.stat(to).ino]
+    rescue StandardError
+      nil
+    end
+
+    def keep_renamed_file(target)
+      renamed = @renamed
+      @renamed = nil
+      to, ino = renamed && renamed[key(target)]
+      return unless to
+      return if File._mkxp_orig_exist(target)
+      return unless File._mkxp_orig_file(to) && File.stat(to).ino == ino
+
+      copy = temp_path(target, 'restore')
+      remove(copy)
+      File._mkxp_orig_open(to, 'rb') do |src|
+        File._mkxp_orig_open(copy, 'wb') do |dst|
+          while (chunk = src.read(CHUNK))
+            dst.write(chunk)
+          end
+          finish(dst, copy)
+        end
+      end
+      File.chmod(File.stat(to).mode & MODE_BITS, copy)
+      File._mkxp_orig_rename(copy, target)
+    rescue StandardError
+      begin
+        remove(copy) if copy
+      rescue StandardError
+        nil
+      end
+    end
+
+    def finish(file, path)
+      if file.closed?
+        # A game can close the file itself inside the block.
+        File._mkxp_orig_open(path, 'rb') { |again| sync(again) }
+      else
+        file.flush
+        sync(file)
+      end
+    end
+
+    # Some file systems refuse fsync. A full or failing disk must
+    # still fail the save, so the old file stays.
+    NO_FSYNC = [Errno::EINVAL, NotImplementedError].concat(
+      %w[ENOTSUP EOPNOTSUPP].select { |name| Errno.const_defined?(name) }.map { |name| Errno.const_get(name) }
+    ).freeze
+
+    def sync(file)
+      file.fsync
+    rescue *NO_FSYNC
+      nil
+    end
+
+    def finish_rename(temp, target)
+      File._mkxp_orig_rename(temp, target)
+    rescue Errno::ENOENT
+      # The block deleted the folder. A direct write loses the file too.
+      raise if File._mkxp_orig_directory(File.dirname(target))
+    end
+
+    # A Pathname names a file. An open File also has to_path.
+    def name_of(target)
+      return target if target.is_a?(String)
+      return nil if target.is_a?(IO) || !target.respond_to?(:to_path)
+
+      target.to_path
+    end
+
+    # A game that renames file.path inside the block moves the old file.
+    # The new data still lands at the name it opened. Windows refuses to
+    # rename an open file, so games made for it do not do this.
+    def show_target_path(file, target)
+      file.instance_variable_set(:@mkxp_target_path, target)
+      class << file
+        def path
+          @mkxp_target_path
+        end
+
+        def to_path
+          @mkxp_target_path
+        end
+      end
+    end
+
+    def open(asked, args, &block)
+      # A Dir.chdir inside the block must not move the final rename.
+      target = absolute(asked)
+      return File._mkxp_orig_open(asked, *args, &block) unless claim(target)
+
+      begin
+        write(target, asked, args, &block)
+      ensure
+        release(target)
+      end
+    end
+
+    def write(target, asked, args)
+      keep_renamed_file(target)
+      temp = temp_path(target)
+      remove(temp)
+      remove(temp_path(target, 'restore'))
+      mode = File._mkxp_orig_exist(target) ? File.stat(target).mode & MODE_BITS : nil
+      failed = false
+      begin
+        File._mkxp_orig_open(temp, *temp_args(args)) do |file|
+          File.chmod(mode, temp) if mode
+          show_target_path(file, asked)
+          result = yield file
+          finish(file, temp)
+          result
+        end
+      rescue Exception # rubocop:disable Lint/RescueException -- an Interrupt or an exit must not replace the save either
+        failed = true
+        raise
+      ensure
+        # A throw, a break, or a return in the block raises nothing.
+        # The new file then replaces the target, as a direct write does.
+        begin
+          if failed
+            remove(temp)
+          else
+            finish_rename(temp, target)
+          end
+        ensure
+          # A case lookup inside the block can list the folder before
+          # the target is there.
+          MKXPSaveFS.bump_fs_generation!
+        end
+      end
+    end
+  end
+end
+
 # --- File API front: legacy-save recovery + case resolution ---
 # Paths resolve literally. path_for only performs the one-time
 # legacy-save recovery side effect. The case helpers keep destructive
@@ -918,14 +1207,38 @@ class << File
   alias _mkxp_orig_zero? zero? unless method_defined?(:_mkxp_orig_zero?)
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
-  def open(path, *args, &block)
+  def open(path, *args)
     args = MKXPTextMode.read_args(args)
-    _mkxp_orig_open(MKXPSaveFS.open_target(path, args[0]), *args, &block)
-  rescue Errno::ENOENT
-    fixed = MKXPSaveFS.read_fallback_target(path)
-    raise unless fixed
+    target = MKXPSaveFS.open_target(path, args[0])
+    started = false
+    retried = false
+    begin
+      return _mkxp_orig_open(target, *args) unless block_given?
 
-    _mkxp_orig_open(MKXPSaveFS.refuse_directory(fixed), *args, &block)
+      name = MKXPSafeWrite.name_of(target)
+      if MKXPSafeWrite.use?(name, args)
+        MKXPSafeWrite.open(name, args) do |file|
+          started = true
+          yield file
+        end
+      else
+        _mkxp_orig_open(target, *args) do |file|
+          started = true
+          yield file
+        end
+      end
+    rescue Errno::ENOENT
+      # An Errno::ENOENT from the game code in the block must not run
+      # the block a second time.
+      raise if started || retried
+
+      fixed = MKXPSaveFS.read_fallback_target(path)
+      raise unless fixed
+
+      target = MKXPSaveFS.refuse_directory(fixed)
+      retried = true
+      retry
+    end
   end
 
   def new(path, *args)
@@ -946,7 +1259,11 @@ class << File
   alias unlink delete
 
   def rename(from, to)
-    _mkxp_orig_rename(MKXPSaveFS.change_target(from), MKXPSaveFS.change_target(to))
+    from = MKXPSaveFS.change_target(from)
+    to = MKXPSaveFS.change_target(to)
+    result = _mkxp_orig_rename(from, to)
+    MKXPSafeWrite.note_rename(from, to)
+    result
   end
 
   def exist?(path)
@@ -1115,7 +1432,6 @@ class << Dir
   alias _mkxp_orig_new new unless method_defined?(:_mkxp_orig_new)
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_entries entries unless method_defined?(:_mkxp_orig_entries)
-  alias _mkxp_orig_foreach foreach unless method_defined?(:_mkxp_orig_foreach)
   if (method_defined?(:exist?) || private_method_defined?(:exist?)) && !method_defined?(:_mkxp_orig_exist)
     alias _mkxp_orig_exist exist?
   end
@@ -1127,7 +1443,11 @@ class << Dir
   # enumeration and the open that follows see the same folder.
   def glob(pattern, *args, &block)
     MKXPSaveFS.recover_saves_for_glob(pattern)
-    _mkxp_orig_glob(pattern, *args, &block)
+    found = MKXPSaveFS.filter_safe_write_entries(_mkxp_orig_glob(pattern, *args))
+    return found unless block
+
+    found.each(&block)
+    nil
   end
   # Keep Ruby 3 kwargs (`Dir.glob(pat, base: dir)` - rubygems uses
   # this) flowing through the *args wrapper. See the File note above.
@@ -1136,7 +1456,7 @@ class << Dir
   # Dir[] shares glob's recovery. Ancient slot pickers use both.
   def [](*patterns)
     MKXPSaveFS.recover_saves_for_glob(patterns)
-    _mkxp_orig_brackets(*patterns)
+    MKXPSaveFS.filter_safe_write_entries(_mkxp_orig_brackets(*patterns))
   end
   ruby2_keywords :[] if respond_to?(:ruby2_keywords, true)
 
@@ -1163,29 +1483,14 @@ class << Dir
     # else passes through.
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
-    result = _mkxp_orig_entries(target, *args)
-    return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
-
-    result
+    MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args))
   end
   ruby2_keywords :entries if respond_to?(:ruby2_keywords, true)
 
   def foreach(path = '.', *args, &block)
     MKXPSaveFS.maybe_recover_portable_dir(path)
     target = MKXPSaveFS.path_for(path)
-    unless block
-      if MKXPSaveFS.save_root_target?(target)
-        return MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each
-      end
-
-      return _mkxp_orig_foreach(target, *args)
-    end
-
-    if MKXPSaveFS.save_root_target?(target)
-      MKXPSaveFS.filter_dir_entries(_mkxp_orig_entries(target, *args)).each(&block)
-    else
-      _mkxp_orig_foreach(target, *args, &block)
-    end
+    MKXPSaveFS.list_entries(target, _mkxp_orig_entries(target, *args)).each(&block)
   end
   ruby2_keywords :foreach if respond_to?(:ruby2_keywords, true)
 
@@ -1197,33 +1502,16 @@ class << Dir
     def children(path, *args)
       MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
-      result = _mkxp_orig_children(target, *args)
-      return MKXPSaveFS.filter_dir_entries(result) if MKXPSaveFS.save_root_target?(target)
-
-      result
+      MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args))
     end
     ruby2_keywords :children if respond_to?(:ruby2_keywords, true)
   end
 
   if method_defined?(:each_child) || private_method_defined?(:each_child)
-    alias _mkxp_orig_each_child each_child unless method_defined?(:_mkxp_orig_each_child)
-
     def each_child(path, *args, &block)
       MKXPSaveFS.maybe_recover_portable_dir(path)
       target = MKXPSaveFS.path_for(path)
-      unless block
-        if MKXPSaveFS.save_root_target?(target)
-          return MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each
-        end
-
-        return _mkxp_orig_each_child(target, *args)
-      end
-
-      if MKXPSaveFS.save_root_target?(target)
-        MKXPSaveFS.filter_dir_entries(_mkxp_orig_children(target, *args)).each(&block)
-      else
-        _mkxp_orig_each_child(target, *args, &block)
-      end
+      MKXPSaveFS.list_entries(target, _mkxp_orig_children(target, *args)).each(&block)
     end
     ruby2_keywords :each_child if respond_to?(:ruby2_keywords, true)
   end
