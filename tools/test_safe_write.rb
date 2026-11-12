@@ -37,6 +37,13 @@ def insurgence_save(game, backup, values)
   end
 end
 
+def assert_raises(error, message)
+  yield
+  assert_true(false, message)
+rescue error
+  assert_true(true, message)
+end
+
 def load_all(path)
   values = []
   File.open(path, 'rb') do |f|
@@ -157,6 +164,104 @@ File.open(game, File::WRONLY | File::TRUNC | File::CREAT) { |file| file.write('f
 assert_eq(File.binread(game), 'flags', 'a mode given as flags with TRUNC writes')
 assert_eq(temp_files, [], 'the flag write leaves no hidden file')
 assert_eq(File.open(game, 'rb', &:read), 'flags', 'a read still works')
+# --- The game closes the file inside the block ---
+File.open(game, 'wb') do |file|
+  file.write('closed by the game')
+  file.close
+end
+assert_eq(File.binread(game), 'closed by the game', 'a file the game closes in the block is saved')
+
+# --- The same file opened again inside the block ---
+File.open(game, 'wb') do |outer|
+  File.open(game, 'wb') { |inner| inner.write('inner') }
+  outer.write('outer')
+end
+assert_eq(File.binread(game), 'outer', 'a nested open of the same file does not fail')
+assert_eq(temp_files, [], 'a nested open leaves no hidden file')
+
+# --- The path of the open file is the name the game asked for ---
+File.open(game, 'wb') { |file| assert_eq(file.path, game, 'file.path is the target name') }
+
+# --- After a failed save, the save and the backup are two files ---
+File.delete(backup) if File.exist?(backup)
+File.open(game, 'wb') { |file| file.write('kept') }
+begin
+  insurgence_save(game, backup, ['new', proc { 'cannot dump' }])
+rescue TypeError
+  nil
+end
+assert_false(File.stat(game).ino == File.stat(backup).ino, 'the kept save is a copy, not a link')
+f = File.open(game, 'wb')
+f.write('PARTIAL')
+f.close
+assert_eq(File.binread(backup), 'kept', 'a later write to the save does not change the backup')
+
+# --- A rename is forgotten after the next save of another file ---
+File.open(game_file('A.rxdata'), 'wb') { |file| file.write('a') }
+File.rename(game_file('A.rxdata'), game_file('A.bak'))
+File.open(game_file('Other.rxdata'), 'wb') { |file| file.write('other') }
+begin
+  File.open(game_file('A.rxdata'), 'wb') { raise 'stop' }
+rescue RuntimeError
+  nil
+end
+assert_false(File.exist?(game_file('A.rxdata')), 'an old rename does not bring back a file')
+
+# --- A failed fsync does not lose the save ---
+File.class_eval do
+  alias_method :_test_fsync, :fsync
+  define_method(:fsync) { raise Errno::EINVAL }
+end
+File.open(game, 'wb') { |file| file.write('no fsync') }
+File.class_eval do
+  alias_method :fsync, :_test_fsync
+  remove_method :_test_fsync
+end
+assert_eq(File.binread(game), 'no fsync', 'a save on a disk without fsync is written')
+
+# --- Modes and files that the safe write leaves to the system ---
+assert_raises(Errno::EEXIST, 'an exclusive open of a file that exists still fails') do
+  File.open(game, File::WRONLY | File::CREAT | File::TRUNC | File::EXCL) { |file| file.write('x') }
+end
+assert_raises(Errno::EEXIST, 'a "wx" open of a file that exists still fails') do
+  File.open(game, 'wx') { |file| file.write('x') }
+end
+locked = game_file('Locked.rxdata')
+File.open(locked, 'wb') { |file| file.write('locked') }
+File.chmod(0o444, locked)
+assert_raises(Errno::EACCES, 'a read-only file is not overwritten') do
+  File.open(locked, 'wb') { |file| file.write('x') }
+end
+assert_eq(File.binread(locked), 'locked', 'the read-only file keeps its data')
+File.chmod(0o600, game)
+File.open(game, 'wb') { |file| file.write('private') }
+assert_eq(File.stat(game).mode & 0o777, 0o600, 'a save keeps the mode of the old file')
+real = game_file('Real.rxdata')
+link = game_file('Link.rxdata')
+File.open(real, 'wb') { |file| file.write('real') }
+File.symlink(real, link)
+File.open(link, 'wb') { |file| file.write('through the link') }
+assert_true(File.symlink?(link), 'a save through a link keeps the link')
+assert_eq(File.binread(real), 'through the link', 'a save through a link writes the file it points to')
+leftover = MKXPSafeWrite.temp_path(game)
+File._mkxp_orig_open(leftover, 'wb') { |file| file.write('left over') }
+File.chmod(0o444, leftover)
+File.open(game, 'wb') { |file| file.write('after leftover') }
+assert_eq(File.binread(game), 'after leftover', 'a read-only hidden file from a crash does not stop the save')
+fd = IO.sysopen(game, 'w')
+File.open(fd, 'w') { |file| file.write('fd') }
+assert_eq(File.binread(game), 'fd', 'an open of a file descriptor still writes')
+
+# --- An Errno::ENOENT from the game code runs the block once ---
+runs = 0
+assert_raises(Errno::ENOENT, 'the game error reaches the game') do
+  File.open(game_file('Case.rxdata'), 'wb') do
+    runs += 1
+    raise Errno::ENOENT, 'from the game'
+  end
+end
+assert_eq(runs, 1, 'the block runs once')
+assert_eq(temp_files, [], 'the hidden files are gone at the end')
 # rubocop:enable Style/FileWrite, Style/FileOpen, Lint/NonAtomicFileOperation, Security/MarshalLoad
 
-test_passed('test_safe_write', 29)
+test_passed('test_safe_write', 49)

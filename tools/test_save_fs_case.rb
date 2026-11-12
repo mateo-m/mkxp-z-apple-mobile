@@ -70,7 +70,7 @@ end
 def assert_case_variant_writes(records)
   File.open('Audio/BGS/Battle Open.wav', 'wb') { |f| f.write('new') }
   assert_true(
-    records.include?(MKXPSafeWrite.temp_path('Audio/BGS/Battle Open.WAV')),
+    records.include?('Audio/BGS/Battle Open.WAV'),
     'wrapper handed the resolved spelling to the raw open'
   )
   assert_eq(read_raw('Audio/BGS/Battle Open.WAV'), 'new', 'case-variant write reached the file')
@@ -85,7 +85,7 @@ def assert_case_variant_writes(records)
 
   File.open('Audio/BGS/Fresh.wav', 'wb') { |f| f.write('fresh') }
   assert_true(
-    records.include?(MKXPSafeWrite.temp_path('Audio/BGS/Fresh.wav')),
+    records.include?('Audio/BGS/Fresh.wav'),
     'fresh name stays literal through the raw open'
   )
 end
@@ -116,7 +116,7 @@ def assert_respell_after_unlink(records)
   File.unlink('Audio/BGS/Respell Me.wav')
   File.open('Audio/BGS/Respell Me.wav', 'wb') { |f| f.write('new') }
   assert_true(
-    records.include?(MKXPSafeWrite.temp_path('Audio/BGS/Respell Me.wav')),
+    records.include?('Audio/BGS/Respell Me.wav'),
     'write after a same-session unlink stays literal'
   )
   assert_true(

@@ -145,6 +145,7 @@ def with_recorded_raw_paths
     originals[[receiver, name]] = original
     receiver.define_singleton_method(name) do |*args, &blk|
       records << args[0].to_s
+      records << args[1].to_s if name == :_mkxp_orig_rename
       original.call(*args, &blk)
     end
   end

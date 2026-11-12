@@ -906,22 +906,46 @@ end
 # target changes only when the block ends without an exception.
 unless defined?(MKXPSafeWrite)
   module MKXPSafeWrite
+    MODE_BITS = 0xFFF
+    CHUNK = 65_536
+
     module_function
+
+    def use?(target, mode)
+      return false unless target.is_a?(String) && truncate_mode?(mode)
+      return false if @active && @active[target]
+
+      dir = File.dirname(target)
+      return false unless File._mkxp_orig_directory(dir) && File.writable?(dir)
+      return false if File.symlink?(target)
+      return true unless File._mkxp_orig_exist(target)
+
+      File._mkxp_orig_file(target) && File.writable?(target)
+    end
 
     def truncate_mode?(mode)
       mode = mode[:mode] if mode.is_a?(Hash) && mode.key?(:mode)
       case mode
       when Integer
-        (mode & File::TRUNC) != 0
-      when String, Symbol
-        mode.to_s.split(':', 2)[0].start_with?('w')
+        (mode & File::TRUNC) != 0 && (mode & File::EXCL).zero?
+      when String
+        flags = mode.split(':', 2)[0]
+        flags.start_with?('w') && !flags.include?('x')
       else
         false
       end
     end
 
-    def temp_path(target)
-      File.join(File.dirname(target), ".#{File.basename(target)}.mkxp-tmp")
+    def temp_path(target, kind = 'tmp')
+      File.join(File.dirname(target), ".#{File.basename(target)}.mkxp-#{kind}")
+    end
+
+    def remove(path)
+      File._mkxp_orig_delete(path) if File._mkxp_orig_exist(path)
+    end
+
+    def key(path)
+      File.expand_path(path).downcase
     end
 
     # Pokemon Insurgence renames Game.rxdata to Save_0_Backup_1.rxdata
@@ -929,41 +953,82 @@ unless defined?(MKXPSafeWrite)
     # target name, a failed write leaves no save to continue from.
     def note_rename(from, to)
       @renamed ||= {}
-      @renamed[File.expand_path(from)] = [to, File.stat(to).ino]
+      @renamed[key(from)] = [File.expand_path(to), File.stat(to).ino]
     rescue StandardError
       nil
     end
 
     def keep_renamed_file(target)
-      return unless defined?(@renamed) && @renamed
-
-      to, ino = @renamed.delete(File.expand_path(target))
+      renamed = @renamed
+      @renamed = nil
+      to, ino = renamed && renamed[key(target)]
       return unless to
       return if File._mkxp_orig_exist(target)
       return unless File.stat(to).ino == ino
 
-      File.link(to, target)
+      copy = temp_path(target, 'restore')
+      remove(copy)
+      File._mkxp_orig_open(to, 'rb') do |src|
+        File._mkxp_orig_open(copy, 'wb') do |dst|
+          while (chunk = src.read(CHUNK))
+            dst.write(chunk)
+          end
+          finish(dst)
+        end
+      end
+      File.chmod(File.stat(to).mode & MODE_BITS, copy)
+      File._mkxp_orig_rename(copy, target)
     rescue StandardError
-      nil
+      begin
+        remove(copy) if copy
+      rescue StandardError
+        nil
+      end
+    end
+
+    # A game can close the file itself inside the block.
+    def finish(file)
+      return if file.closed?
+
+      file.flush
+      begin
+        file.fsync
+      rescue SystemCallError, NotImplementedError
+        nil
+      end
+    end
+
+    def show_target_path(file, target)
+      file.instance_variable_set(:@mkxp_target_path, target)
+      class << file
+        def path
+          @mkxp_target_path
+        end
+      end
     end
 
     def open(target, args)
       keep_renamed_file(target)
       temp = temp_path(target)
+      remove(temp)
+      mode = File._mkxp_orig_exist(target) ? File.stat(target).mode & MODE_BITS : nil
+      (@active ||= {})[target] = true
       failed = false
       begin
         File._mkxp_orig_open(temp, *args) do |file|
+          File.chmod(mode, temp) if mode
+          show_target_path(file, target)
           result = yield file
-          file.flush
-          file.fsync
+          finish(file)
           result
         end
       rescue Exception # rubocop:disable Lint/RescueException -- an Interrupt or an exit must not replace the save either
         failed = true
         raise
       ensure
+        @active.delete(target)
         if failed
-          File._mkxp_orig_delete(temp) if File._mkxp_orig_exist(temp)
+          remove(temp)
         else
           File._mkxp_orig_rename(temp, target)
         end
@@ -991,20 +1056,37 @@ class << File
   alias _mkxp_orig_zero? zero? unless method_defined?(:_mkxp_orig_zero?)
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
-  def open(path, *args, &block)
+  def open(path, *args)
     args = MKXPTextMode.read_args(args)
     target = MKXPSaveFS.open_target(path, args[0])
-    return MKXPSafeWrite.open(target, args, &block) if block && MKXPSafeWrite.truncate_mode?(args[0])
+    started = false
+    retried = false
+    begin
+      return _mkxp_orig_open(target, *args) unless block_given?
 
-    _mkxp_orig_open(target, *args, &block)
-  rescue Errno::ENOENT
-    fixed = MKXPSaveFS.read_fallback_target(path)
-    raise unless fixed
+      if MKXPSafeWrite.use?(target, args[0])
+        MKXPSafeWrite.open(target, args) do |file|
+          started = true
+          yield file
+        end
+      else
+        _mkxp_orig_open(target, *args) do |file|
+          started = true
+          yield file
+        end
+      end
+    rescue Errno::ENOENT
+      # An Errno::ENOENT from the game code in the block must not run
+      # the block a second time.
+      raise if started || retried
 
-    fixed = MKXPSaveFS.refuse_directory(fixed)
-    return MKXPSafeWrite.open(fixed, args, &block) if block && MKXPSafeWrite.truncate_mode?(args[0])
+      fixed = MKXPSaveFS.read_fallback_target(path)
+      raise unless fixed
 
-    _mkxp_orig_open(fixed, *args, &block)
+      target = MKXPSaveFS.refuse_directory(fixed)
+      retried = true
+      retry
+    end
   end
 
   def new(path, *args)
