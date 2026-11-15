@@ -47,9 +47,6 @@ unsigned soundEventCount();
  * false at once when no event can come: the count is still `since`, and
  * iOS allows sound now, so iOS did not cause the failure. */
 bool waitForSoundEvent(unsigned since);
-/* Pauses the device during each interruption and resumes it after.
- * Give nullptr before the device closes. */
-void pauseDuringInterruptions(struct ALCdevice *device);
 #endif
 }
 

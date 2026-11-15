@@ -486,7 +486,6 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
     ALCcontext *ctx = dev ? alcCreateContext(dev, 0) : nullptr;
     if (ctx) {
       alcMakeContextCurrent(ctx);
-      mkxp_sys::pauseDuringInterruptions(dev);
       *outDev = dev;
       *outCtx = ctx;
       return true;
@@ -707,9 +706,6 @@ void EngineHost::shutdown() {
     persistAlcCtx_ = nullptr;
   }
   if (persistAlcDev_) {
-#if TARGET_OS_IPHONE
-    mkxp_sys::pauseDuringInterruptions(nullptr);
-#endif
     alcCloseDevice(persistAlcDev_);
     persistAlcDev_ = nullptr;
   }
