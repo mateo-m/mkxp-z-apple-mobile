@@ -1255,8 +1255,8 @@ end
 # --- File API front: legacy-save recovery + case resolution ---
 # Paths resolve literally. path_for only performs the one-time
 # legacy-save recovery side effect. The case helpers keep destructive
-# operations on the on-disk spelling. IO.read is not hooked. No
-# observed game reads saves through it.
+# operations on the on-disk spelling. IO.read gets no save-path
+# handling. No observed game reads saves through it.
 class << File
   alias _mkxp_orig_open open unless method_defined?(:_mkxp_orig_open)
   alias _mkxp_orig_delete delete unless method_defined?(:_mkxp_orig_delete)
@@ -1692,8 +1692,6 @@ if RUBY_VERSION < '1.9'
   end
 end
 
-# --- Dir.chdir nil/empty-safety ---
-# Pokemon Essentials and some plugin scripts pass nil or "" to
 # A Dir object lists the folder through its own reader, past the
 # class methods above.
 class Dir
@@ -1733,6 +1731,8 @@ class Dir
   end
 end
 
+# --- Dir.chdir nil/empty-safety ---
+# Pokemon Essentials and some plugin scripts pass nil or "" to
 # Dir.chdir. nil crashes Ruby pre-2.0 outright. "" raises
 # Errno::ENOENT on every Ruby version. Both are no-ops in spirit
 # (the script wants "stay where you are") so we route them through
