@@ -40,12 +40,13 @@ WineHostType getRealHostType();
 
 #if TARGET_OS_IPHONE
 /* Call these on the main thread. The count goes up when the app becomes
- * active or stops being active, and when an interruption (a call, Siri)
- * starts or ends. iOS can refuse or allow sound again after each one. */
+ * active or stops being active, when an interruption (a call, Siri)
+ * starts or ends, and when the media services of iOS start again. iOS
+ * can refuse or allow sound again after each one. */
 unsigned soundEventCount();
 /* Runs the main run loop until the count is no longer `since`. Returns
- * false at once when no event can come: the count is still `since`, and
- * iOS allows sound now, so iOS did not cause the failure. */
+ * false at once when the count is still `since` and iOS allows sound
+ * now. The check turns the sound session on. */
 bool waitForSoundEvent(unsigned since);
 #endif
 }

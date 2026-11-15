@@ -104,7 +104,7 @@ unsigned systemImpl::soundEventCount() {
         // app events also end the wait.
         for (NSNotificationName name in @[
                  UIApplicationWillResignActiveNotification, UIApplicationDidBecomeActiveNotification,
-                 AVAudioSessionInterruptionNotification
+                 AVAudioSessionInterruptionNotification, AVAudioSessionMediaServicesWereResetNotification
              ]) {
             [NSNotificationCenter.defaultCenter addObserverForName:name
                                                             object:nil

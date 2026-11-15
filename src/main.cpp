@@ -479,7 +479,9 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
    * interruption (error -16980, insufficient privileges), because the
    * host has no audio background mode. The open or the context then
    * fails, so both wait for the next event after which iOS can allow
-   * sound, and try again. */
+   * sound, and try again. The check for an event can turn the session
+   * on, so a failure with no event tries once more before the error. */
+  bool sessionOn = false;
   for (;;) {
     unsigned events = mkxp_sys::soundEventCount();
     ALCdevice *dev = alcOpenDevice(0);
@@ -492,8 +494,10 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
     }
     if (dev)
       alcCloseDevice(dev);
-    if (!mkxp_sys::waitForSoundEvent(events))
+    bool event = mkxp_sys::waitForSoundEvent(events);
+    if (!event && sessionOn)
       break;
+    sessionOn = !event;
     Debug() << "iOS refused sound. Trying again.";
   }
   showInitError("Could not detect an available audio device.");
