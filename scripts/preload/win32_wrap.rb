@@ -543,6 +543,8 @@ module Win32API_Impl
         1
       end
     end
+    SystemParametersInfoA = SystemParametersInfo
+    SystemParametersInfoW = SystemParametersInfo
 
     class ScreenToClient
       def call(_args)
@@ -622,6 +624,7 @@ module Win32API_Impl
         "\"#{File.join(Dir.pwd, 'Game.exe')}\""
       end
     end
+    GetCommandLineA = GetCommandLine
 
     # RtlMoveMemory(destination, source, length).
     #
