@@ -21,37 +21,42 @@ CHDIR_GAME = Dir.pwd
 CHDIR_SUB = File.join(CHDIR_GAME, 'dir_chdir_suite')
 Dir.mkdir(CHDIR_SUB) unless File.directory?(CHDIR_SUB)
 
-def chdir_error
-  yield
-  nil
-rescue Exception => e # rubocop:disable Lint/RescueException
-  e.class
+# The error class and the folder after the call, read before the
+# folder goes back to the game folder.
+def chdir_result
+  error = nil
+  begin
+    yield
+  rescue Exception => e # rubocop:disable Lint/RescueException
+    error = e.class
+  end
+  [error, Dir.pwd]
 ensure
   Dir.chdir(CHDIR_GAME)
 end
 
 EngineTest.test('Dir.chdir(nil) raises TypeError and stays in the game folder') do
-  EngineTest.assert_equal(TypeError, chdir_error { Dir.chdir(nil) }, 'Dir.chdir(nil)')
-  EngineTest.assert_equal(TypeError, chdir_error { Dir.chdir(nil) { nil } }, 'Dir.chdir(nil) with a block')
-  EngineTest.assert_equal(CHDIR_GAME, Dir.pwd, 'folder after Dir.chdir(nil)')
+  EngineTest.assert_equal([TypeError, CHDIR_GAME], chdir_result { Dir.chdir(nil) }, 'Dir.chdir(nil)')
+  EngineTest.assert_equal([TypeError, CHDIR_GAME], chdir_result { Dir.chdir(nil) { nil } },
+                          'Dir.chdir(nil) with a block')
 end
 
-EngineTest.test('Dir.chdir("") raises ENOENT and stays in the game folder') do
-  EngineTest.assert_equal(Errno::ENOENT, chdir_error { Dir.chdir('') }, 'Dir.chdir("")')
-  EngineTest.assert_equal(Errno::ENOENT, chdir_error { Dir.chdir('') { nil } }, 'Dir.chdir("") with a block')
-  EngineTest.assert_equal(CHDIR_GAME, Dir.pwd, 'folder after Dir.chdir("")')
+EngineTest.test('Dir.chdir("") raises EINVAL and stays in the game folder') do
+  EngineTest.assert_equal([Errno::EINVAL, CHDIR_GAME], chdir_result { Dir.chdir('') }, 'Dir.chdir("")')
+  EngineTest.assert_equal([Errno::EINVAL, CHDIR_GAME], chdir_result { Dir.chdir('') { nil } },
+                          'Dir.chdir("") with a block')
 end
 
 EngineTest.test('a NUL in a Dir.chdir path acts like RGSS') do
   if RUBY_VERSION < '1.9'
     seen = Dir.chdir("dir_chdir_suite\0junk") { Dir.pwd }
     EngineTest.assert_equal(CHDIR_SUB, seen, 'Ruby 1.8 ends the path at the NUL')
-    EngineTest.assert_equal(Errno::ENOENT, chdir_error { Dir.chdir("\0junk") }, 'Ruby 1.8 with a NUL first')
+    EngineTest.assert_equal([Errno::EINVAL, CHDIR_GAME], chdir_result { Dir.chdir("\0junk") },
+                            'Ruby 1.8 with a NUL first')
   else
-    EngineTest.assert_equal(ArgumentError, chdir_error { Dir.chdir("dir_chdir_suite\0junk") },
+    EngineTest.assert_equal([ArgumentError, CHDIR_GAME], chdir_result { Dir.chdir("dir_chdir_suite\0junk") },
                             'Ruby 1.9 and later refuse a NUL')
   end
-  EngineTest.assert_equal(CHDIR_GAME, Dir.pwd, 'folder after a NUL path')
 end
 
 Dir.rmdir(CHDIR_SUB)

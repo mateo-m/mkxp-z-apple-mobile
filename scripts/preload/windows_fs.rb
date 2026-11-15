@@ -1734,10 +1734,14 @@ end
 # --- Dir.chdir ---
 # RGSS raises for Dir.chdir(nil) and Dir.chdir(""). Only the call with
 # no argument goes to HOME, which on a device is the app folder.
+# Windows refuses an empty path with EINVAL, POSIX with ENOENT.
 class << Dir
   alias _mkxp_orig_chdir chdir unless method_defined?(:_mkxp_orig_chdir)
   def chdir(*args, &block)
-    args[0] = MKXPSaveFS.cut_at_nul(args[0]) unless args.empty?
+    unless args.empty?
+      args[0] = MKXPSaveFS.cut_at_nul(args[0])
+      raise Errno::EINVAL, args[0] if args[0] == ''
+    end
     _mkxp_orig_chdir(*args, &block)
   end
 end
