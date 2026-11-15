@@ -1,13 +1,14 @@
 diff --git a/gc.c b/gc.c
-index b7fc7b1..a43aaa3 100644
+index b7fc7b1..5636a03 100644
 --- a/gc.c
 +++ b/gc.c
-@@ -436,6 +436,57 @@ add_heap()
+@@ -436,6 +436,59 @@ add_heap()
  }
  #define RANY(o) ((RVALUE*)(o))
  
-+/* Lazy sweep. garbage_collect() only marks. The sweep then runs in
-+ * small steps from rb_newobj(), so one collection does not stop the
++/* Lazy sweep. garbage_collect() marks, then sweeps only until it has
++ * SWEEP_STEP_FREE free slots. rb_newobj() sweeps the next part each
++ * time the freelist is empty, so one collection does not stop the
 + * game for the whole sweep. Heaps [0, sweep_heaps_end) existed at the
 + * mark. Slots before sweep_p in heap sweep_heap, and the slots of the
 + * heaps before it, are swept. While a sweep is pending, only swept
@@ -15,8 +16,9 @@ index b7fc7b1..a43aaa3 100644
 + * freelist. An unswept slot with flags 0 is free, and the sweep puts
 + * it on the freelist. A live unswept slot keeps FL_MARK until its
 + * sweep, so OBJSETUP and rb_obj_clone() do not copy that flag from
-+ * another object. A clone keeps its own FL_MARK, because a collection
-+ * can start while rb_obj_clone() makes its singleton class. */
++ * another object. A collection can start after the new object exists
++ * and before it gets its flags, so the new object keeps its own
++ * FL_MARK. */
 +static int sweep_heap = -1;
 +static int sweep_heaps_end;
 +static RVALUE *sweep_p;
@@ -60,7 +62,7 @@ index b7fc7b1..a43aaa3 100644
  int
  rb_during_gc()
  {
-@@ -450,6 +501,7 @@ rb_newobj()
+@@ -450,6 +503,7 @@ rb_newobj()
      if (during_gc)
  	rb_bug("object allocation during garbage collection phase");
  
@@ -68,7 +70,7 @@ index b7fc7b1..a43aaa3 100644
      if (ruby_gc_stress || !freelist) garbage_collect();
  
      obj = (VALUE)freelist;
-@@ -1113,6 +1165,19 @@ add_freelist(p)
+@@ -1113,6 +1167,19 @@ add_freelist(p)
      freelist = p;
  }
  
@@ -88,7 +90,7 @@ index b7fc7b1..a43aaa3 100644
  static void
  finalize_list(p)
      RVALUE *p;
-@@ -1121,7 +1186,7 @@ finalize_list(p)
+@@ -1121,7 +1188,7 @@ finalize_list(p)
  	RVALUE *tmp = p->as.free.next;
  	run_final((VALUE)p);
  	if (!FL_TEST(p, FL_SINGLETON)) { /* not freeing page */
@@ -97,7 +99,7 @@ index b7fc7b1..a43aaa3 100644
  	}
  	p = tmp;
      }
-@@ -1132,6 +1197,8 @@ free_unused_heaps()
+@@ -1132,6 +1199,8 @@ free_unused_heaps()
  {
      int i, j;
  
@@ -106,7 +108,7 @@ index b7fc7b1..a43aaa3 100644
      for (i = j = 1; j < heaps_used; i++) {
  	if (heaps[i].limit == 0) {
  	    free(heaps[i].membase);
-@@ -1149,50 +1216,62 @@ free_unused_heaps()
+@@ -1149,50 +1218,62 @@ free_unused_heaps()
  void rb_gc_abort_threads(void);
  
  static void
@@ -202,7 +204,7 @@ index b7fc7b1..a43aaa3 100644
  	    if (!(p->as.basic.flags & FL_MARK)) {
  		if (p->as.basic.flags &&
  		    ((deferred = obj_free((VALUE)p)) ||
-@@ -1202,13 +1281,15 @@ gc_sweep()
+@@ -1202,13 +1283,15 @@ gc_sweep()
  			RDATA(p)->dfree = 0;
  		    }
  		    p->as.free.flags |= FL_MARK;
@@ -221,7 +223,7 @@ index b7fc7b1..a43aaa3 100644
  	    }
  	    else if (BUILTIN_TYPE(p) == T_ZOMBIE) {
  		/* objects to be finalized */
-@@ -1216,55 +1297,93 @@ gc_sweep()
+@@ -1216,55 +1299,93 @@ gc_sweep()
  	    }
  	    else {
  		RBASIC(p)->flags &= ~FL_MARK;
@@ -340,7 +342,7 @@ index b7fc7b1..a43aaa3 100644
  }
  
  static inline void
-@@ -1474,6 +1593,8 @@ garbage_collect()
+@@ -1474,6 +1595,8 @@ garbage_collect()
  	return;
      }
      if (during_gc) return;
@@ -349,7 +351,7 @@ index b7fc7b1..a43aaa3 100644
      during_gc++;
  
      init_mark_stack();
-@@ -1557,6 +1678,7 @@ void
+@@ -1557,6 +1680,7 @@ void
  rb_gc()
  {
      garbage_collect();
@@ -357,7 +359,7 @@ index b7fc7b1..a43aaa3 100644
      rb_gc_finalize_deferred();
  }
  
-@@ -1695,6 +1817,7 @@ os_obj_of(of)
+@@ -1695,6 +1819,7 @@ os_obj_of(of)
      int n = 0;
      volatile VALUE v;
  
@@ -365,7 +367,7 @@ index b7fc7b1..a43aaa3 100644
      for (i = 0; i < heaps_used; i++) {
  	RVALUE *p, *pend;
  
-@@ -1981,6 +2104,7 @@ rb_gc_call_finalizer_at_exit()
+@@ -1981,6 +2106,7 @@ rb_gc_call_finalizer_at_exit()
      RVALUE *final_list = 0;
      int i;
  
@@ -373,7 +375,7 @@ index b7fc7b1..a43aaa3 100644
      /* run finalizers */
      if (need_call_final) {
  	finalize_deferred();
-@@ -2061,6 +2185,7 @@ id2ref(obj, objid)
+@@ -2061,6 +2187,7 @@ id2ref(obj, objid)
      if (ptr == Qnil) return Qnil;
      if (FIXNUM_P(ptr)) return (VALUE)ptr;
      ptr = objid ^ FIXNUM_FLAG;	/* unset FIXNUM_FLAG */
@@ -382,7 +384,7 @@ index b7fc7b1..a43aaa3 100644
      if ((ptr % sizeof(RVALUE)) == (4 << 2)) {
          ID symid = ptr / sizeof(RVALUE);
 diff --git a/object.c b/object.c
-index 2aa8217..848eb61 100644
+index 2aa8217..675e16f 100644
 --- a/object.c
 +++ b/object.c
 @@ -247,7 +247,7 @@ rb_obj_clone(obj)
@@ -390,22 +392,23 @@ index 2aa8217..848eb61 100644
      clone = rb_obj_alloc(rb_obj_class(obj));
      RBASIC(clone)->klass = rb_singleton_class_clone(obj);
 -    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT)) & ~(FL_FREEZE|FL_FINALIZE);
-+    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT)) & ~(FL_FREEZE|FL_FINALIZE|FL_MARK) | FL_TEST(clone, FL_MARK);
++    RBASIC(clone)->flags = ((RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT)) & ~(FL_FREEZE|FL_FINALIZE|FL_MARK)) | FL_TEST(clone, FL_MARK);
      init_copy(clone, obj);
      RBASIC(clone)->flags |= RBASIC(obj)->flags & FL_FREEZE;
  
 diff --git a/ruby.h b/ruby.h
-index ffbabb9..7979439 100644
+index ffbabb9..f94a5d4 100644
 --- a/ruby.h
 +++ b/ruby.h
-@@ -313,8 +313,9 @@ DEPRECATED(char *rb_str2cstr _((VALUE,long*)));
+@@ -313,8 +313,10 @@ DEPRECATED(char *rb_str2cstr _((VALUE,long*)));
  
  VALUE rb_newobj _((void));
  #define NEWOBJ(obj,type) type *obj = (type*)rb_newobj()
-+/* A copied FL_MARK makes the next mark skip what the new object holds. */
++/* A copied FL_MARK makes the next mark skip what obj holds. A
++ * collection can mark obj before this, so obj keeps its own FL_MARK. */
  #define OBJSETUP(obj,c,t) do {\
 -    RBASIC(obj)->flags = (t);\
-+    RBASIC(obj)->flags = (t) & ~FL_MARK;\
++    RBASIC(obj)->flags = ((t) & ~FL_MARK) | (RBASIC(obj)->flags & FL_MARK);\
      RBASIC(obj)->klass = (c);\
      if (rb_safe_level() >= 3) FL_SET(obj, FL_TAINT);\
  } while (0)

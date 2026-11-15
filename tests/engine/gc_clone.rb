@@ -17,7 +17,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('gc-clone', 2)
+EngineTest.suite('gc-clone', 3)
 
 ROUNDS = 40
 SOUNDS = 2000
@@ -97,6 +97,24 @@ EngineTest.test('a clone keeps its singleton methods after the original is dropp
   collect_and_reuse
   bad = kept.reject { |clone, name| clone.tag.equal?(name) }
   EngineTest.assert(bad.empty?, "#{bad.size} of #{kept.size} clones lost their method")
+end
+
+COPIES = 200
+COPY_SIZE = 50_000
+
+# `reverse` copies the array through DUPSETUP, and `dup` does not. The
+# buffer of each copy is large, so the memory limit of the interpreter
+# starts a collection in the middle of a copy.
+EngineTest.test('a reversed array stays alive when a collection starts during the copy') do
+  source = Array.new(COPY_SIZE) { |i| i }
+  kept = Array.new(COPIES) { source.reverse }
+  ids = kept.map(&:object_id)
+  collect_and_reuse
+  bad = ids.reject do |id|
+    copy = live(id)
+    copy.is_a?(Array) && copy.size == COPY_SIZE
+  end
+  EngineTest.assert(bad.empty?, "#{bad.size} of #{COPIES} copies were freed")
 end
 
 EngineTest.finish

@@ -19,8 +19,8 @@ patches.
 
 ## Patches
 
-All iOS patches are in `ios.patch`. The makefile applies it
-automatically via `git apply` before `autoconf`:
+`deps/ruby18.patches.lst` lists the patches in their order. The
+makefile applies each one with `git apply` before `autoconf`:
 
 ### `config.guess` and `config.sub`: updated for aarch64
 
@@ -31,19 +31,22 @@ with current versions from the GNU config project so that `./configure
 
 ### `lazy-sweep.patch`: sweep in small steps
 
-A collection only marks. `rb_newobj()` then sweeps a small part of
-the heap at each call, so one collection does not stop the game.
+A collection marks, then sweeps only until it has 2048 free slots.
+`rb_newobj()` sweeps the next part each time the free list is empty,
+so one collection does not stop the game.
 
 A live object keeps its mark bit until the sweep gets to its slot.
-`OBJSETUP` and `rb_obj_clone()` copy the flags of another object, so
-the patch removes the mark bit from the copy. Without that, the next
-collection does not mark what the copy holds and frees it. For
-example, the clone of a playing sound loses its name.
+`rb_obj_clone()`, `CLONESETUP`, and `DUPSETUP` give a new object the
+flags of another object, so the patch removes the mark bit from those
+flags. Without that, the next collection does not mark what the copy
+holds and frees it. For example, the clone of a playing sound loses
+its name.
 
-A collection can also start while `rb_obj_clone()` makes the
-singleton class of the clone. That collection marks the clone, so
-the clone keeps its own mark bit. Without it, the sweep frees the
-clone itself.
+A collection can also start after the new object exists and before it
+gets its flags, for example while `Array#reverse` allocates the buffer
+of its copy. That collection marks the new object, so `OBJSETUP` and
+`rb_obj_clone()` keep that mark bit. Without it, the sweep frees the
+new object itself.
 
 ### Engine-side accommodations (in mkxp-z, not in Ruby source)
 
@@ -88,7 +91,7 @@ make -f iphoneos.make
 
 The makefile automatically:
 
-1. Applies `ios.patch` via `git apply` (updates config.guess/config.sub)
+1. Applies the patches of `deps/ruby18.patches.lst` via `git apply`
 2. Runs `autoconf` to generate `configure`
 3. Cross-compiles with `-std=gnu89` and the applicable `-Wno-*` flags
 4. Builds the core library (`libruby18-static.a`)
