@@ -112,15 +112,6 @@ module Graphics
   def self.height
     384
   end
-
-  # The iOS Simulator gives a display smaller than the game.
-  def self.display_width
-    155
-  end
-
-  def self.display_height
-    226
-  end
 end
 
 # Stand-in for the engine's native HTTP client. Serves canned
@@ -574,11 +565,11 @@ assert_eq(HSRA.call(HORA.call(connection, 'GET', 'missing', nil, nil, nil, 0, 0)
 # Win32API.fillScreen and the arithmetic of pbConfigureFullScreen.
 metrics = Win32API.new('user32', 'GetSystemMetrics', 'I', 'I')
 screen = [metrics.call(0), metrics.call(1)]
-assert_eq(screen, [512, 747], 'GetSystemMetrics gives the display at the scale that fits the game')
+assert_eq(screen, [512, 384], 'GetSystemMetrics gives the game size')
 factor = [((2 * screen[0]) / 512).floor, ((2 * screen[1]) / 384).floor].min / 2.0
 offset_x = (screen[0] - 512 * factor) / (2 * factor)
 offset_y = (screen[1] - 384 * factor) / (2 * factor)
-assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 181.5], 'the full-screen resize factor and offsets are finite')
+assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 0.0], 'the full-screen canvas keeps the game size')
 
 # Zeus81's Fullscreen++ for VX Ace: borders_size and workarea_rect.
 window = [0, 0, 0, 0].pack('l4')
@@ -590,9 +581,9 @@ assert_eq(client.unpack('l4'), window.unpack('l4'), 'the game window has no bord
 work_area = [0, 0, 0, 0].pack('l4')
 spi = Win32API.new('user32', 'SystemParametersInfo', 'iipi', 'i')
 assert_eq(spi.call(0x30, 0, work_area, 0), 1, 'SPI_GETWORKAREA succeeds')
-assert_eq(work_area.unpack('l4'), [0, 0, 512, 747], 'the work area is the screen')
+assert_eq(work_area.unpack('l4'), [0, 0, 512, 384], 'the work area is the screen')
 
 command_line = Win32API.new('Kernel32', 'GetCommandLine', '', 'p').call
-assert_eq(command_line.scan(/console/), [], 'GetCommandLine gives a String without test-play flags')
+assert_eq(command_line, "\"#{File.join(Dir.pwd, 'Game.exe')}\"", 'GetCommandLine gives Game.exe with no test-play flags')
 
-test_passed('test_win32_stubs', 96)
+test_passed('test_win32_stubs', 100)

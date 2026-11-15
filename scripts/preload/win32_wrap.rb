@@ -517,25 +517,17 @@ module Win32API_Impl
     class GetWindowRect < GetClientRect
     end
 
-    # The display at the scale that fits the game on it. A Windows screen
-    # is never smaller than the game, and full-screen scripts divide by
-    # the screen size over the game size. On iOS, Graphics.display_width
-    # can be smaller than the game, so only its aspect ratio is used.
-    def self.screen_size
-      width = Graphics.display_width.to_f
-      height = Graphics.display_height.to_f
-      scale = [width / Graphics.width, height / Graphics.height].min
-      [(width / scale).round, (height / scale).round]
-    end
-
+    # Full-screen scripts size the canvas from the screen once, and the
+    # engine already scales the canvas to the window. A screen the size
+    # of the game keeps the canvas the size of the game.
     class GetSystemMetrics
       SM_CXSCREEN = 0
       SM_CYSCREEN = 1
 
       def call(args)
         case args[0]
-        when SM_CXSCREEN then User32.screen_size[0]
-        when SM_CYSCREEN then User32.screen_size[1]
+        when SM_CXSCREEN then Graphics.width
+        when SM_CYSCREEN then Graphics.height
         else 0
         end
       end
@@ -547,7 +539,7 @@ module Win32API_Impl
       def call(args)
         return 0 unless args[0] == SPI_GETWORKAREA
 
-        memcpy_string(args[2], ([0, 0] + User32.screen_size).pack('l4'))
+        memcpy_string(args[2], [0, 0, Graphics.width, Graphics.height].pack('l4'))
         1
       end
     end
