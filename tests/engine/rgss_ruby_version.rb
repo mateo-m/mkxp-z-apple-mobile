@@ -2,9 +2,7 @@
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
 # Ruby 1.8 and Ruby 1.9 report the Ruby version of RPG Maker: 1.8.1 for
-# XP and VX, and 1.9.2 for VX Ace. Scripts tell the makers apart by this
-# value. Zeus Video Player v2.3 takes any version other than 1.8.1 for
-# VX Ace, and Grim's console script finds VX Ace only by 1.9.2.
+# XP and VX, and 1.9.2 for VX Ace.
 #
 #   tools/run-engine-tests.sh --suite rgss_ruby_version.rb --ruby 18
 #   tools/run-engine-tests.sh --suite rgss_ruby_version.rb --ruby 19
