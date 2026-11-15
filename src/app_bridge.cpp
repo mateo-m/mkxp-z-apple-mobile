@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <pthread.h>
 #include <condition_variable>
 #include <string>
 #include <vector>
@@ -806,10 +807,21 @@ void mkxp_presentErrorAndWait(const char *message) {
     s_errorAwaitingDismiss.store(true, std::memory_order_release);
     mkxp_setErrorMessage(message);
 
-    std::unique_lock<std::mutex> lock(s_errorDismissMutex);
-    s_errorDismissCV.wait(lock, [] {
-        return s_errorDismissed.load(std::memory_order_acquire);
-    });
+    if (pthread_main_np()) {
+        // The host shows the alert from the main run loop. A blocked
+        // main thread shows nothing, and the iOS watchdog stops the
+        // app after 10 seconds (0x8BADF00D). The dismiss can come from
+        // another thread, and a CFRunLoopStop from there is lost when
+        // this thread is not yet in the run, so the flag is read again
+        // every 50 ms.
+        while (!s_errorDismissed.load(std::memory_order_acquire))
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
+    } else {
+        std::unique_lock<std::mutex> lock(s_errorDismissMutex);
+        s_errorDismissCV.wait(lock, [] {
+            return s_errorDismissed.load(std::memory_order_acquire);
+        });
+    }
     s_errorAwaitingDismiss.store(false, std::memory_order_release);
 }
 
