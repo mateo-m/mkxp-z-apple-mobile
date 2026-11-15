@@ -474,15 +474,17 @@ static SDL_GLContext createPersistentGL(SDL_Window *win) {
 /* iOS refuses audio to an app in the background (error -16980,
  * insufficient privileges), because the host has no audio background
  * mode, and alcOpenDevice then returns NULL. The app can go to the
- * background between the check and the open, so a failed open waits
- * for the foreground again. */
+ * background after the check, so an open that fails across a move to
+ * the background waits for the foreground and tries again. */
 static ALCdevice *openAudioDevice() {
   for (;;) {
     mkxp_sys::waitUntilForeground();
+    unsigned moves = mkxp_sys::backgroundMoveCount();
     if (ALCdevice *dev = alcOpenDevice(0))
       return dev;
-    Debug() << "Could not open the audio device. Trying again.";
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, false);
+    if (mkxp_sys::backgroundMoveCount() == moves)
+      return nullptr;
+    Debug() << "The app went to the background while the audio device opened. Trying again.";
   }
 }
 #endif
@@ -495,11 +497,11 @@ static bool createPersistentAudio(ALCdevice **outDev, ALCcontext **outCtx) {
   ALCdevice *dev = openAudioDevice();
 #else
   ALCdevice *dev = alcOpenDevice(0);
+#endif
   if (!dev) {
     showInitError("Could not detect an available audio device.");
     return false;
   }
-#endif
 
   ALCcontext *ctx = alcCreateContext(dev, 0);
   if (ctx)

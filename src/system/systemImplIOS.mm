@@ -78,14 +78,32 @@ systemImpl::WineHostType systemImpl::getRealHostType() {
 }
 
 #if TARGET_OS_IPHONE
-void systemImpl::waitUntilForeground() {
-    // UIKit updates applicationState only when the main run loop
-    // runs, so a move to the background during a long main-thread
-    // task shows only after the queued events are handled.
+// UIKit updates applicationState and posts its notifications only when
+// the main run loop runs, so a move to the background during a long
+// main-thread task shows only after the queued events are handled.
+static void handleQueuedEvents() {
     while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) == kCFRunLoopRunHandledSource) {
     }
+}
+
+void systemImpl::waitUntilForeground() {
+    handleQueuedEvents();
     while (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, true);
+}
+
+unsigned systemImpl::backgroundMoveCount() {
+    static unsigned moves;
+    static id observer = [NSNotificationCenter.defaultCenter
+        addObserverForName:UIApplicationDidEnterBackgroundNotification
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification *) {
+                  moves++;
+                }];
+    (void)observer;
+    handleQueuedEvents();
+    return moves;
 }
 #endif
 
