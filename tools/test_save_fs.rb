@@ -684,9 +684,10 @@ Dir.chdir(GAME) do
       end
       assert_eq(Dir.pwd, GAME, "a refused Dir.chdir on Ruby #{version} stays in the game folder")
       assert_eq(Dir.chdir { Dir.pwd }, File.realpath(ENV['HOME']), "Dir.chdir with no path on Ruby #{version} goes to HOME")
+      assert_eq(open_error { Dir.chdir('', '.') }, ArgumentError, "Dir.chdir with two paths on Ruby #{version} raises ArgumentError")
     end
   end
   load_windows_fs!(false)
 end
 
-test_passed('test_save_fs', 409)
+test_passed('test_save_fs', 411)

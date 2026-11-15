@@ -1738,7 +1738,7 @@ end
 class << Dir
   alias _mkxp_orig_chdir chdir unless method_defined?(:_mkxp_orig_chdir)
   def chdir(*args, &block)
-    unless args.empty?
+    if args.length == 1
       args[0] = MKXPSaveFS.cut_at_nul(args[0])
       raise Errno::EINVAL, args[0] if args[0] == ''
     end
