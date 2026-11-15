@@ -592,5 +592,12 @@ assert_eq(command_line, "\"#{File.join(Dir.pwd, 'Game.exe')}\"", 'GetCommandLine
   assert_eq(named_area.unpack('l4'), [0, 0, 512, 384], "#{name} gives the screen as the work area")
 end
 assert_eq(Win32API.new('Kernel32', 'GetCommandLineA', '', 'p').call, command_line, 'GetCommandLineA gives the same command line')
+# GetCommandLineW returns UTF-16, which a byte string can't give.
+assert_eq(Win32API.new('Kernel32', 'GetCommandLineW', '', 'p').call, 0, 'GetCommandLineW has no stub')
 
-test_passed('test_win32_stubs', 105)
+[0x1234, [0].pack('l')].each do |buffer|
+  assert_eq(Win32API.new('user32', 'GetClientRect', 'ip', 'i').call(42, buffer), 0, 'GetClientRect refuses a buffer that is not a RECT')
+  assert_eq(spi.call(0x30, 0, buffer, 0), 0, 'SPI_GETWORKAREA refuses a buffer that is not a RECT')
+end
+
+test_passed('test_win32_stubs', 110)

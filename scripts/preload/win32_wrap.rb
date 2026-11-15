@@ -499,7 +499,7 @@ module Win32API_Impl
 
     class GetClientRect
       def call(args)
-        return 0 if args[0] != 42
+        return 0 unless args[0] == 42 && args[1].is_a?(String) && args[1].bytesize >= 16
 
         rect = [0, 0, 640, 480]
         begin
@@ -537,7 +537,7 @@ module Win32API_Impl
       SPI_GETWORKAREA = 0x30
 
       def call(args)
-        return 0 unless args[0] == SPI_GETWORKAREA
+        return 0 unless args[0] == SPI_GETWORKAREA && args[2].is_a?(String) && args[2].bytesize >= 16
 
         memcpy_string(args[2], [0, 0, Graphics.width, Graphics.height].pack('l4'))
         1
