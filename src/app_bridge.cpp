@@ -810,10 +810,9 @@ void mkxp_presentErrorAndWait(const char *message) {
     if (pthread_main_np()) {
         // The host shows the alert from the main run loop. A blocked
         // main thread shows nothing, and the iOS watchdog stops the
-        // app after 10 seconds (0x8BADF00D). The dismiss can come from
-        // another thread, and a CFRunLoopStop from there is lost when
-        // this thread is not yet in the run, so the flag is read again
-        // every 50 ms.
+        // app (0x8BADF00D). The dismiss can come from another thread,
+        // and a CFRunLoopStop from there is lost when this thread is
+        // not yet in the run, so the flag is read again every 50 ms.
         while (!s_errorDismissed.load(std::memory_order_acquire))
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
     } else {
