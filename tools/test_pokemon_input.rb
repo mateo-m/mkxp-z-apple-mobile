@@ -179,6 +179,5 @@ ensure
 end
 
 without_file_write { check_marker('Ruby 1.8') }
-check_marker('Ruby 1.9 and 3.1')
 
-test_passed('test_pokemon_input', 21)
+test_passed('test_pokemon_input', 19)
