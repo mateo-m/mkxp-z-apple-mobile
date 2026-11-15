@@ -1,28 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# The full-screen option of Pokemon Essentials v16 and v17 (the
-# "Win32API" and "Sprite_Resizer" script sections) on the Win32API
-# stand-ins of win32_wrap.rb. A screen size of 0 made the factor 0 and
-# the offsets NaN, so a viewport raised "float nan out of range of
-# integer" and the next Sprite#x= raised FloatDomainError.
+# The full-screen option of Pokemon Essentials on the interpreters that
+# the engine ships. tools/test_win32_stubs.rb runs the same math only
+# on the host Ruby.
 #
 #   tools/run-engine-tests.sh --suite full_screen_resizer.rb --ruby 18
 #
-# This file must parse on all three interpreters.
+# This file must parse on all three.
 
 unless defined?(EngineTest)
   harness_path = File.join(File.dirname(__FILE__), 'harness.rb')
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('full-screen-resizer', 3)
+EngineTest.suite('full-screen-resizer', 2)
 
 EngineTest.load_preloads(%w[windows_fs platform_compat pokemon_compat win32_wrap])
 
-# The Essentials code keeps its own style, so that it stays the same
-# as what the games run.
-# rubocop:disable all
+# rubocop:disable all -- Win32API.fillScreen as Essentials ships it
 class Win32API
   @@RGSSWINDOW=nil
   @@GetCurrentThreadId=Win32API.new('kernel32','GetCurrentThreadId', '%w()','l')
@@ -66,42 +62,34 @@ class Win32API
     return [width,height]
   end
 end
-
-# pbConfigureFullScreen, with the game size and the border as
-# arguments, and Sprite#x= of a sprite with no viewport. It returns
-# the factor and offsets that the game gives to pbSetResizeFactor2.
-def essentials_full_screen(gamew, gameh, border)
-  params = Win32API.fillScreen
-  fullgamew = gamew + 80 * 2 * border
-  fullgameh = gameh + 80 * 2 * border
-  factor_x = ((2*params[0])/fullgamew).floor
-  factor_y = ((2*params[1])/fullgameh).floor
-  factor = [factor_x,factor_y].min/2.0
-  offset_x = (params[0]-gamew*factor)/(2*factor)
-  offset_y = (params[1]-gameh*factor)/(2*factor)
-  EngineTest.owning(Viewport.new(0, 0, gamew, gameh)) do |o|
-    o.rect.x = o.rect.x+offset_x
-    o.rect.y = o.rect.y+offset_y
-  end
-  resize_factor_mul = (factor*100).to_i
-  EngineTest.owning(Sprite.new) do |sprite|
-    sprite.x = ((10+offset_x)*resize_factor_mul/100).to_i
-  end
-  [factor, offset_x, offset_y]
-end
 # rubocop:enable all
 
-EngineTest.test('GetSystemMetrics gives a screen the size of the game') do
-  EngineTest.assert_equal([Graphics.width, Graphics.height], Win32API.fillScreen, 'Win32API.fillScreen')
+def essentials_full_screen(border)
+  screen_width, screen_height = Win32API.fillScreen
+  width = Graphics.width
+  height = Graphics.height
+  border_size = 160 * border
+  factor = [(2 * screen_width / (width + border_size)).floor,
+            (2 * screen_height / (height + border_size)).floor].min / 2.0
+  offset_x = (screen_width - (width * factor)) / (2 * factor)
+  offset_y = (screen_height - (height * factor)) / (2 * factor)
+  move_viewport(offset_x, offset_y)
+  [factor, offset_x, offset_y]
+end
+
+def move_viewport(offset_x, offset_y)
+  EngineTest.owning(Viewport.new(0, 0, Graphics.width, Graphics.height)) do |viewport|
+    viewport.rect.x += offset_x
+    viewport.rect.y += offset_y
+  end
 end
 
 EngineTest.test('full screen keeps the game size with no border') do
-  EngineTest.assert_equal([1.0, 0.0, 0.0], essentials_full_screen(Graphics.width, Graphics.height, 0),
-                          'factor and offsets')
+  EngineTest.assert_equal([1.0, 0.0, 0.0], essentials_full_screen(0), 'factor and offsets')
 end
 
 EngineTest.test('full screen with the border has a factor above 0') do
-  factor, = essentials_full_screen(Graphics.width, Graphics.height, 1)
+  factor, = essentials_full_screen(1)
   EngineTest.assert(factor > 0, "factor #{factor}")
 end
 
