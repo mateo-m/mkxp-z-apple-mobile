@@ -828,7 +828,10 @@ void mkxp_presentErrorAndWait(const char *message) {
 void mkxp_signalErrorDismissed(void) {
     if (!s_errorAwaitingDismiss.load(std::memory_order_acquire))
         return;
-    s_errorDismissed.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(s_errorDismissMutex);
+        s_errorDismissed.store(true, std::memory_order_release);
+    }
     s_errorDismissCV.notify_all();
 }
 
@@ -857,7 +860,10 @@ void mkxp_presentInfoAndWait(const char *message) {
 void mkxp_signalInfoDismissed(void) {
     if (!s_infoAwaitingDismiss.load(std::memory_order_acquire))
         return;
-    s_infoDismissed.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(s_infoDismissMutex);
+        s_infoDismissed.store(true, std::memory_order_release);
+    }
     s_infoDismissCV.notify_all();
 }
 #else
