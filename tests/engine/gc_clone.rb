@@ -17,7 +17,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('gc-clone', 3)
+EngineTest.suite('gc-clone', 4)
 
 ROUNDS = 40
 SOUNDS = 2000
@@ -115,6 +115,26 @@ EngineTest.test('a reversed array stays alive when a collection starts during th
     copy.is_a?(Array) && copy.size == COPY_SIZE
   end
   EngineTest.assert(bad.empty?, "#{bad.size} of #{COPIES} copies were freed")
+end
+
+Leftover = Class.new
+
+LEFTOVERS = 200_000
+
+# The block allocates, so collections start while each_object walks the
+# heaps.
+EngineTest.test('an object from each_object stays alive when the block starts a collection') do
+  LEFTOVERS.times { Leftover.new }
+  kept = []
+  ids = []
+  ObjectSpace.each_object(Leftover) do |leftover|
+    kept << leftover
+    ids << leftover.object_id
+    20.times { 'x' * 16 }
+  end
+  collect_and_reuse
+  bad = ids.reject { |id| live(id).is_a?(Leftover) }
+  EngineTest.assert(bad.empty?, "#{bad.size} of #{ids.size} kept objects were freed")
 end
 
 EngineTest.finish
