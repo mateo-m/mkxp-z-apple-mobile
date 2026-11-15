@@ -2362,6 +2362,19 @@ static void mriBindingExecute() {
     Init_ext();
 #endif
 
+#if RAPI_FULL <= 187
+    /* RPG Maker XP and VX run Ruby 1.8.1, and this Ruby is 1.8.8.
+     * Zeus Video Player takes any version other than 1.8.1 for VX Ace
+     * and calls String#force_encoding, which Ruby 1.8 does not have. */
+    {
+        VALUE rgssVersion = rb_obj_freeze(rb_str_new2("1.8.1"));
+        rb_const_remove(rb_cObject, rb_intern("RUBY_VERSION"));
+        rb_const_remove(rb_cObject, rb_intern("VERSION"));
+        rb_define_global_const("RUBY_VERSION", rgssVersion);
+        rb_define_global_const("VERSION", rgssVersion);
+    }
+#endif
+
     // Set the default encoding for regular expressions to UTF-8 when using syntax transform targeting Ruby <= 1.8
     rb_gv_set("$KCODE", rb_str_new_cstr("UTF8"));
     rb_gv_set("$-K", rb_str_new_cstr("UTF8"));
