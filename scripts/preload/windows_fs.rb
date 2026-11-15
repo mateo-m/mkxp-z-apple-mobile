@@ -1408,9 +1408,19 @@ class << File
   MKXPSaveFS.wrap_lookups(self, 0, %w[atime ctime mtime birthtime stat lstat ftype size size? zero?
                                       empty? readable? writable? executable? readable_real?
                                       writable_real? executable_real? world_readable? world_writable?
-                                      owned? identical? realpath truncate])
+                                      owned? identical? truncate])
   MKXPSaveFS.wrap_lookups(self, 1, %w[chmod])
   MKXPSaveFS.wrap_lookups(self, 2, %w[utime])
+
+  if method_defined?(:realpath)
+    alias _mkxp_orig_realpath realpath unless method_defined?(:_mkxp_orig_realpath)
+
+    # The path is relative to dir, not to the working directory.
+    def realpath(path, dir = nil)
+      path = File.join(dir, path) if dir && path.to_s !~ %r{\A/}
+      _mkxp_orig_realpath(MKXPSaveFS.existing_target(path))
+    end
+  end
 
   # Whole-file read/write helpers must resolve bare save names the
   # same way File.open does, or a game's File.read of a save sees a

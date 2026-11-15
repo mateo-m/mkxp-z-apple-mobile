@@ -284,7 +284,7 @@ ensure
   end
 end
 
-# Sentry EMPO-APP-1S: the Essentials plugin manager asks File.mtime
+# The Essentials plugin manager asks File.mtime
 # for "meta.txt" in a folder that holds "Meta.txt". The host folds
 # case, so only the argument of the raw call shows the spelling.
 LOOKUP_DIR = 'Plugins/Redistribuidor EVS'.freeze
@@ -366,6 +366,16 @@ def assert_lookup_spellings(label)
   assert_eq(err, Errno::ENOENT, "#{label}: File.mtime of a missing file still raises ENOENT")
   assert_eq(seen, [LOOKUP_MISSING], "#{label}: File.mtime of a missing file keeps the spelling of the game")
   assert_eq(Dir._mkxp_orig_entries(LOOKUP_DIR).grep(/\Ameta\.txt\z/i), ['Meta.txt'], "#{label}: one Meta.txt on disk")
+  assert_realpath_base(label)
+end
+
+# File.realpath takes its path relative to its second argument.
+def assert_realpath_base(label)
+  File._mkxp_orig_open('Meta.txt', 'wb') { |f| f.write("top\n") }
+  seen = raw_args_of(File, :_mkxp_orig_realpath) { File.realpath('meta.txt', LOOKUP_DIR_VARIANT) }
+  assert_eq(seen, [LOOKUP_FILE], "#{label}: File.realpath with a folder gets the file in that folder")
+ensure
+  File._mkxp_orig_delete('Meta.txt')
 end
 
 # A probe under missing folders lists each folder of the path once.
@@ -475,4 +485,4 @@ Dir.chdir(GAME) do
   asserted
 end
 
-test_passed('test_save_fs_case', 209)
+test_passed('test_save_fs_case', 211)

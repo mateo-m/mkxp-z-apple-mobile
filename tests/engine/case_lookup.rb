@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# Windows finds a file in any case, and iOS does not. Sentry
-# EMPO-APP-1S: the Essentials plugin manager calls File.mtime on
+# Windows finds a file in any case, and iOS does not. The Essentials
+# plugin manager calls File.mtime on
 # "Plugins/Redistribuidor EVS/meta.txt", and the file is "Meta.txt".
 # The engine's own lookup cannot see a file that the game made after
 # launch, so the suite makes its files first.
@@ -73,6 +73,10 @@ EngineTest.test('the stat calls find a file in another case') do
   EngineTest.assert_equal(true, File.writable?(LOOKUP_VARIANT), 'File.writable?')
   EngineTest.assert_equal(size, FileTest.size(LOOKUP_VARIANT), 'FileTest.size')
   EngineTest.assert_equal(false, File.empty?(LOOKUP_VARIANT), 'File.empty?') if File.respond_to?(:empty?)
+  if File.respond_to?(:realpath)
+    real = File.realpath(LOOKUP_FILE)
+    EngineTest.assert_equal(real, File.realpath('meta.txt', LOOKUP_DIR_VARIANT), 'realpath in a folder')
+  end
 end
 
 EngineTest.test('the read calls find a file in another case') do
