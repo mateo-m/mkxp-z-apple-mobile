@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# The Ruby 1.8 build reports the Ruby version of RPG Maker XP and VX.
-# Zeus Video Player v2.3 takes any version other than 1.8.1 for VX Ace
-# and calls String#force_encoding, which Ruby 1.8 does not have.
+# Ruby 1.8 and Ruby 1.9 report the Ruby version of RPG Maker: 1.8.1 for
+# XP and VX, and 1.9.2 for VX Ace. Scripts tell the makers apart by this
+# value. Zeus Video Player v2.3 takes any version other than 1.8.1 for
+# VX Ace, and Grim's console script finds VX Ace only by 1.9.2.
 #
 #   tools/run-engine-tests.sh --suite rgss_ruby_version.rb --ruby 18
+#   tools/run-engine-tests.sh --suite rgss_ruby_version.rb --ruby 19
 #
 # This file must parse on Ruby 1.8.
 
@@ -16,13 +18,15 @@ end
 
 EngineTest.suite('rgss-ruby-version', 2)
 
-EngineTest.test('RUBY_VERSION is 1.8.1 on Ruby 1.8') do
-  EngineTest.assert_equal('1.8', System.ruby_version, 'interpreter')
-  EngineTest.assert_equal('1.8.1', RUBY_VERSION, 'RUBY_VERSION')
+EngineTest.test('RUBY_VERSION is the Ruby of RPG Maker') do
+  expected = { '1.8' => '1.8.1', '1.9' => '1.9.2' }[System.ruby_version]
+  EngineTest.assert_equal(expected, RUBY_VERSION, 'RUBY_VERSION')
 end
 
-EngineTest.test('VERSION is the same as RUBY_VERSION') do
-  EngineTest.assert_equal(RUBY_VERSION, VERSION, 'VERSION')
+# Ruby 1.9 removed VERSION.
+EngineTest.test('VERSION is RUBY_VERSION on Ruby 1.8 only') do
+  expected = System.ruby_version == '1.8' ? RUBY_VERSION : nil
+  EngineTest.assert_equal(expected, defined?(VERSION) ? VERSION : nil, 'VERSION')
 end
 
 EngineTest.finish

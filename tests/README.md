@@ -61,7 +61,7 @@ game, which is the only way to reach the drawing code.
 | `fast_forward_clock.rb` | `System.uptime` runs at the fast-forward speed, and the average frame rate does not. |
 | `file_lookup_order.rb` | A path without an extension loads the first matching file in name order, and a folder path loads no file. |
 | `gc_clone.rb` | A clone keeps its instance variables and singleton methods, and a copied array and an object from `ObjectSpace.each_object` stay alive, through a collection, on each bundled interpreter. |
-| `rgss_ruby_version.rb` | Ruby 1.8 reports `RUBY_VERSION` 1.8.1, as RPG Maker XP and VX do. |
+| `rgss_ruby_version.rb` | Ruby 1.8 and 1.9 report `RUBY_VERSION` 1.8.1 and 1.9.2, as RPG Maker XP, VX, and VX Ace do. |
 | `win32_wrap_encoding.rb` | Text conversion in the Win32API stand-ins, on Ruby 1.9 and 3.1. |
 | `run_suites.rb` | Runs several suites in one launch. |
 
