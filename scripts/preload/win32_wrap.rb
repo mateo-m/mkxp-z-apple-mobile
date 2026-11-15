@@ -513,6 +513,45 @@ module Win32API_Impl
       end
     end
 
+    # The game window has no borders and sits at the top left.
+    class GetWindowRect < GetClientRect
+    end
+
+    # The display at the scale that fits the game on it. A Windows screen
+    # is never smaller than the game, and full-screen scripts divide by
+    # the screen size over the game size. On iOS, Graphics.display_width
+    # can be smaller than the game, so only its aspect ratio is used.
+    def self.screen_size
+      width = Graphics.display_width.to_f
+      height = Graphics.display_height.to_f
+      scale = [width / Graphics.width, height / Graphics.height].min
+      [(width / scale).round, (height / scale).round]
+    end
+
+    class GetSystemMetrics
+      SM_CXSCREEN = 0
+      SM_CYSCREEN = 1
+
+      def call(args)
+        case args[0]
+        when SM_CXSCREEN then User32.screen_size[0]
+        when SM_CYSCREEN then User32.screen_size[1]
+        else 0
+        end
+      end
+    end
+
+    class SystemParametersInfo
+      SPI_GETWORKAREA = 0x30
+
+      def call(args)
+        return 0 unless args[0] == SPI_GETWORKAREA
+
+        memcpy_string(args[2], ([0, 0] + User32.screen_size).pack('l4'))
+        1
+      end
+    end
+
     class ScreenToClient
       def call(_args)
         1
@@ -581,6 +620,14 @@ module Win32API_Impl
     class GetCurrentThreadId
       def call(_args)
         1
+      end
+    end
+
+    # The command line of a player who opened Game.exe, with no
+    # test-play flags.
+    class GetCommandLine
+      def call(_args)
+        "\"#{File.join(Dir.pwd, 'Game.exe')}\""
       end
     end
 

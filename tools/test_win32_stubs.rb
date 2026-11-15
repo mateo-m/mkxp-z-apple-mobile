@@ -16,6 +16,8 @@
 #      Net.const_missing, so a game-defined `module Net` holding a
 #      `module HTTP` (Berka) loads instead of dying with "HTTP is
 #      not a module".
+#   4. win32_wrap.rb: the screen, window and work-area sizes, and the
+#      command line, that full-screen scripts read.
 # Run: ruby mkxp-z-apple-mobile/tools/test_win32_stubs.rb
 #
 # Caution for extenders: once platform_compat.rb loads, its global
@@ -102,6 +104,23 @@ end
 # win32_wrap.rb wraps Graphics.update at load time. Give it a target.
 module Graphics
   def self.update; end
+
+  def self.width
+    512
+  end
+
+  def self.height
+    384
+  end
+
+  # The iOS Simulator gives a display smaller than the game.
+  def self.display_width
+    155
+  end
+
+  def self.display_height
+    226
+  end
 end
 
 # Stand-in for the engine's native HTTP client. Serves canned
@@ -550,4 +569,30 @@ assert_eq(HSRA.call(refused, nil, 0, '', 0), 0, 'a refused transfer fails the se
 assert_eq(HSRA.call(HORA.call(connection, 'GET', 'missing', nil, nil, nil, 0, 0), nil, 0, '', 0), 0,
           'a transport failure fails the send')
 
-test_passed('test_win32_stubs', 88)
+# --- Screen size, window rect, work area, command line ---
+# Essentials v17's Sprite_Resizer (Pokemon Empyrean, Iberia, GS Vitro):
+# Win32API.fillScreen and the arithmetic of pbConfigureFullScreen.
+metrics = Win32API.new('user32', 'GetSystemMetrics', 'I', 'I')
+screen = [metrics.call(0), metrics.call(1)]
+assert_eq(screen, [512, 747], 'GetSystemMetrics gives the display at the scale that fits the game')
+factor = [((2 * screen[0]) / 512).floor, ((2 * screen[1]) / 384).floor].min / 2.0
+offset_x = (screen[0] - 512 * factor) / (2 * factor)
+offset_y = (screen[1] - 384 * factor) / (2 * factor)
+assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 181.5], 'the full-screen resize factor and offsets are finite')
+
+# Zeus81's Fullscreen++ (EMPO-APP-8): borders_size and workarea_rect.
+window = [0, 0, 0, 0].pack('l4')
+client = [0, 0, 0, 0].pack('l4')
+Win32API.new('user32', 'GetWindowRect', 'ip', 'i').call(42, window)
+Win32API.new('user32', 'GetClientRect', 'ip', 'i').call(42, client)
+assert_eq(window.unpack('l4'), [0, 0, 512, 384], 'GetWindowRect gives the game window')
+assert_eq(client.unpack('l4'), window.unpack('l4'), 'the game window has no borders')
+work_area = [0, 0, 0, 0].pack('l4')
+spi = Win32API.new('user32', 'SystemParametersInfo', 'iipi', 'i')
+assert_eq(spi.call(0x30, 0, work_area, 0), 1, 'SPI_GETWORKAREA succeeds')
+assert_eq(work_area.unpack('l4'), [0, 0, 512, 747], 'the work area is the screen')
+
+command_line = Win32API.new('Kernel32', 'GetCommandLine', '', 'p').call
+assert_eq(command_line.scan(/console/), [], 'GetCommandLine gives a String without test-play flags')
+
+test_passed('test_win32_stubs', 96)
