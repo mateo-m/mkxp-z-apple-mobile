@@ -8,6 +8,7 @@
 #ifndef system_h
 #define system_h
 
+#include <TargetConditionals.h>
 #include <string>
 
 /* Platform identifier preserved for the Ruby-visible `System::platform`
@@ -36,6 +37,12 @@ int getScalingFactor();
 bool isWine();
 bool isRosetta();
 WineHostType getRealHostType();
+
+#if TARGET_OS_IPHONE
+/* Runs the main run loop until the app is not in the background.
+ * Call it on the main thread. */
+void waitUntilForeground();
+#endif
 }
 
 std::string getPlistValue(const char *key);

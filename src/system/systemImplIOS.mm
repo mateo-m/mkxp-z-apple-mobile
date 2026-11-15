@@ -77,6 +77,18 @@ systemImpl::WineHostType systemImpl::getRealHostType() {
     return WineHostType::Mac;
 }
 
+#if TARGET_OS_IPHONE
+void systemImpl::waitUntilForeground() {
+    // UIKit updates applicationState only when the main run loop
+    // runs, so a move to the background during a long main-thread
+    // task shows only after the queued events are handled.
+    while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) == kCFRunLoopRunHandledSource) {
+    }
+    while (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, true);
+}
+#endif
+
 void openSettingsWindow() {
     // No settings window on iOS
 }
