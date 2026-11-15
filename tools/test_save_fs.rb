@@ -666,4 +666,26 @@ Dir.chdir(GAME) do
   Dir.rmdir('Characters')
 end
 
-test_passed('test_save_fs', 395)
+# Every RGSS Ruby gives the nil or empty path to chdir, which refuses
+# it. Only Dir.chdir with no argument goes to HOME, and on a device
+# HOME is the app folder, not the game folder.
+Dir.chdir(GAME) do
+  { '1.8.1' => ['', "\0junk"], '1.9.3' => [''], '3.1.3' => [''] }.each do |version, empty_paths|
+    as_ruby_version(version) do
+      load_windows_fs!(false)
+      assert_eq(open_error { Dir.chdir(nil) }, TypeError, "Dir.chdir(nil) on Ruby #{version} raises TypeError")
+      assert_eq(open_error { Dir.chdir(nil) { nil } }, TypeError,
+                "Dir.chdir(nil) with a block on Ruby #{version} raises TypeError")
+      empty_paths.each do |path|
+        assert_eq(open_error { Dir.chdir(path) }, Errno::ENOENT, "Dir.chdir(#{path.inspect}) on Ruby #{version} raises ENOENT")
+        assert_eq(open_error { Dir.chdir(path) { nil } }, Errno::ENOENT,
+                  "Dir.chdir(#{path.inspect}) with a block on Ruby #{version} raises ENOENT")
+      end
+      assert_eq(Dir.pwd, GAME, "a refused Dir.chdir on Ruby #{version} stays in the game folder")
+      assert_eq(Dir.chdir { Dir.pwd }, File.realpath(ENV['HOME']), "Dir.chdir with no path on Ruby #{version} goes to HOME")
+    end
+  end
+  load_windows_fs!(false)
+end
+
+test_passed('test_save_fs', 415)
