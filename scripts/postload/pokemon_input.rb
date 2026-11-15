@@ -34,7 +34,9 @@ unless $PokemonSystem.nil?
       managed = MKXP.managed_config_dir.to_s
       unless managed.empty?
         marker = "#{managed}/.pokemon_essentials_detected"
-        File.write(marker, '') unless File.exist?(marker)
+        # rubocop:disable Style/FileWrite -- Ruby 1.8 has no File.write.
+        File.open(marker, 'w') { |file| file.write('') } unless File.exist?(marker)
+        # rubocop:enable Style/FileWrite
       end
     end
   rescue StandardError => e
