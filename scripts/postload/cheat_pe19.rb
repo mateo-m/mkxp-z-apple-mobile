@@ -95,7 +95,9 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
 
       case @cheat_window.index
       when 0
-        if ENABLE_GET_ITEM
+        # Essentials v17 makes $Trainer and the bag when the intro asks
+        # for the player's name, so the menu can open on a map before them.
+        if ENABLE_GET_ITEM && $Trainer
           @cheat_window.active = false
           @cheat_window.visible = false
           scene = SceneCheat_Items.new
