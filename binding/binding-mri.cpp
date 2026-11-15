@@ -2362,16 +2362,21 @@ static void mriBindingExecute() {
     Init_ext();
 #endif
 
-#if RAPI_FULL <= 187
-    /* RPG Maker XP and VX run Ruby 1.8.1, and this Ruby is 1.8.8.
-     * Zeus Video Player takes any version other than 1.8.1 for VX Ace
-     * and calls String#force_encoding, which Ruby 1.8 does not have. */
+#if RAPI_FULL < 200
+    /* RPG Maker XP and VX run Ruby 1.8.1, and VX Ace runs Ruby 1.9.2.
+     * These Rubies are 1.8.8 and 1.9.3. Zeus Video Player takes any
+     * version other than 1.8.1 for VX Ace, and Grim's console script
+     * finds VX Ace only by RUBY_VERSION == "1.9.2". */
     {
+#if RAPI_FULL <= 187
         VALUE rgssVersion = rb_obj_freeze(rb_str_new2("1.8.1"));
-        rb_const_remove(rb_cObject, rb_intern("RUBY_VERSION"));
         rb_const_remove(rb_cObject, rb_intern("VERSION"));
-        rb_define_global_const("RUBY_VERSION", rgssVersion);
         rb_define_global_const("VERSION", rgssVersion);
+#else
+        VALUE rgssVersion = rb_obj_freeze(rb_str_new2("1.9.2"));
+#endif
+        rb_const_remove(rb_cObject, rb_intern("RUBY_VERSION"));
+        rb_define_global_const("RUBY_VERSION", rgssVersion);
     }
 #endif
 
