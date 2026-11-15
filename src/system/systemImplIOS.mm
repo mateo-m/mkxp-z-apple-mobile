@@ -79,8 +79,9 @@ systemImpl::WineHostType systemImpl::getRealHostType() {
 
 #if TARGET_OS_IPHONE
 // UIKit updates applicationState and posts its notifications only when
-// the main run loop runs, so a move to the background during a long
-// main-thread task shows only after the queued events are handled.
+// the main run loop runs. UIKit can get a move to the background seconds
+// after the system moved the app, so a check before the audio open can
+// miss the move that makes the open fail.
 static void handleQueuedEvents() {
     while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) == kCFRunLoopRunHandledSource) {
     }
