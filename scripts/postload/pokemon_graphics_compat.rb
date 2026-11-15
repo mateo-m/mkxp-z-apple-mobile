@@ -400,6 +400,13 @@ if defined?(Bitmap) &&
       export(filename, &on_finish)
     end
 
+    # Some games call this name when `$MKXP` is set, and `export` on
+    # Windows. mkxp and mkxp-z never defined it, so write the Windows
+    # file.
+    def save_to_file(filename)
+      export(filename)
+    end
+
     def export_png(filename, &on_finish)
       to_file(filename)
       on_finish.call if on_finish
