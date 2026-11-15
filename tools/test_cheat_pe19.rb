@@ -3,7 +3,8 @@
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
 # Unit tests for the Pokemon Essentials cheat menu in cheat_pe19.rb:
-# Get Items and Heal Party before and after the game makes the player.
+# Get Items and Heal Party before the game makes the player, and
+# with the player globals of Essentials v17 ($Trainer) and v21 ($player).
 # Run: ruby tools/test_cheat_pe19.rb
 
 require_relative 'assertion_count'
@@ -105,7 +106,7 @@ assert_eq(choose(0), -1, 'Get Items with no player closes the menu')
 assert_eq($marts, [], 'Get Items with no player opens no mart')
 assert_eq(choose(1), -1, 'Heal Party with no player closes the menu')
 
-# --- After the player exists ---
+# --- Essentials v17 to v20: $Trainer ---
 pokemon = Pokemon.new
 $Trainer = Trainer.new(0, [pokemon])
 assert_eq(choose(0), -1, 'Get Items with a player closes the menu after the mart')
@@ -113,4 +114,11 @@ assert_eq($marts, [[1]], 'Get Items with a player opens the mart with every name
 choose(1)
 assert_eq(pokemon.healed, true, 'Heal Party heals the party of $Trainer')
 
-test_passed('test_cheat_pe19', 6)
+# --- Essentials v21: $player, no $Trainer ---
+$Trainer = nil
+pokemon = Pokemon.new
+$player = Trainer.new(0, [pokemon])
+choose(1)
+assert_eq(pokemon.healed, true, 'Heal Party heals the party of $player')
+
+test_passed('test_cheat_pe19', 7)
