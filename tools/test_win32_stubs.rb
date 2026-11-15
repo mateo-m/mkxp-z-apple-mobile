@@ -580,7 +580,7 @@ offset_x = (screen[0] - 512 * factor) / (2 * factor)
 offset_y = (screen[1] - 384 * factor) / (2 * factor)
 assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 181.5], 'the full-screen resize factor and offsets are finite')
 
-# Zeus81's Fullscreen++ (EMPO-APP-8): borders_size and workarea_rect.
+# Zeus81's Fullscreen++ for VX Ace: borders_size and workarea_rect.
 window = [0, 0, 0, 0].pack('l4')
 client = [0, 0, 0, 0].pack('l4')
 Win32API.new('user32', 'GetWindowRect', 'ip', 'i').call(42, window)
