@@ -89,7 +89,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
 
       return unless Input.trigger?(Input::C)
 
-      # Essentials v17 makes $Trainer and the bag when the intro asks
+      # Essentials v16 to v18 make $Trainer and the bag when the intro asks
       # for the player's name, so the menu can open on a map before them.
       # Essentials v21 has only $player.
       player = $player || $Trainer

@@ -115,10 +115,20 @@ choose(1)
 assert_eq(pokemon.healed, true, 'Heal Party heals the party of $Trainer')
 
 # --- Essentials v21: $player, no $Trainer ---
+# Essentials v21 reads the money of $player (UI_PokeMart getMoney).
+class PokemonMartAdapter
+  def getMoney
+    $player.money
+  end
+end
+
 $Trainer = nil
+$marts = []
 pokemon = Pokemon.new
 $player = Trainer.new(0, [pokemon])
+assert_eq(choose(0), -1, 'Get Items with $player closes the menu after the mart')
+assert_eq($marts, [[1]], 'Get Items with $player opens the mart with every named item')
 choose(1)
 assert_eq(pokemon.healed, true, 'Heal Party heals the party of $player')
 
-test_passed('test_cheat_pe19', 7)
+test_passed('test_cheat_pe19', 9)
