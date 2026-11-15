@@ -568,4 +568,49 @@ Dir.chdir(GAME) do
   Dir.rmdir('Characters')
 end
 
-test_passed('test_save_fs', 315)
+def as_ruby_version(version)
+  real = RUBY_VERSION
+  prev_verbose = $VERBOSE
+  $VERBOSE = nil
+  Object.send(:remove_const, :RUBY_VERSION)
+  Object.const_set(:RUBY_VERSION, version)
+  yield
+ensure
+  Object.send(:remove_const, :RUBY_VERSION)
+  Object.const_set(:RUBY_VERSION, real)
+  $VERBOSE = prev_verbose
+end
+
+def open_error
+  yield
+  nil
+rescue StandardError => e
+  e.class
+end
+
+# Ruby 1.8.1 of RGSS1 and RGSS2 gives the string to fopen, so the path
+# ends at the first NUL. GS Vitro's safeExists? rescues only Errno.
+Dir.chdir(GAME) do
+  File.open('Battler.png', 'wb') { |f| f.write('x') }
+  Dir.mkdir('Characters')
+  as_ruby_version('1.8.1') do
+    opened = false
+    File.open("Battler.png\0junk", 'rb') { opened = true }
+    assert_true(opened, 'File.open on Ruby 1.8 opens the path before the NUL')
+    file = File.new("Battler.png\0junk", 'rb')
+    assert_eq(file.read, 'x', 'File.new on Ruby 1.8 opens the path before the NUL')
+    file.close
+    assert_eq(open_error { File.open("Missing.png\0junk", 'rb') { nil } }, Errno::ENOENT,
+              'File.open on Ruby 1.8 with a NUL and no file raises ENOENT')
+    assert_eq(open_error { File.new("Missing.png\0junk", 'rb') }, Errno::ENOENT,
+              'File.new on Ruby 1.8 with a NUL and no file raises ENOENT')
+    assert_eq(open_error { File.open("Characters/\0junk", 'rb') { nil } }, Errno::EACCES,
+              'File.open on Ruby 1.8 with a NUL after a folder raises EACCES')
+  end
+  assert_eq(open_error { File.open("Battler.png\0junk", 'rb') { nil } }, ArgumentError,
+            'File.open on Ruby 1.9 and later refuses a NUL, like RGSS3')
+  Dir.rmdir('Characters')
+  File.delete('Battler.png')
+end
+
+test_passed('test_save_fs', 321)

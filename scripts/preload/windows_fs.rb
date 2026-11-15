@@ -619,6 +619,16 @@ unless defined?(MKXPSaveFS)
       change_spelling(target)
     end
 
+    # Ruby 1.8.1 of RGSS1 and RGSS2 gives the string to fopen with no
+    # NUL check, so the path ends at the first NUL. Ruby 1.8.8 and
+    # Ruby 1.9.2 of RGSS3 raise ArgumentError.
+    def fopen_path(path)
+      return path unless RUBY_VERSION < '1.9' && path.is_a?(String)
+
+      nul = path.index("\0")
+      nul ? path[0, nul] : path
+    end
+
     def refuse_directory(target)
       raise Errno::EACCES, target if target.is_a?(String) && File.directory?(target)
 
@@ -1258,6 +1268,7 @@ class << File
   alias _mkxp_orig_mtime mtime unless method_defined?(:_mkxp_orig_mtime)
 
   def open(path, *args)
+    path = MKXPSaveFS.fopen_path(path)
     args = MKXPTextMode.read_args(args)
     target = MKXPSaveFS.open_target(path, args[0])
     started = false
@@ -1292,6 +1303,7 @@ class << File
   end
 
   def new(path, *args)
+    path = MKXPSaveFS.fopen_path(path)
     args = MKXPTextMode.read_args(args)
     _mkxp_orig_new(MKXPSaveFS.open_target(path, args[0]), *args)
   rescue Errno::ENOENT
