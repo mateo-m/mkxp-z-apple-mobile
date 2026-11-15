@@ -3,7 +3,11 @@
 
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
+#import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
+#define AL_ALEXT_PROTOTYPES
+#include <alc.h>
+#include <alext.h>
 #else
 #import <AppKit/AppKit.h>
 #endif
@@ -80,31 +84,86 @@ systemImpl::WineHostType systemImpl::getRealHostType() {
 #if TARGET_OS_IPHONE
 // UIKit updates applicationState and posts its notifications only when
 // the main run loop runs. UIKit can get a move to the background seconds
-// after the system moved the app, so a check before the audio open can
-// miss the move that makes the open fail.
+// after the system moved the app.
 static void handleQueuedEvents() {
     while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) == kCFRunLoopRunHandledSource) {
     }
 }
 
-void systemImpl::waitUntilForeground() {
-    handleQueuedEvents();
-    while (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, true);
+// iOS refuses the session while the app is in the background or an
+// interruption is on.
+static bool iosAllowsSound() {
+    return UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
+           [AVAudioSession.sharedInstance setActive:YES error:nil];
 }
 
-unsigned systemImpl::backgroundMoveCount() {
-    static unsigned moves;
-    static id observer = [NSNotificationCenter.defaultCenter
-        addObserverForName:UIApplicationDidEnterBackgroundNotification
-                    object:nil
-                     queue:nil
-                usingBlock:^(NSNotification *) {
-                  moves++;
-                }];
-    (void)observer;
+static unsigned soundEvents;
+static ALCdevice *interruptibleDevice;
+static bool devicePaused;
+
+// OpenAL Soft on iOS does not start its output again after an
+// interruption. A start that iOS refuses disconnects the device, and a
+// disconnected device cannot resume, so the resume waits until iOS
+// allows sound.
+static void resumeDevice() {
+    if (!devicePaused || !iosAllowsSound())
+        return;
+    devicePaused = false;
+    alcDeviceResumeSOFT(interruptibleDevice);
+}
+
+unsigned systemImpl::soundEventCount() {
+    static bool watching;
+    if (!watching) {
+        watching = true;
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        NSOperationQueue *main = NSOperationQueue.mainQueue;
+        [center addObserverForName:UIApplicationWillResignActiveNotification
+                            object:nil
+                             queue:main
+                        usingBlock:^(NSNotification *) {
+                          soundEvents++;
+                        }];
+        [center addObserverForName:UIApplicationDidBecomeActiveNotification
+                            object:nil
+                             queue:main
+                        usingBlock:^(NSNotification *) {
+                          soundEvents++;
+                          resumeDevice();
+                        }];
+        // iOS can send a start with no end, so the end is not the only
+        // event that resumes the device.
+        [center addObserverForName:AVAudioSessionInterruptionNotification
+                            object:nil
+                             queue:main
+                        usingBlock:^(NSNotification *note) {
+                          soundEvents++;
+                          if ([note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] !=
+                              AVAudioSessionInterruptionTypeBegan) {
+                              resumeDevice();
+                          } else if (interruptibleDevice && !devicePaused) {
+                              alcDevicePauseSOFT(interruptibleDevice);
+                              devicePaused = true;
+                          }
+                        }];
+    }
+    return soundEvents;
+}
+
+bool systemImpl::waitForSoundEvent(unsigned since) {
     handleQueuedEvents();
-    return moves;
+    if (soundEvents == since && iosAllowsSound())
+        return false;
+    // A timeout this long never ends. The run returns after each source
+    // that it handles, and each notification comes from one.
+    while (soundEvents == since)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0e10, true);
+    return true;
+}
+
+void systemImpl::pauseDuringInterruptions(ALCdevice *device) {
+    interruptibleDevice = device;
+    devicePaused = false;
 }
 #endif
 
