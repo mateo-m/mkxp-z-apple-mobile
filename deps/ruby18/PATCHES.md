@@ -29,7 +29,21 @@ platform triplets like `aarch64-apple-darwin`. We replaced both files
 with current versions from the GNU config project so that `./configure
 --host=aarch64-apple-darwin` works correctly.
 
-These are the ONLY modifications to the JoiPlay Ruby 1.8 source.
+### `lazy-sweep.patch`: sweep in small steps
+
+A collection only marks. `rb_newobj()` then sweeps a small part of
+the heap at each call, so one collection does not stop the game.
+
+A live object keeps its mark bit until the sweep gets to its slot.
+`OBJSETUP` and `rb_obj_clone()` copy the flags of another object, so
+the patch removes the mark bit from the copy. Without that, the next
+collection does not mark what the copy holds and frees it. For
+example, the clone of a playing sound loses its name.
+
+A collection can also start while `rb_obj_clone()` makes the
+singleton class of the clone. That collection marks the clone, so
+the clone keeps its own mark bit. Without it, the sweep frees the
+clone itself.
 
 ### Engine-side accommodations (in mkxp-z, not in Ruby source)
 
