@@ -159,21 +159,37 @@ end
 load File.join(SCRIPTS, 'preload', 'mkxp_wrap.rb')
 load File.join(SCRIPTS, 'postload', "#{NAME}.rb")
 
-# The real menus draw windows. Only the call matters here.
+# The real menus draw windows. Only the call matters here. The
+# Essentials menu runs pbUpdateSceneMap on each of its frames, which
+# runs Scene_Map#updateMaps again.
+$menus_opened = 0
+$tap_in_menu = false
+MAP = Scene_Map.new
+
 class Scene_Cheat
   def main
-    $scene = Scene_Cheat
+    $menus_opened += 1
+    return unless $tap_in_menu
+
+    $tap_in_menu = false
+    Input.hold
+    MAP.updateMaps
+    Input.hold(Input::HOME)
+    MAP.updateMaps
   end
 end
 
+# The XP, VX and VX Ace menus open as the next scene.
 def map_frame
+  before = $menus_opened
   $scene = nil
   if NAME == 'cheat_pe19'
-    Scene_Map.new.updateMaps
+    MAP.updateMaps
   else
     Game_Player.new.update
   end
-  $scene == Scene_Cheat || $scene.is_a?(Scene_Cheat)
+  $menus_opened += 1 if $scene == Scene_Cheat || $scene.is_a?(Scene_Cheat)
+  $menus_opened > before
 end
 
 System.cheats = false
@@ -182,7 +198,11 @@ map_frame
 Input.hold(Input::HOME)
 assert_eq(map_frame, false, 'HOME with cheats off opens no menu')
 
+# The app turns cheats on and taps HOME at almost the same time.
 System.cheats = true
+Input.hold(Input::HOME)
+assert_eq(map_frame, true, 'cheats on while HOME is held opens the menu')
+
 Input.hold
 map_frame
 Input.hold(Input::HOME)
@@ -201,4 +221,11 @@ assert_eq(map_frame, true, 'HOME after a second Input.update opens the menu')
 Input.hold(Input::C)
 assert_eq(map_frame, false, 'another key opens no menu')
 
-test_passed(NAME, 5)
+Input.hold
+map_frame
+$tap_in_menu = true
+Input.hold(Input::HOME)
+map_frame
+assert_eq($menus_opened, 4, 'HOME in the open menu opens no second menu')
+
+test_passed(NAME, 7)
