@@ -4,7 +4,7 @@
 
 # Unit tests for the HOME key check of the four cheat menus, with a
 # game script that replaces Input.trigger? in the shape of Yanfly's
-# "YEA - Debug Extension" (Sentry EMPO-APP-2A). That script sends
+# "YEA - Debug Extension". That script sends
 # each key it does not know to `key.between?(130, 158)`, so a Symbol
 # such as :HOME raises ArgumentError, and an Integer such as 43 reads
 # a Windows key that is never down.
