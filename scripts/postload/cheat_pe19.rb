@@ -10,9 +10,7 @@
 #
 # Design notes: we keep the original class / method names so that
 # games defining their own Window_CommandPokemon / PokemonMartScreen
-# variants plug in unchanged. The engine-injected HOME keypress
-# from the iOS toolbar flows through the same Input.trigger?(HOME)
-# gate the JoiPlay build uses.
+# variants plug in unchanged.
 
 if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
   MKXP.puts('[cheats] loading Pokemon Essentials cheat menu')
@@ -143,7 +141,7 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
   class Scene_Map
     alias cheatUpdateMaps updateMaps unless method_defined?(:cheatUpdateMaps)
     def updateMaps
-      if Input.trigger?(Input::HOME) && MKXP.cheats_enabled?
+      if MKXP.cheat_menu_requested?
         $game_temp.menu_calling = false if $game_temp
         $game_temp.in_menu = true if $game_temp && $game_temp.respond_to?(:in_menu=)
         $game_player.straighten if $game_player
