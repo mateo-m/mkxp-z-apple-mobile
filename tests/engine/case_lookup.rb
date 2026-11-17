@@ -172,10 +172,10 @@ EngineTest.test('an empty path names no file or folder') do
     %w[exist? file? directory?].each do |name|
       EngineTest.assert_equal(false, receiver.send(name, ''), "#{receiver}.#{name}")
     end
-    # Ruby 3.1 keeps exists? only for a script that the syntax transform parsed.
-    EngineTest.assert_equal(false, receiver.send(:exists?, ''), "#{receiver}.exists?") if RUBY_VERSION < '3'
+    # From Ruby 3.2, exists? works only in a script that the syntax transform parsed.
+    EngineTest.assert_equal(false, receiver.send(:exists?, ''), "#{receiver}.exists?") if RUBY_VERSION < '3.2'
   end
-  EngineTest.assert_equal(false, Dir.exist?(''), 'Dir.exist?') if Dir.respond_to?(:exist?)
+  EngineTest.assert_equal(false, Dir.exist?(''), 'Dir.exist?')
 end
 # rubocop:enable Style/FileWrite, Style/NumericLiteralPrefix
 # rubocop:enable Security/IoMethods, Security/Open

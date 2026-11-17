@@ -1015,8 +1015,7 @@ std::string FileSystem::normalize(const char *pathname, bool preferred,
   return filesystemImpl::normalizePath(pathname, preferred, absolute);
 }
 
-// PhysFS reads an empty path as the root of the game folder, and
-// "./" normalizes to an empty path.
+// PhysFS reads an empty path as the root of the game folder.
 bool FileSystem::exists(const char *filename) {
   std::string normalized = normalize(filename, false, false);
   if (normalized.empty())
