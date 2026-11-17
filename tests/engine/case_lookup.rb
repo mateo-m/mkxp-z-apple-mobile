@@ -18,7 +18,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('case-lookup', 9)
+EngineTest.suite('case-lookup', 10)
 
 EngineTest.load_preloads(%w[windows_fs])
 
@@ -162,6 +162,20 @@ EngineTest.test('a missing file still raises ENOENT') do
   EngineTest.assert_raises('No such file', 'File.mtime') { File.mtime("#{LOOKUP_DIR_VARIANT}/missing.txt") }
   EngineTest.assert_raises('No such file', 'File.read') { File.read("#{LOOKUP_DIR_VARIANT}/missing.txt") }
   EngineTest.assert_equal(nil, File.size?("#{LOOKUP_DIR_VARIANT}/missing.txt"), 'File.size?')
+end
+
+# Pokemon Ancient Platinum calls File.delete(path) if File.exist?(path)
+# with an empty path, and the engine's game folder lookup reads an
+# empty path as the game folder itself.
+EngineTest.test('an empty path names no file or folder') do
+  [File, FileTest].each do |receiver|
+    %w[exist? file? directory?].each do |name|
+      EngineTest.assert_equal(false, receiver.send(name, ''), "#{receiver}.#{name}")
+    end
+    # Ruby 3.1 keeps exists? only for a script that the syntax transform parsed.
+    EngineTest.assert_equal(false, receiver.send(:exists?, ''), "#{receiver}.exists?") if RUBY_VERSION < '3'
+  end
+  EngineTest.assert_equal(false, Dir.exist?(''), 'Dir.exist?') if Dir.respond_to?(:exist?)
 end
 # rubocop:enable Style/FileWrite, Style/NumericLiteralPrefix
 # rubocop:enable Security/IoMethods, Security/Open
