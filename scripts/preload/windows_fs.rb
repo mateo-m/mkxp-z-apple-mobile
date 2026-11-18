@@ -94,7 +94,7 @@ unless defined?(MKXPSaveFS)
     PORTABLE_SAVE_DIR = 'Save Data'.freeze
     PORTABLE_PREFIX = "#{PORTABLE_SAVE_DIR}/".freeze
     ENGINE_DIR_ENTRY_RE = /\Akeybindings\.mkxp\d+\z/.freeze
-    SAFE_WRITE_ENTRY_RE = /\A.+\.mkxp-(?:tmp|restore)\z/.freeze
+    SAFE_WRITE_ENTRY_RE = /\A.+\.mkxp-(?:tmp|restore|rejected)\z/.freeze
     # Rooted path: "/...", "\...", or a Windows drive prefix.
     ABSOLUTE_PATH_RE = %r{\A(?:[A-Za-z]:[\\/]|[\\/])}.freeze
 
@@ -1033,7 +1033,7 @@ unless defined?(MKXPSafeWrite)
     MODE_BITS = 0xFFF
     CHUNK = 65_536
     # Most file systems stop at 255 bytes in one name.
-    NAME_MAX = 255 - '.mkxp-restore'.length
+    NAME_MAX = 255 - '.mkxp-rejected'.length
     LOCK = defined?(Mutex) ? Mutex.new : nil
 
     module_function
@@ -1052,6 +1052,7 @@ unless defined?(MKXPSafeWrite)
       return false unless File._mkxp_orig_directory(dir) && File.writable?(dir)
       return false if File._mkxp_orig_directory(temp_path(target))
       return false if File._mkxp_orig_directory(temp_path(target, 'restore'))
+      return false if File._mkxp_orig_directory(temp_path(target, 'rejected'))
       return false if File.symlink?(target)
       return create_mode?(mode) unless File._mkxp_orig_exist(target)
 
@@ -1282,10 +1283,12 @@ unless defined?(MKXPSafeWrite)
       remove(temp_path(target, 'restore'))
       mode = File._mkxp_orig_exist(target) ? File.stat(target).mode & MODE_BITS : nil
       failed = false
+      watch = nil
       begin
         File._mkxp_orig_open(temp, *temp_args(args)) do |file|
           File.chmod(mode, temp) if mode
           show_target_path(file, asked)
+          watch = MKXPSaveCheck.watch(file)
           result = yield file
           finish(file, temp)
           result
@@ -1296,20 +1299,24 @@ unless defined?(MKXPSafeWrite)
       ensure
         # A throw, a break, or a return in the block raises nothing.
         # The new file then replaces the target, as a direct write does.
-        begin
-          # Thread#kill and an exit from another thread raise nothing
-          # in this thread.
-          if failed || MKXPSafeWrite.killed?
-            remove(temp)
-          else
-            finish_rename(temp, target)
-          end
-        ensure
-          # A case lookup inside the block can list the folder before
-          # the target is there.
-          MKXPSaveFS.bump_fs_generation!
-        end
+        settle(temp, target, failed, watch)
       end
+    end
+
+    def settle(temp, target, failed, watch)
+      # Thread#kill and an exit from another thread raise nothing in
+      # this thread.
+      if failed || MKXPSafeWrite.killed?
+        remove(temp)
+      elsif (problem = MKXPSaveCheck.problem(temp, watch))
+        MKXPSaveCheck.reject(temp, target, problem)
+      else
+        finish_rename(temp, target)
+      end
+    ensure
+      # A case lookup inside the block can list the folder before the
+      # target is there.
+      MKXPSaveFS.bump_fs_generation!
     end
   end
 end

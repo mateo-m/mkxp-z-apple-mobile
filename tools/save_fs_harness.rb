@@ -47,6 +47,9 @@ ROOT = File.expand_path('..', __dir__)
 WORK = File.expand_path('test_save_fs_workspace', __dir__)
 USERDATA = File.join(WORK, 'UserData')
 GAME = File.join(WORK, 'Game')
+# What the preloads send to System.report_save_load and
+# System.report_save_rejected.
+SAVE_REPORTS = []
 
 def reset_workspace!
   FileUtils.rm_rf(WORK)
@@ -82,6 +85,8 @@ def load_windows_fs!(joiplay = false)
     define_method(:data_directory) { USERDATA }
     define_method(:puts) { |*args| Kernel.puts(*args) }
     define_method(:joiplay_compat?) { joiplay }
+    define_method(:report_save_load) { |name| SAVE_REPORTS << [:load, name] }
+    define_method(:report_save_rejected) { |detail| SAVE_REPORTS << [:rejected, detail] }
   end)
   unless Kernel.private_method_defined?(:load_data)
     Kernel.module_eval do
@@ -95,6 +100,7 @@ def load_windows_fs!(joiplay = false)
   prev_verbose = $VERBOSE
   $VERBOSE = nil
   begin
+    load File.join(ROOT, 'scripts', 'preload', 'save_check.rb')
     load File.join(ROOT, 'scripts', 'preload', 'windows_fs.rb')
   ensure
     $VERBOSE = prev_verbose

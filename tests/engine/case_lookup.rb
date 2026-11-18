@@ -20,7 +20,7 @@ end
 
 EngineTest.suite('case-lookup', 10)
 
-EngineTest.load_preloads(%w[windows_fs])
+EngineTest.load_preloads(%w[save_check windows_fs])
 
 # The suite calls IO and Kernel#open on purpose, because games do.
 # rubocop:disable Security/IoMethods, Security/Open

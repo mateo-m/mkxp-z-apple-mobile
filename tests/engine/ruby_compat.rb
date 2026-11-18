@@ -95,7 +95,7 @@ EngineTest.test('$userAgentVersion is a frozen "unknown" when the launcher passe
   EngineTest.assert_equal(true, $userAgentVersion.frozen?, '$userAgentVersion.frozen?')
 end
 
-EngineTest.load_preloads(%w[windows_fs platform_compat])
+EngineTest.load_preloads(%w[save_check windows_fs platform_compat])
 
 # Essentials writes $game_variables with Marshal.dump. A missing
 # constant turns into IOS::NullStub, and a variable can hold it.
