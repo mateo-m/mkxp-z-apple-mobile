@@ -30,6 +30,7 @@
 #include "etc-internal.h"
 #include "eventthread.h"
 #include "filesystem.h"
+#include "framerateaverage.h"
 #include "gl-fun.h"
 #include "gl-util.h"
 #include "glstate.h"
@@ -496,8 +497,7 @@ struct GraphicsPrivate {
     bool integerScaleActive;
     bool integerLastMileScaling;
     
-    std::vector<double> avgFPSData;
-    double last_avg_update;
+    FrameRateAverage frameRateAverage;
     Uint64 avgFPSStart;
     SDL_mutex *avgFPSLock;
 
@@ -521,11 +521,10 @@ struct GraphicsPrivate {
     multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
-    last_update(0), last_delta(0), last_avg_update(0), avgFPSStart(SDL_GetPerformanceCounter()), backingScaleFactor(1), integerScaleFactor(0, 0),
+    last_update(0), last_delta(0), avgFPSStart(SDL_GetPerformanceCounter()), backingScaleFactor(1), integerScaleFactor(0, 0),
     glResourceLockOwner(0), glResourceLockDepth(0),
     integerScaleActive(rtData->config.integerScaling.active),
     integerLastMileScaling(rtData->config.integerScaling.lastMileScaling) {
-        avgFPSData = std::vector<double>();
         avgFPSLock = SDL_CreateMutex();
         glResourceLock = SDL_CreateMutex();
         
@@ -1093,12 +1092,8 @@ struct GraphicsPrivate {
     }
     
     double averageFPS() {
-        double ret = 0;
         SDL_LockMutex(avgFPSLock);
-        for (double times : avgFPSData)
-            ret += times;
-        
-        ret = 1 / (ret / avgFPSData.size());
+        double ret = frameRateAverage.average();
         SDL_UnlockMutex(avgFPSLock);
         return ret;
     }
@@ -1133,16 +1128,15 @@ struct GraphicsPrivate {
         SDL_UnlockMutex(glResourceLock);
     }
 
+    // Use real time here. Fast-forward speeds up shState->runTime(),
+    // and this rate must count the frames that the screen shows.
+    double avgFPSSeconds() const {
+        return (double)(SDL_GetPerformanceCounter() - avgFPSStart) / SDL_GetPerformanceFrequency();
+    }
+
     void updateAvgFPS() {
         SDL_LockMutex(avgFPSLock);
-        if (avgFPSData.size() > 40)
-            avgFPSData.erase(avgFPSData.begin());
-        
-        // Use real time here. Fast-forward speeds up shState->runTime(),
-        // and this rate must count the frames that the screen shows.
-        double time = (double)(SDL_GetPerformanceCounter() - avgFPSStart) / SDL_GetPerformanceFrequency();
-        avgFPSData.push_back(time - last_avg_update);
-        last_avg_update = time;
+        frameRateAverage.frameShown(avgFPSSeconds());
         SDL_UnlockMutex(avgFPSLock);
     }
 
@@ -1248,6 +1242,10 @@ struct GraphicsPrivate {
 
         /* Reset frame timing so the limiter doesn't try to catch up. */
         fpsLimiter.resetFrameAdjust();
+
+        SDL_LockMutex(avgFPSLock);
+        frameRateAverage.restart(avgFPSSeconds());
+        SDL_UnlockMutex(avgFPSLock);
     }
 
     /* Call right after every swap. */
