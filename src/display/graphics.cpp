@@ -1157,6 +1157,7 @@ struct GraphicsPrivate {
         GLMeta::blitEnd();
 
         swapGLBuffer();
+        updateAvgFPS();
         framePresented(frozenScene);
     }
 
@@ -1239,9 +1240,13 @@ struct GraphicsPrivate {
         }
 
         mkxp_checkPause();
+        resetFrameTiming();
+    }
 
-        /* Reset frame timing so the limiter doesn't try to catch up. */
+    /* After the game thread waited, so that the wait counts as no frame. */
+    void resetFrameTiming() {
         fpsLimiter.resetFrameAdjust();
+        last_update = shState->runTime();
 
         SDL_LockMutex(avgFPSLock);
         frameRateAverage.restart(avgFPSSeconds());
@@ -1345,7 +1350,6 @@ void Graphics::update(bool checkForShutdown) {
         p->blitFrozenSceneToScreen();
         ++p->frameCount;
         p->threadData->ethread->notifyFrame();
-        p->updateAvgFPS();
         return;
     }
     
@@ -1524,7 +1528,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
     p->frozen = false;
 }
 
-void Graphics::frameReset() {p->fpsLimiter.resetFrameAdjust();}
+void Graphics::frameReset() { p->resetFrameTiming(); }
 
 static void guardDisposed() {}
 

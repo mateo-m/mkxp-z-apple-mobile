@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-/*
-** Pokémon Unbreakable Ties divides its camera step by
-** Graphics.average_frame_rate. When a long pause counted as one frame,
-** the step grew past 1 and the camera position grew until Plane#ox=
-** raised a RangeError (Sentry EMPO-APP-3E).
-*/
-
 #include "harness.h"
 
 #include "display/framerateaverage.h"

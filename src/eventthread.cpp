@@ -847,6 +847,7 @@ void EventThread::showMessageBox(const char *body, int flags)
             mkxp_presentInfoAndWait(body);
         else
             mkxp_presentErrorAndWait(body);
+        shState->graphics().frameReset();
     }
     return;
 #else
