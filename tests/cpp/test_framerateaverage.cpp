@@ -97,6 +97,7 @@ TEST(awayclock_counts_overlapping_spans_once)
 
     clock.comeBack(at(30));
     CHECK(near(clock.seconds(at(31)), 11));
+    CHECK(clock.comebacks() == 1);
 }
 
 TEST(awayclock_ignores_a_come_back_with_no_leave)
@@ -107,6 +108,7 @@ TEST(awayclock_ignores_a_come_back_with_no_leave)
     clock.comeBack(at(20));
 
     CHECK(near(clock.seconds(at(21)), 11));
+    CHECK(clock.comebacks() == 1);
 }
 
 TEST(framerateaverage_on_the_away_clock_does_not_count_a_pause)

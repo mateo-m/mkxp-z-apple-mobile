@@ -26,8 +26,13 @@ public:
         if (depth == 0)
             return;
         if (--depth == 0)
+        {
             away += now - leftAt;
+            ++comebackCount;
+        }
     }
+
+    unsigned comebacks() const { return comebackCount; }
 
     double seconds(Clock::time_point now) const
     {
@@ -42,6 +47,7 @@ private:
     Clock::time_point leftAt;
     Clock::duration away{};
     int depth = 0;
+    unsigned comebackCount = 0;
 };
 
 #endif // AWAYCLOCK_H

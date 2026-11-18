@@ -325,6 +325,8 @@ struct FPSLimiter {
     const double tickFreqNS;
     
     bool disabled;
+
+    unsigned comebacks = 0;
     
     /* Data for frame timing adjustment */
     struct {
@@ -362,6 +364,15 @@ struct FPSLimiter {
     void delay() {
         if (disabled)
             return;
+
+        /* Start again from now after the engine was away, or the
+         * limiter catches up on that time by skipping frames. */
+        unsigned seen = mkxp_engineComebacks();
+        if (seen != comebacks) {
+            comebacks = seen;
+            lastTickCount = adj.last = SDL_GetPerformanceCounter();
+            adj.idealDiff = 0;
+        }
         
         int64_t tickDelta = SDL_GetPerformanceCounter() - lastTickCount;
         // Runtime fast-forward (host bridge): scale target ticks-per-
@@ -1243,9 +1254,6 @@ struct GraphicsPrivate {
         }
 
         mkxp_checkPause();
-
-        /* Reset frame timing so the limiter doesn't try to catch up. */
-        fpsLimiter.resetFrameAdjust();
     }
 
     /* Call right after every swap. */

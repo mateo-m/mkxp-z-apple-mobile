@@ -278,6 +278,11 @@ double mkxp_engineSeconds(void) {
     return s_awayClock.seconds(AwayClock::Clock::now());
 }
 
+unsigned mkxp_engineComebacks(void) {
+    std::lock_guard<std::mutex> lock(s_awayMutex);
+    return s_awayClock.comebacks();
+}
+
 // Snapshot buffer: owned by the bridge, written by engine, read by UI.
 static std::mutex s_snapshotMutex;
 static std::vector<unsigned char> s_snapshotData;
