@@ -16,7 +16,6 @@
 #define IOS_BRIDGE_H
 
 #include <stdbool.h>
-#include <time.h>
 
 // MKXPZ_MOBILE - 1 on platforms where a host app embeds the engine
 // (iOS, iPadOS, tvOS and macOS), 0 elsewhere. Overridable from the
@@ -682,6 +681,8 @@ int         mkxp_debugLogEnabled(void);
 #endif
 
 #else /* !MKXPZ_MOBILE */
+
+#include <time.h>
 
 // ---------------------------------------------------------------------------
 // Inert stubs (desktop and every non-mobile platform).

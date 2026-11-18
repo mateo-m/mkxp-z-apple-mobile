@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -150,8 +151,13 @@ static void answerGameDialog(const char *message, void *userdata) {
     double first = 0, second = 0;
     if (sscanf(message, "pause-cancel %lf %lf", &first, &second) == 2) {
         mkxp_signalInfoDismissed();
-        after(first, ^{ mkxp_requestPause(); });
-        after(first + second, ^{ mkxp_requestResume(); });
+        // One timer, because a late second timer would let the engine
+        // reach a frame while the pause is still asked for.
+        after(first, ^{
+            mkxp_requestPause();
+            usleep((useconds_t)(second * 1e6));
+            mkxp_requestResume();
+        });
     } else if (sscanf(message, "pause %lf", &first) == 1) {
         mkxp_requestPause();
         mkxp_signalInfoDismissed();
