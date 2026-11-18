@@ -1096,6 +1096,14 @@ struct GraphicsPrivate {
         SDL_UnlockMutex(avgFPSLock);
         return ret;
     }
+
+    /* Under avgFPSLock, because the host reads frameRate through
+     * averageFPS() from its own thread. */
+    void storeFrameRate(int value) {
+        SDL_LockMutex(avgFPSLock);
+        frameRate = value;
+        SDL_UnlockMutex(avgFPSLock);
+    }
     
     void setLock(bool force = false) {
         if (!(force || multithreadedMode)) return;
@@ -1281,7 +1289,7 @@ Graphics::Graphics(RGSSThreadData *data) {
         // dictates game speed. Initial target is the display
         // refresh - the game's first `Graphics.frame_rate = N`
         // call updates it to the right value via setFrameRate.
-        p->frameRate = data->refreshRate;
+        p->storeFrameRate(data->refreshRate);
         p->fpsLimiter.setDesiredFPS(data->refreshRate);
     }
 }
@@ -1524,7 +1532,7 @@ DEF_ATTR_RD_SIMPLE(Graphics, FrameRate, int, p->frameRate)
 DEF_ATTR_SIMPLE(Graphics, FrameCount, int, p->frameCount)
 
 void Graphics::setFrameRate(int value) {
-    p->frameRate = std::max(value, 1);
+    p->storeFrameRate(std::max(value, 1));
 
     // fixedFramerate>0 means the user / mkxp.json explicitly
     // pinned a target FPS; respect that and ignore the game's
