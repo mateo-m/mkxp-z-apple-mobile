@@ -1239,17 +1239,18 @@ struct GraphicsPrivate {
             mkxp_setSnapshot(pixels.data(), w, h);
         }
 
+        double pausedAt = avgFPSSeconds();
+        double runTimeAtPause = shState->runTime();
         mkxp_checkPause();
-        resetFrameTiming();
-    }
 
-    /* After the game thread waited, so that the wait counts as no frame. */
-    void resetFrameTiming() {
+        /* Reset frame timing so the limiter doesn't try to catch up. */
         fpsLimiter.resetFrameAdjust();
-        last_update = shState->runTime();
+
+        if (last_update > 0)
+            last_update += shState->runTime() - runTimeAtPause;
 
         SDL_LockMutex(avgFPSLock);
-        frameRateAverage.restart(avgFPSSeconds());
+        frameRateAverage.skip(avgFPSSeconds() - pausedAt);
         SDL_UnlockMutex(avgFPSLock);
     }
 
@@ -1528,7 +1529,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
     p->frozen = false;
 }
 
-void Graphics::frameReset() { p->resetFrameTiming(); }
+void Graphics::frameReset() {p->fpsLimiter.resetFrameAdjust();}
 
 static void guardDisposed() {}
 

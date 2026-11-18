@@ -19,10 +19,11 @@ public:
         lastFrame = seconds;
     }
 
-    /* After a pause, so that the paused time does not count as one
-     * long frame. Games divide by Graphics.average_frame_rate to keep
-     * a speed per second, and a rate near 0 makes that step huge. */
-    void restart(double seconds) { lastFrame = seconds; }
+    /* Leaves a pause out of the next frame, so that the pause does not
+     * count as one long frame. Games divide by
+     * Graphics.average_frame_rate to keep a speed per second, and a rate
+     * near 0 makes that step huge. */
+    void skip(double seconds) { lastFrame += seconds; }
 
     double average() const
     {

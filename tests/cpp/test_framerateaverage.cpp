@@ -31,7 +31,7 @@ bool near60(double fps) { return std::fabs(fps - 60) < 0.01; }
 TEST(framerateaverage_reads_the_rate_of_steady_frames)
 {
     FrameRateAverage rate;
-    rate.restart(5);
+    rate.skip(5);
     showFrames(rate, 5, 100);
 
     CHECK(near60(rate.average()));
@@ -40,20 +40,30 @@ TEST(framerateaverage_reads_the_rate_of_steady_frames)
 TEST(framerateaverage_does_not_count_a_pause_as_a_frame)
 {
     FrameRateAverage rate;
-    rate.restart(0);
     double now = showFrames(rate, 0, 100);
 
     now += 30;
-    rate.restart(now);
+    rate.skip(30);
     showFrames(rate, now, 1);
 
     CHECK(near60(rate.average()));
 }
 
+TEST(framerateaverage_counts_the_work_before_a_pause)
+{
+    FrameRateAverage rate;
+    double now = showFrames(rate, 0, 40);
+
+    now += 1 + 30;
+    rate.skip(30);
+    rate.frameShown(now);
+
+    CHECK(rate.average() < 30);
+}
+
 TEST(framerateaverage_counts_a_slow_frame)
 {
     FrameRateAverage rate;
-    rate.restart(0);
     double now = showFrames(rate, 0, 40);
 
     rate.frameShown(now + 1);
