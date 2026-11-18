@@ -30,13 +30,11 @@ Color = Struct.new(:red, :green, :blue)
 load File.join(ROOT, 'scripts', 'preload', 'rpg_xp.rb')
 
 # The game's own definition, as in GS Vitro.
-module RPG
-  class AudioFile
-    attr_accessor :name
-  end
+def load_game_scripts
+  RPG::AudioFile.class_eval { attr_accessor :name }
 end
 
-load SCRIPT
+load_game_scripts
 load SCRIPT
 
 # A save from the old engine: the name slot held another object.
@@ -57,4 +55,9 @@ assert_eq(from_save('Rain').name, 'Rain', 'a good name stays')
 assert_eq(from_save(nil).name, nil, 'a nil name stays')
 assert_eq(File.basename(from_save(1.5).name, '.*'), '', 'the GS Vitro weather call works')
 
-test_passed('audio_file_name_repair', 9)
+# F12 runs the game's scripts again, then the postloads.
+load_game_scripts
+load SCRIPT
+assert_eq(from_save(1.5).name, '', 'a Float name reads as no sound after F12')
+
+test_passed('audio_file_name_repair', 10)

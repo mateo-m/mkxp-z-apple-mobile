@@ -10,19 +10,15 @@
 # the repaired name.
 #
 # It runs after the game's scripts, because games define
-# RPG::AudioFile#name again (GS Vitro does in RGSS2Compatibility).
+# RPG::AudioFile#name again (GS Vitro does in RGSS2Compatibility). F12
+# runs the game's scripts and this file again, so it reads @name and
+# does not wrap the game's method.
 
-if defined?(RPG::AudioFile) && !RPG::AudioFile.method_defined?(:empo_unrepaired_name)
-  module RPG
-    class AudioFile
-      alias empo_unrepaired_name name
-
-      def name
-        name = empo_unrepaired_name
-        return name if name.nil? || name.is_a?(String)
-
-        @name = ''
-      end
+module RPG
+  class AudioFile
+    def name
+      @name = '' unless @name.nil? || @name.is_a?(String)
+      @name
     end
   end
 end
