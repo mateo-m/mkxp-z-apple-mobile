@@ -498,7 +498,6 @@ struct GraphicsPrivate {
     bool integerLastMileScaling;
     
     FrameRateAverage frameRateAverage;
-    Uint64 avgFPSStart;
     SDL_mutex *avgFPSLock;
 
     SDL_mutex *glResourceLock;
@@ -521,7 +520,7 @@ struct GraphicsPrivate {
     multithreadedMode(true),
     frameRate(DEF_FRAMERATE), frameCount(0), brightness(255),
     fpsLimiter(frameRate), useFrameSkip(rtData->config.frameSkip), frozen(false),
-    last_update(0), last_delta(0), avgFPSStart(SDL_GetPerformanceCounter()), backingScaleFactor(1), integerScaleFactor(0, 0),
+    last_update(0), last_delta(0), backingScaleFactor(1), integerScaleFactor(0, 0),
     glResourceLockOwner(0), glResourceLockDepth(0),
     integerScaleActive(rtData->config.integerScaling.active),
     integerLastMileScaling(rtData->config.integerScaling.lastMileScaling) {
@@ -1093,7 +1092,7 @@ struct GraphicsPrivate {
     
     double averageFPS() {
         SDL_LockMutex(avgFPSLock);
-        double ret = frameRateAverage.average();
+        double ret = frameRateAverage.average(frameRate);
         SDL_UnlockMutex(avgFPSLock);
         return ret;
     }
@@ -1128,15 +1127,11 @@ struct GraphicsPrivate {
         SDL_UnlockMutex(glResourceLock);
     }
 
-    // Use real time here. Fast-forward speeds up shState->runTime(),
-    // and this rate must count the frames that the screen shows.
-    double avgFPSSeconds() const {
-        return (double)(SDL_GetPerformanceCounter() - avgFPSStart) / SDL_GetPerformanceFrequency();
-    }
-
+    // Not shState->runTime(): fast-forward speeds that up, and this rate
+    // must count the frames that the screen shows.
     void updateAvgFPS() {
         SDL_LockMutex(avgFPSLock);
-        frameRateAverage.frameShown(avgFPSSeconds());
+        frameRateAverage.frameShown(mkxp_engineSeconds());
         SDL_UnlockMutex(avgFPSLock);
     }
 
@@ -1239,19 +1234,10 @@ struct GraphicsPrivate {
             mkxp_setSnapshot(pixels.data(), w, h);
         }
 
-        double pausedAt = avgFPSSeconds();
-        double runTimeAtPause = shState->runTime();
         mkxp_checkPause();
 
         /* Reset frame timing so the limiter doesn't try to catch up. */
         fpsLimiter.resetFrameAdjust();
-
-        if (last_update > 0)
-            last_update += shState->runTime() - runTimeAtPause;
-
-        SDL_LockMutex(avgFPSLock);
-        frameRateAverage.skip(avgFPSSeconds() - pausedAt);
-        SDL_UnlockMutex(avgFPSLock);
     }
 
     /* Call right after every swap. */

@@ -16,6 +16,7 @@
 #define IOS_BRIDGE_H
 
 #include <stdbool.h>
+#include <time.h>
 
 // MKXPZ_MOBILE - 1 on platforms where a host app embeds the engine
 // (iOS, iPadOS, tvOS and macOS), 0 elsewhere. Overridable from the
@@ -615,6 +616,11 @@ void        mkxp_checkPause(void);
 bool        mkxp_isPauseRequested(void);
 bool        mkxp_isPaused(void);
 
+// Engine-internal: seconds of run time that leave out the time the
+// engine was away. Away is from a pause request to its resume, and
+// while a game dialog waits for the player.
+double      mkxp_engineSeconds(void);
+
 // Snapshot: RGBA pixel buffer captured before blocking.
 void        mkxp_setSnapshot(const unsigned char *data, int width, int height);
 
@@ -812,6 +818,8 @@ static inline void        mkxp_requestResume(void) {}
 static inline void        mkxp_checkPause(void) {}
 static inline bool        mkxp_isPauseRequested(void) { return false; }
 static inline bool        mkxp_isPaused(void) { return false; }
+static inline double      mkxp_engineSeconds(void)
+{ struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 static inline void        mkxp_setSnapshot(const unsigned char *data, int width, int height) { (void)data; (void)width; (void)height; }
 static inline bool        mkxp_copySnapshotRGBA(unsigned char *dest, int destSize, int *width, int *height) { (void)dest; (void)destSize; (void)width; (void)height; return false; }
 static inline bool        mkxp_getSnapshotSize(int *width, int *height) { (void)width; (void)height; return false; }

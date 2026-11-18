@@ -16,6 +16,7 @@
 #include "audio.h"
 #include "eventthread.h"
 #include "config.h"
+#include "util/awayclock.h"
 #include "util/debugwriter.h"
 #include <atomic>
 #include <cstdio>
@@ -246,6 +247,24 @@ static std::atomic<bool> s_paused{false};
 static std::mutex s_pauseMutex;
 static std::condition_variable s_pauseCV;
 
+static std::mutex s_awayMutex;
+static AwayClock s_awayClock{AwayClock::Clock::now()};
+
+static void leaveEngine() {
+    std::lock_guard<std::mutex> lock(s_awayMutex);
+    s_awayClock.leave(AwayClock::Clock::now());
+}
+
+static void comeBackToEngine() {
+    std::lock_guard<std::mutex> lock(s_awayMutex);
+    s_awayClock.comeBack(AwayClock::Clock::now());
+}
+
+double mkxp_engineSeconds(void) {
+    std::lock_guard<std::mutex> lock(s_awayMutex);
+    return s_awayClock.seconds(AwayClock::Clock::now());
+}
+
 // Snapshot buffer: owned by the bridge, written by engine, read by UI.
 static std::mutex s_snapshotMutex;
 static std::vector<unsigned char> s_snapshotData;
@@ -313,7 +332,8 @@ void mkxp_requestTerminate(void) {
     {
         std::lock_guard<std::mutex> lock(s_pauseMutex);
         s_paused.store(false, std::memory_order_release);
-        s_pauseRequested.store(false, std::memory_order_release);
+        if (s_pauseRequested.exchange(false, std::memory_order_acq_rel))
+            comeBackToEngine();
     }
     s_pauseCV.notify_one();
 
@@ -847,12 +867,16 @@ void mkxp_presentInfoAndWait(const char *message) {
 
     s_infoDismissed.store(false, std::memory_order_release);
     s_infoAwaitingDismiss.store(true, std::memory_order_release);
+    leaveEngine();
     s_infoMsgCb.fire(message);
 
-    std::unique_lock<std::mutex> lock(s_infoDismissMutex);
-    s_infoDismissCV.wait(lock, [] {
-        return s_infoDismissed.load(std::memory_order_acquire);
-    });
+    {
+        std::unique_lock<std::mutex> lock(s_infoDismissMutex);
+        s_infoDismissCV.wait(lock, [] {
+            return s_infoDismissed.load(std::memory_order_acquire);
+        });
+    }
+    comeBackToEngine();
     s_infoAwaitingDismiss.store(false, std::memory_order_release);
 }
 
@@ -911,13 +935,15 @@ void mkxp_setErrorMessageCallback(mkxp_ErrorMessageCallback cb, void *userdata) 
 // Pause / Resume
 
 void mkxp_requestPause(void) {
-    s_pauseRequested.store(true, std::memory_order_release);
+    if (!s_pauseRequested.exchange(true, std::memory_order_acq_rel))
+        leaveEngine();
 }
 
 void mkxp_requestResume(void) {
     {
         std::lock_guard<std::mutex> lock(s_pauseMutex);
-        s_pauseRequested.store(false, std::memory_order_release);
+        if (s_pauseRequested.exchange(false, std::memory_order_acq_rel))
+            comeBackToEngine();
         s_paused.store(false, std::memory_order_release);
     }
     // Arm the one-shot frame-rendered signal so the UI knows when the
