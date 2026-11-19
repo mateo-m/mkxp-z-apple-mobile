@@ -118,13 +118,26 @@ unless defined?(MKXPSaveRepair)
       original = ::Game.method(:load)
       # Ruby 1.8 cannot parse a block argument of a block.
       (class << ::Game; self; end).send(:define_method, :load) do |*args|
-        MKXPSaveRepair.game_load
-        original.call(*args)
+        MKXPSaveRepair.game_load { original.call(*args) }
       end
       @game_load_wrapper = ::Game.method(:load)
     end
 
+    # A script that wraps Game.load after us puts one of our wrappers
+    # inside another. Only the outer one reports.
     def game_load
+      return yield if @in_game_load
+
+      @in_game_load = true
+      begin
+        report_game_load
+        yield
+      ensure
+        @in_game_load = false
+      end
+    end
+
+    def report_game_load
       loaded(@last_save || 'unknown file')
     rescue StandardError
       nil

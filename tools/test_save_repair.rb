@@ -276,9 +276,8 @@ rescue SystemStackError
   true
 end
 assert_eq(looped, false, 'Essentials 19: a wrapper that a script adds after ours does not loop')
-assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:plugin_load], [:load, 'Game_2.rxdata'],
-                    [:game_load_after_reset, 1]],
-          'Essentials 19: each wrapper calls its own original')
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:plugin_load], [:game_load_after_reset, 1]],
+          'Essentials 19: each wrapper calls its own original, and only the outer one reports')
 
 # rubocop:enable Style/FileOpen, Security/MarshalLoad
 

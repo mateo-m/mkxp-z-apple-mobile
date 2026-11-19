@@ -232,8 +232,7 @@ EngineTest.test('a wrapper that a script adds over ours does not loop') do
     end
     EngineTest.assert_equal(false, looped, 'a loop')
     EngineTest.assert_equal(
-      [[:report_save_load, 'Game_4.rxdata'], [:plugin_load],
-       [:report_save_load, 'Game_4.rxdata'], [:game_load, 1]],
+      [[:report_save_load, 'Game_4.rxdata'], [:plugin_load], [:game_load, 1]],
       REPAIR_REPORTS, 'reports of Game.load'
     )
   ensure
