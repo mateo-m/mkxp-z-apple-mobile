@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('save-repair', 10)
+EngineTest.suite('save-repair', 11)
 
 EngineTest.load_preloads(%w[save_repair windows_fs platform_compat])
 
@@ -195,6 +195,47 @@ EngineTest.test('in Essentials 19 and later, Game.load is the save load') do
     Game.load(data)
     EngineTest.assert_equal([[:report_save_load, 'Game_4.rxdata'], [:game_load_after_reset, 1]],
                             REPAIR_REPORTS, 'reports of Game.load after F12')
+  ensure
+    Object.send(:remove_const, :SaveData)
+    Object.send(:remove_const, :Game)
+  end
+end
+
+# A script can wrap Game.load after our wrapper.
+EngineTest.test('a wrapper that a script adds over ours does not loop') do
+  REPAIR_REPORTS.clear
+  begin
+    Object.const_set(:SaveData, Module.new)
+    game = Module.new
+    game.instance_eval do
+      def load(save_data)
+        REPAIR_REPORTS.push([:game_load, save_data.size])
+      end
+    end
+    Object.const_set(:Game, game)
+    save = File.join(REPAIR_DIR, 'Game_4.rxdata')
+    File.open(save, 'wb') { |file| Marshal.dump({ :game_system => Game_System.new }, file) }
+    data = load_data(save)
+    (class << game; self; end).send(:alias_method, :plugin_load, :load)
+    game.instance_eval do
+      def load(save_data)
+        REPAIR_REPORTS.push([:plugin_load])
+        plugin_load(save_data)
+      end
+    end
+    load_data(save)
+    looped = begin
+      Game.load(data)
+      false
+    rescue SystemStackError
+      true
+    end
+    EngineTest.assert_equal(false, looped, 'a loop')
+    EngineTest.assert_equal(
+      [[:report_save_load, 'Game_4.rxdata'], [:plugin_load],
+       [:report_save_load, 'Game_4.rxdata'], [:game_load, 1]],
+      REPAIR_REPORTS, 'reports of Game.load'
+    )
   ensure
     Object.send(:remove_const, :SaveData)
     Object.send(:remove_const, :Game)

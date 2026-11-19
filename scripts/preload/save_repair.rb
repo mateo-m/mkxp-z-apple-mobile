@@ -109,17 +109,17 @@ unless defined?(MKXPSaveRepair)
     end
 
     # F12 runs the game's scripts again, and they define Game.load again
-    # over the wrapper.
+    # over the wrapper. A script can also wrap Game.load after us. Each
+    # wrapper keeps its own original, so a second wrapper cannot call
+    # itself through a shared method name.
     def wrap_game_load
       return if @game_load_wrapper && ::Game.method(:load) == @game_load_wrapper
 
-      class << ::Game
-        alias_method :_mkxp_repair_load, :load
-
-        def load(*args, &block)
-          MKXPSaveRepair.game_load
-          _mkxp_repair_load(*args, &block)
-        end
+      original = ::Game.method(:load)
+      # Ruby 1.8 cannot parse a block argument of a block.
+      (class << ::Game; self; end).send(:define_method, :load) do |*args|
+        MKXPSaveRepair.game_load
+        original.call(*args)
       end
       @game_load_wrapper = ::Game.method(:load)
     end

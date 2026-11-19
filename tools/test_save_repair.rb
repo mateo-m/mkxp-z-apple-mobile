@@ -258,6 +258,28 @@ Game.load(boot)
 assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load_after_reset, 1]],
           'Essentials 19: the wrapper goes on again after F12')
 
+# A script wraps Game.load after our wrapper.
+class << Game
+  alias_method :plugin_load, :load
+
+  def load(save_data)
+    REPORTS << [:plugin_load]
+    plugin_load(save_data)
+  end
+end
+REPORTS.clear
+load_data(SAVE)
+looped = begin
+  Game.load(boot)
+  false
+rescue SystemStackError
+  true
+end
+assert_eq(looped, false, 'Essentials 19: a wrapper that a script adds after ours does not loop')
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:plugin_load], [:load, 'Game_2.rxdata'],
+                    [:game_load_after_reset, 1]],
+          'Essentials 19: each wrapper calls its own original')
+
 # rubocop:enable Style/FileOpen, Security/MarshalLoad
 
-test_passed('save_repair', 39)
+test_passed('save_repair', 41)
