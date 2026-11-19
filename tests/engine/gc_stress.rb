@@ -7,9 +7,6 @@
 #
 #   tools/run-engine-tests.sh --suite gc_stress.rb --ruby 18
 #
-# Run it in its own launch: in stress mode each allocation collects the
-# whole heap, so the objects of other suites make it far slower.
-#
 # This file must parse on all three interpreters.
 
 unless defined?(EngineTest)
@@ -70,6 +67,7 @@ def new_save
   map = Table.new(16, 8, 2)
   16.times { |x| 8.times { |y| map[x, y, 0] = (x * 8) + y } }
   party = Array.new(6) { |i| Battler.new("Mon #{i}", i + 5) }
+  # A clone copies the singleton class. The broken lazy sweep of #55 crashed only here.
   party.each_with_index { |battler, i| battler.extend(Nicknamed) if i.even? }
   save = {
     'system' => {},
