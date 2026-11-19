@@ -279,6 +279,20 @@ assert_eq(looped, false, 'Essentials 19: a wrapper that a script adds after ours
 assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:plugin_load], [:game_load_after_reset, 1]],
           'Essentials 19: each wrapper calls its own original, and only the outer one reports')
 
+# A Game.load that takes a block and a keyword argument.
+$VERBOSE, verbose = nil, $VERBOSE
+module Game
+  def self.load(save_data, safe: false)
+    REPORTS << [:game_load_with, save_data.size, safe, yield]
+  end
+end
+$VERBOSE = verbose
+REPORTS.clear
+load_data(SAVE)
+Game.load(boot, safe: true) { :block }
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load_with, 1, true, :block]],
+          'Essentials 19: the wrapper passes on a block and a keyword argument')
+
 # rubocop:enable Style/FileOpen, Security/MarshalLoad
 
-test_passed('save_repair', 41)
+test_passed('save_repair', 42)

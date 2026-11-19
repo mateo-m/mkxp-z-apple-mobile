@@ -110,16 +110,24 @@ unless defined?(MKXPSaveRepair)
 
     # F12 runs the game's scripts again, and they define Game.load again
     # over the wrapper. A script can also wrap Game.load after us. Each
-    # wrapper keeps its own original, so a second wrapper cannot call
-    # itself through a shared method name.
+    # wrapper keeps its original under its own name, so a second wrapper
+    # cannot call itself through a shared name.
     def wrap_game_load
       return if @game_load_wrapper && ::Game.method(:load) == @game_load_wrapper
 
-      original = ::Game.method(:load)
-      # Ruby 1.8 cannot parse a block argument of a block.
-      (class << ::Game; self; end).send(:define_method, :load) do |*args|
-        MKXPSaveRepair.game_load { original.call(*args) }
-      end
+      @game_load_wraps = (@game_load_wraps || 0) + 1
+      original = "_mkxp_repair_load_#{@game_load_wraps}"
+      game = class << ::Game; self; end
+      game.send(:alias_method, original, :load)
+      # Ruby 1.8 cannot parse a block argument of a block, so the wrapper
+      # is a def in a string.
+      game.class_eval(<<-RUBY, __FILE__, __LINE__ + 1) # rubocop:disable Style/DocumentDynamicEvalDefinition
+        def load(*args, &block)
+          MKXPSaveRepair.game_load { #{original}(*args, &block) }
+        end
+      RUBY
+      # Ruby 3 passes keyword arguments on through *args only with this.
+      game.send(:ruby2_keywords, :load) if game.respond_to?(:ruby2_keywords, true)
       @game_load_wrapper = ::Game.method(:load)
     end
 

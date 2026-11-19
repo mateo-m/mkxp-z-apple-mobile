@@ -202,14 +202,14 @@ EngineTest.test('in Essentials 19 and later, Game.load is the save load') do
 end
 
 # A script can wrap Game.load after our wrapper.
-EngineTest.test('a wrapper that a script adds over ours does not loop') do
+EngineTest.test('a wrapper that a script adds over ours does not loop, and a block goes through') do
   REPAIR_REPORTS.clear
   begin
     Object.const_set(:SaveData, Module.new)
     game = Module.new
     game.instance_eval do
       def load(save_data)
-        REPAIR_REPORTS.push([:game_load, save_data.size])
+        REPAIR_REPORTS.push([:game_load, save_data.size, yield])
       end
     end
     Object.const_set(:Game, game)
@@ -218,21 +218,21 @@ EngineTest.test('a wrapper that a script adds over ours does not loop') do
     data = load_data(save)
     (class << game; self; end).send(:alias_method, :plugin_load, :load)
     game.instance_eval do
-      def load(save_data)
+      def load(save_data, &block)
         REPAIR_REPORTS.push([:plugin_load])
-        plugin_load(save_data)
+        plugin_load(save_data, &block)
       end
     end
     load_data(save)
     looped = begin
-      Game.load(data)
+      Game.load(data) { :block }
       false
     rescue SystemStackError
       true
     end
     EngineTest.assert_equal(false, looped, 'a loop')
     EngineTest.assert_equal(
-      [[:report_save_load, 'Game_4.rxdata'], [:plugin_load], [:game_load, 1]],
+      [[:report_save_load, 'Game_4.rxdata'], [:plugin_load], [:game_load, 1, :block]],
       REPAIR_REPORTS, 'reports of Game.load'
     )
   ensure
