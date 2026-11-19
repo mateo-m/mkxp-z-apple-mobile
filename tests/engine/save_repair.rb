@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('save-repair', 9)
+EngineTest.suite('save-repair', 10)
 
 EngineTest.load_preloads(%w[save_repair windows_fs platform_compat])
 
@@ -76,15 +76,17 @@ EngineTest.test('the engine gives the save reports to the host') do
   EngineTest.assert(System.respond_to?(:_repair_suite_report_save_repaired), 'System.report_save_repaired')
 end
 
-EngineTest.test('a save with a broken sound name saves no sound and tells the host') do
+EngineTest.test('a save with broken sound names saves no sound and tells the host once') do
   REPAIR_REPORTS.clear
   system = repair_broken_system(1.5)
+  other = repair_broken_system(2.5)
   File.open(REPAIR_GAME, 'wb') do |file|
     Marshal.dump('Gold', file)
     Marshal.dump(system, file)
   end
   saved = File.open(REPAIR_GAME, 'rb') { |file| [Marshal.load(file), Marshal.load(file)] }
   EngineTest.assert_equal('', saved[1].bgs.instance_variable_get(:@name), 'the saved name')
+  EngineTest.assert_equal('', other.bgs.instance_variable_get(:@name), 'the second broken name')
   EngineTest.assert_equal([[:report_save_repaired, "Game_2.rxdata: #{REPAIR_FLOAT}"],
                            [:report_save_load, 'Game_2.rxdata']], REPAIR_REPORTS, 'reports')
 end
@@ -158,6 +160,33 @@ EngineTest.test('a broken name that the game reads tells the host') do
      [:report_save_repaired, "Game_2.rxdata: #{REPAIR_FLOAT} when the game read it"]],
     REPAIR_REPORTS, 'reports'
   )
+end
+
+# Pokemon Essentials 19 and later reads the whole save at start, and
+# Continue gives that data to Game.load.
+EngineTest.test('in Essentials 19 and later, Game.load is the save load') do
+  REPAIR_REPORTS.clear
+  begin
+    Object.const_set(:SaveData, Module.new)
+    game = Module.new
+    game.instance_eval do
+      def load(save_data)
+        REPAIR_REPORTS.push([:game_load, save_data.size])
+      end
+    end
+    Object.const_set(:Game, game)
+    save = File.join(REPAIR_DIR, 'Game_4.rxdata')
+    File.open(save, 'wb') { |file| Marshal.dump({ :game_system => Game_System.new }, file) }
+    data = File.open(save, 'rb') { |file| Marshal.load(file) }
+    File.open(save, 'rb') { |file| Marshal.load(file) }
+    EngineTest.assert_equal([], REPAIR_REPORTS, 'reports of the reads at start and on the load screen')
+    Game.load(data)
+    EngineTest.assert_equal([[:report_save_load, 'Game_4.rxdata'], [:game_load, 1]], REPAIR_REPORTS,
+                            'reports of Game.load')
+  ensure
+    Object.send(:remove_const, :SaveData)
+    Object.send(:remove_const, :Game)
+  end
 end
 
 # The VM outlives a game, and the next game loads the preloads again.

@@ -27,24 +27,39 @@ unless defined?(MKXPSaveRepair)
       nil
     end
 
-    # Reads @name, because games define the getter again.
+    # Reads @name, because games define the getter again. Sends one
+    # report for each kind of fault, not one for each sound. The name is
+    # set before the report, so a name that has no #class (a BasicObject)
+    # is repaired too.
     def repair_all(file_name)
       klass = audio_file_class
       return unless klass
 
+      faults = {}
       ObjectSpace.each_object(klass) do |audio|
-        name = audio.instance_variable_get(:@name)
-        next if name.nil? || name.is_a?(String) || audio.frozen?
+        begin
+          name = audio.instance_variable_get(:@name)
+          # rubocop:disable Style/CaseEquality -- a BasicObject has no nil? or is_a?.
+          next if ::NilClass === name || ::String === name || audio.frozen?
+          # rubocop:enable Style/CaseEquality
 
-        audio.instance_variable_set(:@name, '')
-        report(:report_save_repaired, "#{file_name}: #{fault(audio, name)}")
+          audio.instance_variable_set(:@name, '')
+          faults[fault(audio, name)] = true
+        rescue StandardError
+          next
+        end
       end
+      faults.each_key { |text| report(:report_save_repaired, "#{file_name}: #{text}") }
     end
 
     # audio_file_name_repair.rb calls this when the getter repairs a name.
     def repaired_on_read(audio, name)
-      file_name = @last_save || 'unknown file'
-      report(:report_save_repaired, "#{file_name}: #{fault(audio, name)} when the game read it")
+      text = "#{fault(audio, name)} when the game read it"
+      @read_faults ||= {}
+      return if @read_faults[text]
+
+      @read_faults[text] = true
+      report(:report_save_repaired, "#{@last_save || 'unknown file'}: #{text}")
     rescue StandardError
       nil
     end
@@ -73,7 +88,38 @@ unless defined?(MKXPSaveRepair)
       return unless source.instance_variable_get(:@mkxp_game_system) && source.eof?
 
       source.instance_variable_set(:@mkxp_save_loaded, true)
-      loaded(source.path.to_s)
+      file_name = File.basename(source.path.to_s)
+      return loaded(file_name) unless essentials_game_load?
+
+      wrap_game_load
+      @last_save = file_name
+    rescue StandardError
+      nil
+    end
+
+    # Pokemon Essentials 19 and later reads the whole save at start and
+    # when the load screen opens. Continue gives that data to Game.load,
+    # so in these games Game.load is the save load. The game defines
+    # Game.load before its first read of a save.
+    def essentials_game_load?
+      defined?(::SaveData) && defined?(::Game) && ::Game.respond_to?(:load)
+    end
+
+    def wrap_game_load
+      return if ::Game.respond_to?(:_mkxp_repair_load)
+
+      class << ::Game
+        alias_method :_mkxp_repair_load, :load
+
+        def load(*args, &block)
+          MKXPSaveRepair.game_load
+          _mkxp_repair_load(*args, &block)
+        end
+      end
+    end
+
+    def game_load
+      loaded(@last_save || 'unknown file')
     rescue StandardError
       nil
     end
@@ -82,14 +128,15 @@ unless defined?(MKXPSaveRepair)
     # windows_fs.rb defines load_data again for each game, so its
     # load_data calls this.
     def after_load_data(path, value)
-      loaded(path.to_s) if holds_game_system?(value)
+      loaded(File.basename(path.to_s)) if holds_game_system?(value)
     rescue StandardError
       nil
     end
 
-    def loaded(path)
-      @last_save = File.basename(path)
-      report(:report_save_load, @last_save)
+    def loaded(file_name)
+      @last_save = file_name
+      @read_faults = {}
+      report(:report_save_load, file_name)
     end
 
     def holds_game_system?(value)

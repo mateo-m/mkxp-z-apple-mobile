@@ -91,12 +91,13 @@ end
 # The getter of audio_file_name_repair.rb before any save load.
 load File.join(ROOT, 'scripts', 'postload', 'audio_file_name_repair.rb')
 REPORTS.clear
-assert_eq(broken(0.5).name, '', 'the getter repairs a Float')
+assert_eq([broken(0.5).name, broken(0.25).name], ['', ''], 'the getter repairs a Float')
 assert_eq(REPORTS, [[:repaired, 'unknown file: the @name of an RPG::AudioFile was a Float when the game read it']],
-          'the getter report before a save load')
+          'one getter report for each kind of fault')
 
 REPORTS.clear
 system = Game_System.new(broken(1.5), broken([1, 2], RPG::BGM))
+other_float = broken(1.25)
 walks = count_walks do
   File.open(SAVE, 'wb') do |file|
     Marshal.dump('Gold', file)
@@ -108,11 +109,12 @@ assert_eq(walks, 1, 'one walk for each file write')
 loaded = File.open(SAVE, 'rb') { |file| [Marshal.load(file), Marshal.load(file), Marshal.load(file)] }
 assert_eq(loaded[1].bgm.instance_variable_get(:@name), '', 'the save holds no sound for a Float')
 assert_eq(loaded[1].bgs.instance_variable_get(:@name), '', 'the save holds no sound for an Array')
+assert_eq(other_float.name, '', 'a second Float is repaired')
 assert_eq(REPORTS.sort,
           [[:load, 'Game_2.rxdata'],
            [:repaired, 'Game_2.rxdata: the @name of an RPG::AudioFile was a Float'],
            [:repaired, 'Game_2.rxdata: the @name of an RPG::BGM was an Array']],
-          'one report for each repaired sound, then one load')
+          'one report for each kind of fault, then one load')
 
 REPORTS.clear
 walks = count_walks do
@@ -132,6 +134,13 @@ assert_eq(frozen.instance_variable_get(:@name), 2.5, 'a frozen sound stays')
 assert_eq(after_frozen.instance_variable_get(:@name), '', 'the walk goes on after a frozen sound')
 assert_eq(REPORTS, [[:repaired, 'Game_2.rxdata: the @name of an RPG::AudioFile was a Float']],
           'one report for the sound after the frozen one')
+
+REPORTS.clear
+odd = Array.new(3) { broken(BasicObject.new) } + Array.new(3) { broken(3.75) }
+File.open(SAVE, 'wb') { |file| Marshal.dump(odd, file) }
+assert_eq(odd.map { |sound| sound.instance_variable_get(:@name) }, [''] * 6, 'a BasicObject name stops no repair')
+assert_eq(REPORTS, [[:repaired, 'Game_2.rxdata: the @name of an RPG::AudioFile was a Float']],
+          'the report of the Floats next to BasicObject names')
 
 REPORTS.clear
 save_data(Game_System.new(broken(4.5)), SAVE)
@@ -204,6 +213,36 @@ REPORTS.clear
 load_data(SAVE)
 assert_eq(REPORTS, [[:load, 'Game_2.rxdata']], 'load_data reports after a second load of windows_fs.rb')
 
+# Pokemon Essentials 19 and later reads the whole save at start and when
+# the load screen opens. Continue gives that data to Game.load.
+module SaveData; end
+
+module Game
+  def self.load(save_data)
+    REPORTS << [:game_load, save_data.keys]
+    raise 'a broken save' if save_data[:broken]
+  end
+end
+
+REPORTS.clear
+File.open(SAVE, 'wb') { |file| Marshal.dump({ :game_system => Game_System.new }, file) }
+boot = File.open(SAVE, 'rb') { |file| Marshal.load(file) }
+File.open(SAVE, 'rb') { |file| Marshal.load(file) }
+assert_eq(REPORTS, [], 'Essentials 19: a read of the save is not a save load')
+Game.load(boot)
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load, [:game_system]]],
+          'Essentials 19: Game.load is the save load, and the report comes first')
+REPORTS.clear
+File.open(SAVE, 'rb') { |file| Marshal.load(file) }
+raised = begin
+  Game.load(boot.merge(:broken => true))
+rescue RuntimeError => e
+  e.message
+end
+assert_eq(raised, 'a broken save', 'the error of Game.load goes on to the game')
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load, [:game_system, :broken]]],
+          'Essentials 19: one wrapper after a second read')
+
 # rubocop:enable Style/FileOpen, Security/MarshalLoad
 
-test_passed('save_repair', 30)
+test_passed('save_repair', 37)
