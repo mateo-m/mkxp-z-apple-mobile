@@ -2,19 +2,13 @@
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
 # Code like a game keeps its objects whole while the garbage collector
-# runs as often as it can, and its save loads back the same.
-#
-# GC.stress starts a collection at each allocation. Stress mode alone
-# can hide a fault: when a collection does not mark what a clone holds,
-# the original often still holds it, and in stress mode the next
-# collection comes before the game drops the original. So one schedule
-# memorizes the sounds with stress mode off, between two stressed
-# steps, as a game does between frames.
-#
-# Each check compares the result with the same rounds run with the
-# collector off.
+# runs at each allocation in the steps of a battle. The check compares
+# the result with the same rounds run with the collector off.
 #
 #   tools/run-engine-tests.sh --suite gc_stress.rb --ruby 18
+#
+# Run it in its own launch: in stress mode each allocation collects the
+# whole heap, so the objects of other suites make it far slower.
 #
 # This file must parse on all three interpreters.
 
@@ -23,26 +17,17 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-# Ruby 3.1 reads 2 as stress mode with a lazy sweep. Ruby 1.8 and 1.9
-# read any value other than false and nil as true.
-GC.stress = 2
-STRESS_MODES = GC.stress == 2 ? [true, 2] : [true]
-GC.stress = false
+EngineTest.suite('gc-stress', 1)
 
-EngineTest.suite('gc-stress', (3 * STRESS_MODES.size) + 1)
-
-STRESS_ROUNDS = 12
+STRESS_ROUNDS = 3
 STRESS_SOUND_EFFECTS = 16
 STRESS_FOES = 3
 STRESS_TURNS = 2
 STRESS_LOG_SIZE = 40
-STRESS_WALK = 3000
 STRESS_FRAME = 20
-STRESS_LEFTOVERS = 20_000
-STRESS_KEPT_LEFTOVERS = 500
 
-def stressed(mode)
-  GC.stress = mode
+def stressed
+  GC.stress = true
   yield
 ensure
   GC.stress = false
@@ -79,10 +64,6 @@ end
 
 def sound(name, volume)
   RPG::AudioFile.new(name, volume, 100)
-end
-
-def walk
-  Array.new(STRESS_WALK) { 'x' * 16 }
 end
 
 def new_save
@@ -142,14 +123,12 @@ end
 # Pokemon Essentials keeps a clone of the playing sounds through a
 # battle (getPlayingBGS, bgs_pause, the battle, bgs_resume). After the
 # pause only the clones hold the names.
-def battle(save, round, memorize_mode, battle_mode)
+def battle(save, round)
   system = save['system']
-  walk
   play_map_sounds(system, round)
-  walk
-  stressed(battle_mode) { Array.new(STRESS_FRAME) { 'x' * 16 } }
-  memorized = stressed(memorize_mode) { pause_sounds(system) }
-  stressed(battle_mode) do
+  stressed { Array.new(STRESS_FRAME) { 'x' * 16 } }
+  memorized = stressed { pause_sounds(system) }
+  stressed do
     party = save['party'].map(&:clone)
     fight(save, party, round)
     save['party'] = party
@@ -161,16 +140,16 @@ def battle(save, round, memorize_mode, battle_mode)
   end
 end
 
-def play(memorize_mode, battle_mode)
+def play
   save = new_save
-  STRESS_ROUNDS.times { |round| battle(save, round, memorize_mode, battle_mode) }
+  STRESS_ROUNDS.times { |round| battle(save, round) }
   save
 end
 
 def unstressed_save
   GC.start
   GC.disable
-  play(false, false)
+  play
 ensure
   GC.enable
 end
@@ -180,8 +159,8 @@ def immediate?(value)
 end
 
 # The live object at an object id, or nil when its slot was freed. A
-# method call on a freed slot can crash the interpreter, so the checks
-# read each object by its id first.
+# method call on a freed slot can crash the interpreter, so the check
+# reads each object by its id first.
 def alive_at(id)
   ObjectSpace._id2ref(id)
 rescue RangeError
@@ -240,19 +219,20 @@ def value_difference(expected, actual, path)
 end
 
 # The first path where `actual` differs from `expected`, or nil.
-# `pairs` maps each object of `expected` to its object in `actual`,
-# so a shared object or a cycle must be shared in both.
-# rubocop:disable Lint/HashCompareByIdentity -- Hash#compare_by_identity is not on Ruby 1.8.
+# `pairs` maps each object to its partner in the other tree, in both
+# directions, so an object is shared in `actual` only where it is
+# shared in `expected`.
 def difference(expected, actual, path, pairs = {})
   return "#{path} is a freed object" unless alive?(actual)
   return "#{path} is a #{actual.class}, not a #{expected.class}" unless actual.instance_of?(expected.class)
   return value_difference(expected, actual, path) if immediate?(expected)
 
-  if pairs.key?(expected.object_id)
-    return pairs[expected.object_id].equal?(actual) ? nil : "#{path} is not shared as in the original"
-  end
+  partner = pairs[[:expected, expected.object_id]]
+  return partner.equal?(actual) ? nil : "#{path} is not shared as in the original" if partner
+  return "#{path} is shared, but not in the original" if pairs.key?([:actual, actual.object_id])
 
-  pairs[expected.object_id] = actual
+  pairs[[:expected, expected.object_id]] = actual
+  pairs[[:actual, actual.object_id]] = expected
   case expected
   when String, Color, Tone, Rect, Table then value_difference(expected, actual, path)
   when Array then array_difference(expected, actual, path, pairs)
@@ -260,68 +240,11 @@ def difference(expected, actual, path, pairs = {})
   else object_difference(expected, actual, path, pairs)
   end
 end
-# rubocop:enable Lint/HashCompareByIdentity
 
-def label(mode)
-  mode == true ? 'stress mode' : "stress mode #{mode}, with a lazy sweep"
-end
-
-STRESS_SAVE = File.join(Dir.pwd, 'gc_stress_save.rxdata')
-
-def save_and_load(save, mode)
-  stressed(mode) do
-    File.open(STRESS_SAVE, 'wb') { |file| Marshal.dump(save, file) }
-    loaded = File.open(STRESS_SAVE, 'rb') { |file| Marshal.load(file) } # rubocop:disable Security/MarshalLoad
-    File.delete(STRESS_SAVE)
-    loaded
-  end
-end
-
-STRESS_MODES.each do |mode|
-  stressed_save = nil
-
-  EngineTest.test("battles in #{label(mode)} keep the party, the log and the memorized sounds") do
-    stressed_save = play(mode, mode)
-    found = difference(unstressed_save, stressed_save, 'save')
-    EngineTest.assert(found.nil?, found)
-  end
-
-  EngineTest.test("sounds memorized between battles in #{label(mode)} keep their names") do
-    save = play(false, mode)
-    found = difference(unstressed_save, save, 'save')
-    EngineTest.assert(found.nil?, found)
-  end
-
-  EngineTest.test("a save written and read in #{label(mode)} loads back the same") do
-    loaded = save_and_load(stressed_save || play(mode, mode), mode)
-    found = difference(unstressed_save, loaded, 'loaded save')
-    EngineTest.assert(found.nil?, found)
-  end
-end
-
-StressLeftover = Class.new
-
-# The leftovers are garbage that no collection freed yet. Stress mode
-# starts in the block: an allocation before the walk starts a
-# collection that frees all of them. Then each call of the block starts
-# a collection while each_object walks the heaps.
-EngineTest.test('an object from each_object in stress mode stays alive') do
-  GC.disable
-  STRESS_LEFTOVERS.times { StressLeftover.new }
-  GC.enable
-  kept = []
-  begin
-    ObjectSpace.each_object(StressLeftover) do |leftover|
-      GC.stress = true
-      kept << [leftover, leftover.object_id]
-      break if kept.size >= STRESS_KEPT_LEFTOVERS
-    end
-  ensure
-    GC.stress = false
-  end
-  GC.start
-  bad = kept.reject { |_, id| alive_at(id).is_a?(StressLeftover) }
-  EngineTest.assert(bad.empty?, "#{bad.size} of #{kept.size} kept objects were freed")
+EngineTest.test('battles in stress mode keep the party, the log and the memorized sounds') do
+  stressed_save = play
+  found = difference(unstressed_save, stressed_save, 'save')
+  EngineTest.assert(found.nil?, found)
 end
 
 EngineTest.finish

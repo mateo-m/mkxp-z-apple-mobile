@@ -177,15 +177,15 @@ jobs:
         run: |
           tools/run-engine-tests.sh --no-build --timeout 300 --ruby 31 \
             --suite legacy_methods_off.rb --suite ruby_compat.rb --suite win32_wrap_encoding.rb \
-            --suite safe_write.rb --suite dir_chdir.rb --suite gc_clone.rb --suite gc_stress.rb \
-            --suite full_screen_resizer.rb --suite case_lookup.rb
+            --suite safe_write.rb --suite dir_chdir.rb --suite gc_clone.rb --suite full_screen_resizer.rb \
+            --suite case_lookup.rb
 
       - name: Suites on Ruby 1.9
         if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
         run: |
           tools/run-engine-tests.sh --no-build --timeout 300 --ruby 19 \
             --suite ruby_compat.rb --suite win32_wrap_encoding.rb --suite safe_write.rb \
-            --suite dir_chdir.rb --suite gc_clone.rb --suite gc_stress.rb --suite full_screen_resizer.rb \
+            --suite dir_chdir.rb --suite gc_clone.rb --suite full_screen_resizer.rb \
             --suite rgss_ruby_version.rb --suite case_lookup.rb
 
       - name: Suites on Ruby 1.8
@@ -193,8 +193,18 @@ jobs:
         run: |
           tools/run-engine-tests.sh --no-build --timeout 300 --ruby 18 \
             --suite ruby_compat.rb --suite safe_write.rb --suite dir_chdir.rb --suite gc_clone.rb \
-            --suite gc_stress.rb --suite full_screen_resizer.rb --suite rgss_ruby_version.rb \
-            --suite case_lookup.rb
+            --suite full_screen_resizer.rb --suite rgss_ruby_version.rb --suite case_lookup.rb
+
+      # In stress mode each allocation collects the whole heap, so the
+      # leftovers of other suites in the same launch make it far slower.
+      - name: GC stress suite
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: |
+          STATUS=0
+          for ruby in 31 19 18; do
+            tools/run-engine-tests.sh --no-build --timeout 300 --ruby "$ruby" --suite gc_stress.rb || STATUS=1
+          done
+          exit "$STATUS"
 
       # The legacy-method support only runs for scripts that come out
       # of Scripts.rxdata, so this suite needs a game folder of its
