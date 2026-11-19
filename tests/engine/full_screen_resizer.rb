@@ -16,7 +16,7 @@ end
 
 EngineTest.suite('full-screen-resizer', 2)
 
-EngineTest.load_preloads(%w[save_check windows_fs platform_compat pokemon_compat win32_wrap])
+EngineTest.load_preloads(%w[windows_fs platform_compat pokemon_compat win32_wrap])
 
 # rubocop:disable all -- Win32API.fillScreen as Essentials ships it
 class Win32API

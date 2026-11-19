@@ -16,7 +16,7 @@ end
 
 EngineTest.suite('safe-write', 7)
 
-EngineTest.load_preloads(%w[save_check windows_fs])
+EngineTest.load_preloads(%w[windows_fs])
 
 # rubocop:disable Style/FileWrite, Style/FileRead -- File.binread and
 # File.binwrite are not on Ruby 1.8.

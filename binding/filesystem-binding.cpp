@@ -422,29 +422,31 @@ static VALUE stringForceUTF8(RB_BLOCK_CALL_FUNC_ARGLIST(arg, callback_arg))
 #if RAPI_FULL < 270
 static VALUE customProc(VALUE arg, VALUE proc) {
     VALUE obj = stringForceUTF8(arg);
-#else
-static VALUE customProc(RB_BLOCK_CALL_FUNC_ARGLIST(arg, proc)) {
-    VALUE obj = stringForceUTF8(arg, Qnil, argc, argv, blockarg);
-#endif
-    return rb_funcall2(proc, rb_intern("call"), 1, &obj);
+    obj = rb_funcall2(proc, rb_intern("call"), 1, &obj);
+    
+    return obj;
 }
+#endif
 
 RB_METHOD(_marshalLoad) {
     RB_UNUSED_PARAM;
+#if RAPI_FULL < 270
     VALUE port, proc = Qnil;
     rb_get_args(argc, argv, "o|o", &port, &proc RB_ARG_END);
+#else
+    VALUE port;
+    rb_get_args(argc, argv, "o", &port RB_ARG_END);
+#endif
     
     VALUE utf8Proc;
 #if RAPI_FULL < 270
     if (NIL_P(proc))
+        
         utf8Proc = rb_proc_new(RUBY_METHOD_FUNC(stringForceUTF8), Qnil);
     else
         utf8Proc = rb_proc_new(RUBY_METHOD_FUNC(customProc), proc);
 #else
-    if (NIL_P(proc))
-        utf8Proc = rb_proc_new(stringForceUTF8, Qnil);
-    else
-        utf8Proc = rb_proc_new(customProc, proc);
+    utf8Proc = rb_proc_new(stringForceUTF8, Qnil);
 #endif
     
     VALUE marsh = rb_const_get(rb_cObject, rb_intern("Marshal"));

@@ -15,7 +15,7 @@ end
 
 EngineTest.suite('dir-chdir', 3)
 
-EngineTest.load_preloads(%w[save_check windows_fs])
+EngineTest.load_preloads(%w[windows_fs])
 
 CHDIR_GAME = Dir.pwd
 CHDIR_SUB = File.join(CHDIR_GAME, 'dir_chdir_suite')

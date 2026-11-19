@@ -15,8 +15,7 @@ end
 
 EngineTest.suite('win32-wrap-encoding', 4)
 
-EngineTest.load_preloads(%w[save_check windows_fs platform_compat pokemon_compat win32_wrap
-                            win32_wrap_encoding])
+EngineTest.load_preloads(%w[windows_fs platform_compat pokemon_compat win32_wrap win32_wrap_encoding])
 
 KERNEL32 = Win32API_Impl::Kernel32
 

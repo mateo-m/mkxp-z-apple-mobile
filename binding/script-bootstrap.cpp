@@ -206,7 +206,7 @@ void loadEnginePreloads() {
     }
 
     const char *enginePreloads[] = {
-        "save_check",
+        "save_repair",
         "windows_fs",
         "platform_compat",
         "pokemon_compat",

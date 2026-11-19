@@ -931,7 +931,7 @@ void mkxp_setInfoMessageCallback(mkxp_InfoMessageCallback cb, void *userdata) {
 
 void mkxp_reportSaveEvent(MKXPSaveEvent event, const char *detail) {
     const char *text = detail ? detail : "";
-    mkxp_debugLog("SAVE", event == MKXP_SAVE_REJECTED ? "save rejected" : "save load", text);
+    mkxp_debugLog("SAVE", event == MKXP_SAVE_REPAIRED ? "save repaired" : "save load", text);
     s_saveEventCb.fire(event, text);
 }
 
