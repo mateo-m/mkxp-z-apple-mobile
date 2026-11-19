@@ -183,6 +183,18 @@ EngineTest.test('in Essentials 19 and later, Game.load is the save load') do
     Game.load(data)
     EngineTest.assert_equal([[:report_save_load, 'Game_4.rxdata'], [:game_load, 1]], REPAIR_REPORTS,
                             'reports of Game.load')
+    # F12 runs the game's scripts again.
+    game.instance_eval do
+      def load(save_data)
+        REPAIR_REPORTS.push([:game_load_after_reset, save_data.size])
+      end
+    end
+    REPAIR_REPORTS.clear
+    load_data(save)
+    EngineTest.assert_equal([], REPAIR_REPORTS, 'reports of load_data')
+    Game.load(data)
+    EngineTest.assert_equal([[:report_save_load, 'Game_4.rxdata'], [:game_load_after_reset, 1]],
+                            REPAIR_REPORTS, 'reports of Game.load after F12')
   ensure
     Object.send(:remove_const, :SaveData)
     Object.send(:remove_const, :Game)

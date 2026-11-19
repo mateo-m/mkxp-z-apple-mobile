@@ -243,6 +243,21 @@ assert_eq(raised, 'a broken save', 'the error of Game.load goes on to the game')
 assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load, [:game_system, :broken]]],
           'Essentials 19: one wrapper after a second read')
 
+# F12 runs the game's scripts again.
+$VERBOSE, verbose = nil, $VERBOSE
+module Game
+  def self.load(save_data)
+    REPORTS << [:game_load_after_reset, save_data.size]
+  end
+end
+$VERBOSE = verbose
+REPORTS.clear
+load_data(SAVE)
+assert_eq(REPORTS, [], 'Essentials 19: load_data of the save is not a save load')
+Game.load(boot)
+assert_eq(REPORTS, [[:load, 'Game_2.rxdata'], [:game_load_after_reset, 1]],
+          'Essentials 19: the wrapper goes on again after F12')
+
 # rubocop:enable Style/FileOpen, Security/MarshalLoad
 
-test_passed('save_repair', 37)
+test_passed('save_repair', 39)

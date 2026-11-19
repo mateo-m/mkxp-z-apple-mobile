@@ -88,13 +88,16 @@ unless defined?(MKXPSaveRepair)
       return unless source.instance_variable_get(:@mkxp_game_system) && source.eof?
 
       source.instance_variable_set(:@mkxp_save_loaded, true)
-      file_name = File.basename(source.path.to_s)
+      save_read(File.basename(source.path.to_s))
+    rescue StandardError
+      nil
+    end
+
+    def save_read(file_name)
       return loaded(file_name) unless essentials_game_load?
 
       wrap_game_load
       @last_save = file_name
-    rescue StandardError
-      nil
     end
 
     # Pokemon Essentials 19 and later reads the whole save at start and
@@ -105,8 +108,10 @@ unless defined?(MKXPSaveRepair)
       defined?(::SaveData) && defined?(::Game) && ::Game.respond_to?(:load)
     end
 
+    # F12 runs the game's scripts again, and they define Game.load again
+    # over the wrapper.
     def wrap_game_load
-      return if ::Game.respond_to?(:_mkxp_repair_load)
+      return if @game_load_wrapper && ::Game.method(:load) == @game_load_wrapper
 
       class << ::Game
         alias_method :_mkxp_repair_load, :load
@@ -116,6 +121,7 @@ unless defined?(MKXPSaveRepair)
           _mkxp_repair_load(*args, &block)
         end
       end
+      @game_load_wrapper = ::Game.method(:load)
     end
 
     def game_load
@@ -128,7 +134,7 @@ unless defined?(MKXPSaveRepair)
     # windows_fs.rb defines load_data again for each game, so its
     # load_data calls this.
     def after_load_data(path, value)
-      loaded(File.basename(path.to_s)) if holds_game_system?(value)
+      save_read(File.basename(path.to_s)) if holds_game_system?(value)
     rescue StandardError
       nil
     end
