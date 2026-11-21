@@ -144,6 +144,19 @@ jobs:
           path: ~/.ccache
           key: ccache-engine-tests-iphonesimulator-${{ github.sha }}
 
+      # The simulator plays sound through the default output of the
+      # runner. At the first launch, "Apple Virtual Sound Device" does
+      # not keep time: a MIDI track was at 0 or at 4.8 seconds after
+      # 1.5 seconds. "Null Audio Device" keeps time.
+      - name: Play sound through the null device
+        if: env.TEST == 'true' && steps.host.outcome == 'success'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install switchaudio-osx
+          SwitchAudioSource -t output -s "Null Audio Device"
+
       # Each launch runs its suites one after the other, and each
       # suite reports on its own. The suite steps run also when an
       # earlier one fails, so one run shows every failure.
