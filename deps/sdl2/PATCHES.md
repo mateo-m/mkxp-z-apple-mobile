@@ -48,6 +48,10 @@ calls `movedToNewScreen` on SDL's OpenGL contexts. That code does not
 compile while `SDL_OPENGL` is OFF, so the patch puts it behind
 `SDL_VIDEO_OPENGL_CGL`.
 
+**`macos.patch`** - `SDL_OpenURL` on macOS calls `CFRelease` on a
+NULL URL when the link is not UTF-8, and the process crashes. The
+patch returns an error.
+
 After you edit the SDL submodule, regenerate the patch:
 
 ```sh
