@@ -5,10 +5,6 @@
 #
 #   tools/run-engine-tests.sh --suite system_launch.rb
 #
-# The web link opens Safari, which sends the app to the background,
-# where iOS can suspend it. So this suite runs in its own launch and
-# finishes right after the link opens.
-#
 # This file must parse on Ruby 1.8, 1.9, and 3.x.
 
 unless defined?(EngineTest)
@@ -16,10 +12,16 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('system-launch', 2)
+EngineTest.suite('system-launch', 3)
 
 EngineTest.test('System.launch with a program name raises MKXPError') do
-  EngineTest.assert_raises('notepad.exe', 'System.launch("notepad.exe")') { System.launch('notepad.exe') }
+  EngineTest.assert_raises('opens only http and https links', 'System.launch("notepad.exe")') do
+    System.launch('notepad.exe')
+  end
+end
+
+EngineTest.test('System.launch with a link that is not UTF-8 returns nil') do
+  EngineTest.assert_equal(nil, System.launch("https://example.com/\xff"), 'System.launch(byte 0xff)')
 end
 
 EngineTest.test('System.launch opens an https link and the game goes on') do
