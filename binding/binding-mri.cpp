@@ -1353,7 +1353,7 @@ RB_METHOD_GUARD(mkxpLaunch) {
     
     rb_scan_args(argc, argv, "11", &target, &args);
     SafeStringValue(target);
-    const char *url = RSTRING_PTR(target);
+    const char *url = StringValueCStr(target);
     
     if (SDL_strncasecmp(url, "http://", 7) != 0 && SDL_strncasecmp(url, "https://", 8) != 0)
         throw Exception(Exception::MKXPError, "System.launch opens only http and https links, not \"%s\"", url);
