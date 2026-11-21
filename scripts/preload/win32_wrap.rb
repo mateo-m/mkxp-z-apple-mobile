@@ -659,13 +659,8 @@ module Win32API_Impl
     # as UTF-8. win32_wrap_encoding.rb replaces them on Ruby 1.9 and
     # later.
     def self.to_utf16(text, _codepage)
-      codes = begin
-        text.unpack('U*')
-      rescue ArgumentError
-        text.unpack('C*').map { |b| b < 0x80 ? b : 0xFFFD }
-      end
       units = []
-      codes.each do |code|
+      utf8_codes(text).each do |code|
         if code > 0xFFFF
           code -= 0x10000
           units << (0xD800 + (code >> 10)) << (0xDC00 + (code & 0x3FF))
@@ -674,6 +669,38 @@ module Win32API_Impl
         end
       end
       units.pack('v*')
+    end
+
+    # A byte that does not start a valid sequence becomes U+FFFD, and the
+    # next byte starts a new character, as Win32 does.
+    def self.utf8_codes(text)
+      bytes = text.unpack('C*')
+      codes = []
+      i = 0
+      while i < bytes.size
+        lead = bytes[i]
+        size = if lead < 0x80 then 1
+               elsif lead >= 0xF0 then 4
+               elsif lead >= 0xE0 then 3
+               elsif lead >= 0xC2 then 2
+               end
+        code = utf8_code(bytes[i, size]) if size
+        if code
+          codes << code
+          i += size
+        else
+          codes << 0xFFFD
+          i += 1
+        end
+      end
+      codes
+    end
+
+    def self.utf8_code(char)
+      code = char.pack('C*').unpack('U').first
+      code unless code > 0x10FFFF || (code >= 0xD800 && code < 0xE000)
+    rescue ArgumentError
+      nil
     end
 
     def self.from_utf16(wide, _codepage)

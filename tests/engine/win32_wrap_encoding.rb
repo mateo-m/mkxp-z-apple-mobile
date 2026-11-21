@@ -17,7 +17,7 @@ end
 
 CODE_PAGES = defined?(Encoding)
 
-EngineTest.suite('win32-wrap-encoding', CODE_PAGES ? 10 : 9)
+EngineTest.suite('win32-wrap-encoding', CODE_PAGES ? 11 : 10)
 
 preloads = %w[windows_fs platform_compat pokemon_compat win32_wrap]
 preloads << 'win32_wrap_encoding' if CODE_PAGES
@@ -52,6 +52,13 @@ EngineTest.test('MultiByteToWideChar reads UTF-8') do
   count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, [0xC3, 0xA9].pack('C*'), 2, out, 2)
   EngineTest.assert_equal(1, count, 'code units written')
   EngineTest.assert_equal([0xE9, 0, 0, 0], byte_list(out), 'bytes written')
+end
+
+EngineTest.test('MultiByteToWideChar replaces only the bad bytes') do
+  out = "\0" * 8
+  count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, [0xC3, 0xA9, 0xFF, 0x41, 0xC3].pack('C*'), 5, out, 4)
+  EngineTest.assert_equal(4, count, 'code units written')
+  EngineTest.assert_equal([0xE9, 0xFFFD, 0x41, 0xFFFD], out.unpack('v*'), 'code units')
 end
 
 EngineTest.test('WideCharToMultiByte writes UTF-8') do
