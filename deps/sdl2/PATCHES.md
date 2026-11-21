@@ -34,6 +34,9 @@ tip. The build applies more iOS fixes from `deps/sdl2/` with
   display legacy `initWithFrame:` windows.
 - Keep the view frame the host set when the keyboard shows or hides,
   after the host moves SDL's view into its own window
+- Open a URL with `openURL:options:completionHandler:` on the main
+  thread. iOS 18.2 and later refuse the old `openURL:`, so
+  `SDL_OpenURL` did nothing (libsdl-org/SDL#11728)
 
 The first three change `SDL_uikitopengles.m` and
 `SDL_uikitopenglview.m`. Those files do not compile while
