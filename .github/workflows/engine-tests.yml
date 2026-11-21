@@ -205,6 +205,12 @@ jobs:
           done
           exit "$STATUS"
 
+      # The link opens Safari and sends the test host to the background,
+      # so no suite can run after it in the same launch.
+      - name: System.launch suite
+        if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
+        run: tools/run-engine-tests.sh --no-build --timeout 300 --suite system_launch.rb
+
       # The legacy-method support only runs for scripts that come out
       # of Scripts.rxdata, so this suite needs a game folder of its
       # own. See tests/README.md.
