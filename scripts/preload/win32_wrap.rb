@@ -684,7 +684,7 @@ module Win32API_Impl
                elsif lead >= 0xE0 then 3
                elsif lead >= 0xC2 then 2
                end
-        code = utf8_code(bytes[i, size]) if size
+        code = size && utf8_code(bytes[i, size])
         if code
           codes << code
           i += size

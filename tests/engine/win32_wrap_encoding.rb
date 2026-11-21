@@ -55,10 +55,10 @@ EngineTest.test('MultiByteToWideChar reads UTF-8') do
 end
 
 EngineTest.test('MultiByteToWideChar replaces only the bad bytes') do
-  out = "\0" * 8
-  count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, [0xC3, 0xA9, 0xFF, 0x41, 0xC3].pack('C*'), 5, out, 4)
-  EngineTest.assert_equal(4, count, 'code units written')
-  EngineTest.assert_equal([0xE9, 0xFFFD, 0x41, 0xFFFD], out.unpack('v*'), 'code units')
+  out = "\0" * 10
+  count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, [0xC3, 0xA9, 0xFF, 0x41, 0x80, 0xC3].pack('C*'), 6, out, 5)
+  EngineTest.assert_equal(5, count, 'code units written')
+  EngineTest.assert_equal([0xE9, 0xFFFD, 0x41, 0xFFFD, 0xFFFD], out.unpack('v*'), 'code units')
 end
 
 EngineTest.test('WideCharToMultiByte writes UTF-8') do
