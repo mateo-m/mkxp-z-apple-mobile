@@ -17,7 +17,7 @@ end
 
 CODE_PAGES = defined?(Encoding)
 
-EngineTest.suite('win32-wrap-encoding', CODE_PAGES ? 7 : 6)
+EngineTest.suite('win32-wrap-encoding', CODE_PAGES ? 10 : 9)
 
 preloads = %w[windows_fs platform_compat pokemon_compat win32_wrap]
 preloads << 'win32_wrap_encoding' if CODE_PAGES
@@ -26,7 +26,7 @@ EngineTest.load_preloads(preloads)
 MULTI_BYTE_TO_WIDE_CHAR = Win32API.new('kernel32', 'MultiByteToWideChar', 'iipipi', 'i')
 WIDE_CHAR_TO_MULTI_BYTE = Win32API.new('kernel32', 'WideCharToMultiByte', 'iipipipp', 'i')
 
-def bytes(text)
+def byte_list(text)
   text.unpack('C*')
 end
 
@@ -35,32 +35,51 @@ EngineTest.test('MultiByteToWideChar measures a null-terminated string') do
   EngineTest.assert_equal(4, count, 'UTF-16 code units with the null')
 end
 
+EngineTest.test('MultiByteToWideChar reads to the end of a string with no null') do
+  count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, 'abc', -1, nil, 0)
+  EngineTest.assert_equal(3, count, 'UTF-16 code units')
+end
+
 EngineTest.test('MultiByteToWideChar writes UTF-16') do
   out = "\0" * 8
   count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, 'hi', 2, out, 4)
   EngineTest.assert_equal(2, count, 'code units written')
-  EngineTest.assert_equal([0x68, 0, 0x69, 0, 0, 0, 0, 0], bytes(out), 'bytes written')
+  EngineTest.assert_equal([0x68, 0, 0x69, 0, 0, 0, 0, 0], byte_list(out), 'bytes written')
 end
 
 EngineTest.test('MultiByteToWideChar reads UTF-8') do
   out = "\0" * 4
   count = MULTI_BYTE_TO_WIDE_CHAR.call(65_001, 0, [0xC3, 0xA9].pack('C*'), 2, out, 2)
   EngineTest.assert_equal(1, count, 'code units written')
-  EngineTest.assert_equal([0xE9, 0, 0, 0], bytes(out), 'bytes written')
+  EngineTest.assert_equal([0xE9, 0, 0, 0], byte_list(out), 'bytes written')
 end
 
 EngineTest.test('WideCharToMultiByte writes UTF-8') do
   out = "\0" * 8
   count = WIDE_CHAR_TO_MULTI_BYTE.call(65_001, 0, [0x68, 0xE9, 0].pack('v*'), -1, out, 8, nil, nil)
   EngineTest.assert_equal(4, count, 'bytes written with the null')
-  EngineTest.assert_equal([0x68, 0xC3, 0xA9, 0], bytes(out)[0, 4], 'bytes')
+  EngineTest.assert_equal([0x68, 0xC3, 0xA9, 0], byte_list(out)[0, 4], 'bytes')
+end
+
+EngineTest.test('WideCharToMultiByte cuts the text to a small buffer') do
+  out = "\0" * 2
+  count = WIDE_CHAR_TO_MULTI_BYTE.call(65_001, 0, [0x61, 0x62, 0x63].pack('v*'), 3, out, 2, nil, nil)
+  EngineTest.assert_equal(2, count, 'bytes written')
+  EngineTest.assert_equal([0x61, 0x62], byte_list(out), 'bytes')
 end
 
 EngineTest.test('WideCharToMultiByte joins a surrogate pair') do
   count = WIDE_CHAR_TO_MULTI_BYTE.call(65_001, 0, [0xD83D, 0xDE00].pack('v*'), 2, nil, 0, nil, nil)
   out = "\0" * count
   WIDE_CHAR_TO_MULTI_BYTE.call(65_001, 0, [0xD83D, 0xDE00].pack('v*'), 2, out, count, nil, nil)
-  EngineTest.assert_equal([0xF0, 0x9F, 0x98, 0x80], bytes(out), 'bytes')
+  EngineTest.assert_equal([0xF0, 0x9F, 0x98, 0x80], byte_list(out), 'bytes')
+end
+
+EngineTest.test('WideCharToMultiByte writes bytes into a buffer with UTF-8 text') do
+  out = [0xC3, 0xA9, 0xC3, 0xA9].pack('C*')
+  out.force_encoding('UTF-8') if CODE_PAGES
+  WIDE_CHAR_TO_MULTI_BYTE.call(65_001, 0, [0x68].pack('v*'), 1, out, 1, nil, nil)
+  EngineTest.assert_equal([0x68, 0xA9, 0xC3, 0xA9], byte_list(out), 'bytes')
 end
 
 # Zeus Video Player (Vinemon's Scene_Movie3) converts each video command
@@ -93,7 +112,7 @@ if CODE_PAGES
     out = "\0" * 4
     count = MULTI_BYTE_TO_WIDE_CHAR.call(932, 0, [0x82, 0xA0].pack('C*'), 2, out, 2)
     EngineTest.assert_equal(1, count, 'code units written')
-    EngineTest.assert_equal([0x42, 0x30, 0, 0], bytes(out), 'bytes written')
+    EngineTest.assert_equal([0x42, 0x30, 0, 0], byte_list(out), 'bytes written')
   end
 end
 

@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# Code page conversion for the text stand-ins in win32_wrap.rb. The
-# engine loads this file only on Ruby 1.9 and later, because Ruby 1.8
-# has no Encoding.
+# The engine loads this file only on Ruby 1.9 and later, because Ruby
+# 1.8 has no Encoding.
 
 module Win32API_Impl
   module Kernel32
-    # A code page that is not in this list reads as UTF-8.
     CODEPAGE_TO_ENCODING = {
       65_001 => Encoding::UTF_8,
       20_127 => Encoding::US_ASCII,

@@ -694,54 +694,57 @@ module Win32API_Impl
       codes.pack('U*')
     end
 
-    # The first `count` units of `unit` bytes each. A count of -1 reads
-    # up to the first null unit and keeps it, as Win32 does.
+    # A count of -1 reads up to the first null unit and keeps it, as
+    # Win32 does.
     def self.unit_slice(buf, count, unit)
       return '' unless buf.is_a?(String)
 
-      bytes = buf.unpack('C*')
       if count == -1
+        bytes = buf.unpack('C*')
         size = 0
         while size + unit <= bytes.size
           size += unit
           break if bytes[size - unit, unit] == [0] * unit
         end
       else
-        size = [count * unit, bytes.size].min
+        size = [count * unit, buf.bytesize].min
         size = 0 if size < 0
       end
-      bytes[0, size].pack('C*')
+      buf.unpack("a#{size}").first
     end
 
     # With no buffer or a size of 0, the caller asks how many bytes the
     # result needs.
     def self.write_buffer(dst, data, size)
-      bytes = data.unpack('C*')
-      return bytes.size unless dst.is_a?(String) && size > 0
+      return data.bytesize unless dst.is_a?(String) && size > 0
 
-      count = [bytes.size, dst.unpack('C*').size, size].min
-      memcpy_string(dst, bytes[0, count].pack('C*'))
+      count = [data.bytesize, dst.bytesize, size].min
+      if defined?(Encoding)
+        # On Ruby 1.9 and later, dst[i] = b replaces the i-th character,
+        # not the i-th byte.
+        count.times { |i| dst.setbyte(i, data.getbyte(i)) }
+      else
+        memcpy_string(dst, data[0, count])
+      end
       count
     end
 
-    # MultiByteToWideChar(codepage, flags, source, bytes, destination,
-    # code units)
     class MultiByteToWideChar
       def call(args)
-        text = Win32API_Impl::Kernel32.unit_slice(args[2], args[3].to_i, 1)
-        wide = Win32API_Impl::Kernel32.to_utf16(text, args[0].to_i)
-        Win32API_Impl::Kernel32.write_buffer(args[4], wide, args[5].to_i * 2) / 2
+        codepage, _flags, source, count, dst, dst_units = args
+        text = Win32API_Impl::Kernel32.unit_slice(source, count.to_i, 1)
+        wide = Win32API_Impl::Kernel32.to_utf16(text, codepage.to_i)
+        Win32API_Impl::Kernel32.write_buffer(dst, wide, dst_units.to_i * 2) / 2
       end
     end
     MultiByteToWideCharA = MultiByteToWideChar
 
-    # WideCharToMultiByte(codepage, flags, source, code units,
-    # destination, bytes, default char, used default char)
     class WideCharToMultiByte
       def call(args)
-        wide = Win32API_Impl::Kernel32.unit_slice(args[2], args[3].to_i, 2)
-        text = Win32API_Impl::Kernel32.from_utf16(wide, args[0].to_i)
-        Win32API_Impl::Kernel32.write_buffer(args[4], text, args[5].to_i)
+        codepage, _flags, source, count, dst, dst_size = args
+        wide = Win32API_Impl::Kernel32.unit_slice(source, count.to_i, 2)
+        text = Win32API_Impl::Kernel32.from_utf16(wide, codepage.to_i)
+        Win32API_Impl::Kernel32.write_buffer(dst, text, dst_size.to_i)
       end
     end
     WideCharToMultiByteA = WideCharToMultiByte
@@ -888,9 +891,9 @@ module Win32API_Impl
       def write_response(buf, text)
         return unless buf.is_a?(String)
 
-        size = buf.unpack('C*').size
-        bytes = Win32API_Impl::Kernel32.to_utf16(text, 65_001).unpack('C*')
-        memcpy_string(buf, (bytes + [0] * size)[0, size].pack('C*'))
+        size = buf.bytesize
+        wide = Win32API_Impl::Kernel32.to_utf16(text, 65_001)
+        Win32API_Impl::Kernel32.write_buffer(buf, wide + ("\0" * size), size)
       end
     end
     MciSendStringA = MciSendStringW
