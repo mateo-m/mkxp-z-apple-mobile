@@ -223,6 +223,7 @@ jobs:
       - name: System.launch suite
         if: env.TEST == 'true' && !cancelled() && steps.host.outcome == 'success'
         run: |
+          xcrun simctl terminate booted com.apple.mobilesafari 2>/dev/null || true
           tools/run-engine-tests.sh --no-build --timeout 300 --suite system_launch.rb
           # simctl sends no event when an app starts.
           for _ in $(seq 30); do
