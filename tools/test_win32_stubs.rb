@@ -571,6 +571,23 @@ offset_x = (screen[0] - 512 * factor) / (2 * factor)
 offset_y = (screen[1] - 384 * factor) / (2 * factor)
 assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 0.0], 'the full-screen canvas keeps the game size')
 
+# Pokemon Sage's Sprite_Resizer: integer factors, with the screen border
+# of the game added to the game size.
+Object.const_set(:BORDERWIDTH, 80)
+Object.const_set(:BORDERHEIGHT, 80)
+$PokemonSystem = Struct.new(:border).new(1)
+screen = [metrics.call(0), metrics.call(1)]
+factor = [screen[0] / (512 + 160), screen[1] / (384 + 160)].min
+assert_eq(factor, 1, 'full screen with the border on has a factor of 1')
+assert_eq([(screen[0] - 512) / 2, (screen[1] - 384) / 2], [80, 80], 'the border fills the space around the game')
+$PokemonSystem.border = 0
+assert_eq([metrics.call(0), metrics.call(1)], [512, 384], 'with the border off, the screen is the game size')
+$PokemonSystem.border = 1
+Object.const_set(:FULLSCREENBORDERCROP, true)
+assert_eq([metrics.call(0), metrics.call(1)], [512, 384], 'a game that crops the border in full screen gets the game size')
+[:BORDERWIDTH, :BORDERHEIGHT, :FULLSCREENBORDERCROP].each { |name| Object.send(:remove_const, name) }
+$PokemonSystem = nil
+
 # Zeus81's Fullscreen++ for VX Ace: borders_size and workarea_rect.
 window = [0, 0, 0, 0].pack('l4')
 client = [0, 0, 0, 0].pack('l4')
