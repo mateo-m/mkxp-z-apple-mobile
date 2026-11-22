@@ -520,9 +520,9 @@ module Win32API_Impl
     # Full-screen scripts size the canvas from the screen once, and the
     # engine already scales the canvas to the window. A screen the size
     # of the game keeps the canvas the size of the game. Pokemon
-    # Essentials adds its screen border to the game size, and divides
-    # the screen by that sum with integer math, so a screen without the
-    # border gives a factor of 0.
+    # Essentials v17 divides the screen by the game size plus its screen
+    # border, and rounds down. A screen without the border gives a factor
+    # below 1: 0.5 in v17, 0 in Pokemon Sage.
     class GetSystemMetrics
       SM_CXSCREEN = 0
       SM_CYSCREEN = 1

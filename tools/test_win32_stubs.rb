@@ -571,12 +571,14 @@ offset_x = (screen[0] - 512 * factor) / (2 * factor)
 offset_y = (screen[1] - 384 * factor) / (2 * factor)
 assert_eq([factor, offset_x, offset_y], [1.0, 0.0, 0.0], 'the full-screen canvas keeps the game size')
 
-# Pokemon Sage's Sprite_Resizer: integer factors, with the screen border
-# of the game added to the game size.
+# Essentials v17 and Pokemon Sage with the screen border on. Sage rounds
+# the factor to whole numbers.
 Object.const_set(:BORDERWIDTH, 80)
 Object.const_set(:BORDERHEIGHT, 80)
 $PokemonSystem = Struct.new(:border).new(1)
 screen = [metrics.call(0), metrics.call(1)]
+half_factor = [((2 * screen[0]) / (512 + 160)).floor, ((2 * screen[1]) / (384 + 160)).floor].min / 2.0
+assert_eq(half_factor, 1.0, 'Essentials v17 full screen with the border on keeps the game size')
 factor = [screen[0] / (512 + 160), screen[1] / (384 + 160)].min
 assert_eq(factor, 1, 'full screen with the border on has a factor of 1')
 assert_eq([(screen[0] - 512) / 2, (screen[1] - 384) / 2], [80, 80], 'the border fills the space around the game')
@@ -617,4 +619,4 @@ assert_eq(Win32API.new('Kernel32', 'GetCommandLineW', '', 'p').call, 0, 'GetComm
   assert_eq(spi.call(0x30, 0, buffer, 0), 0, 'SPI_GETWORKAREA refuses a buffer that is not a RECT')
 end
 
-test_passed('test_win32_stubs', 114)
+test_passed('test_win32_stubs', 115)
