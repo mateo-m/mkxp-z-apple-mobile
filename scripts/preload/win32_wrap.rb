@@ -529,8 +529,8 @@ module Win32API_Impl
 
       def call(args)
         case args[0]
-        when SM_CXSCREEN then Graphics.width + 2 * essentials_border[0]
-        when SM_CYSCREEN then Graphics.height + 2 * essentials_border[1]
+        when SM_CXSCREEN then Graphics.width + (2 * essentials_border[0])
+        when SM_CYSCREEN then Graphics.height + (2 * essentials_border[1])
         else 0
         end
       end

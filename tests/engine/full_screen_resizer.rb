@@ -102,7 +102,8 @@ EngineTest.test('full screen with the border on has a whole-number factor of 1')
     screen_width, screen_height = Win32API.fillScreen
     factor = [screen_width / (Graphics.width + 160), screen_height / (Graphics.height + 160)].min
     EngineTest.assert_equal(1, factor, 'factor')
-    EngineTest.assert_equal([80, 80], [(screen_width - Graphics.width) / 2, (screen_height - Graphics.height) / 2], 'offsets')
+    offsets = [(screen_width - Graphics.width) / 2, (screen_height - Graphics.height) / 2]
+    EngineTest.assert_equal([80, 80], offsets, 'offsets')
   ensure
     Object.send(:remove_const, :BORDERWIDTH)
     Object.send(:remove_const, :BORDERHEIGHT)
