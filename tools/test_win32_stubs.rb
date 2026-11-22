@@ -617,4 +617,4 @@ assert_eq(Win32API.new('Kernel32', 'GetCommandLineW', '', 'p').call, 0, 'GetComm
   assert_eq(spi.call(0x30, 0, buffer, 0), 0, 'SPI_GETWORKAREA refuses a buffer that is not a RECT')
 end
 
-test_passed('test_win32_stubs', 110)
+test_passed('test_win32_stubs', 114)
