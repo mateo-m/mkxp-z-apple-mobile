@@ -1344,15 +1344,6 @@ void Graphics::update(bool checkForShutdown) {
     
     p->checkSyncLock();
 
-    if (p->frozen) {
-        // RGSS scripts still call Graphics.update while the scene is frozen,
-        // especially for Ruby-driven transitions that animate over a frozen
-        // snapshot. Returning immediately here makes Graphics.delta_s collapse
-        // toward zero and those timers never advance on iOS.
-        p->blitFrozenSceneToScreen();
-        return;
-    }
-    
     if (p->fpsLimiter.frameSkipRequired()) {
         if (p->useFrameSkip) {
             /* Skip frame */
@@ -1396,6 +1387,15 @@ void Graphics::update(bool checkForShutdown) {
         } else {
             p->presentSkipCounter = 0;
         }
+    }
+
+    if (p->frozen) {
+        // RGSS scripts still call Graphics.update while the scene is frozen,
+        // especially for Ruby-driven transitions that animate over a frozen
+        // snapshot. Returning immediately here makes Graphics.delta_s collapse
+        // toward zero and those timers never advance on iOS.
+        p->blitFrozenSceneToScreen();
+        return;
     }
 
     p->checkResize();
