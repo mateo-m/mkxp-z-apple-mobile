@@ -1349,10 +1349,7 @@ void Graphics::update(bool checkForShutdown) {
         // especially for Ruby-driven transitions that animate over a frozen
         // snapshot. Returning immediately here makes Graphics.delta_s collapse
         // toward zero and those timers never advance on iOS.
-        p->fpsLimiter.delay();
         p->blitFrozenSceneToScreen();
-        ++p->frameCount;
-        p->threadData->ethread->notifyFrame();
         return;
     }
     
