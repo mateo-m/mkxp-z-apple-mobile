@@ -1561,6 +1561,7 @@ void Graphics::transition(int duration, const char *filename, int vague) {
     delete transMap;
     
     p->frozen = false;
+    p->markFrameTime(FrameTimes::Draw);
 }
 
 void Graphics::frameReset() {p->fpsLimiter.resetFrameAdjust();}
