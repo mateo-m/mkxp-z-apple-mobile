@@ -9,33 +9,33 @@
 
 namespace {
 
-const double budget = 1.0 / 40;
+/* Each steady time is a sum of powers of 2, so the sums of the frames
+ * are exact and a period ends on the same frame from any start time. */
+const double budget = 1.0 / 32;
 
 struct Frame
 {
-    double game, draw, sleep, screen;
+    double scripts, draw, sleep, swap;
 };
 
-const Frame steady = {0.005, 0.001, 0.018, 0.001};
+const Frame steady = {8.0 / 1024, 2.0 / 1024, 20.0 / 1024, 2.0 / 1024};
 
-/* Runs one frame that starts at `now`, and gives back the report. */
 std::string runFrame(FrameTimes &times, double &now, const Frame &frame,
                      double frameBudget = budget, bool drawn = true)
 {
-    times.mark(FrameTimes::Game, now += frame.game);
+    times.mark(FrameTimes::Scripts, now += frame.scripts);
     times.mark(FrameTimes::Draw, now += frame.draw);
     times.mark(FrameTimes::Sleep, now += frame.sleep);
-    times.mark(FrameTimes::Screen, now += frame.screen);
+    times.mark(FrameTimes::Swap, now += frame.swap);
     return times.frameDone(frameBudget, drawn);
 }
 
 /* Starts the clock of `times` at `now`, as the end of a frame does. */
 void start(FrameTimes &times, double now)
 {
-    times.mark(FrameTimes::Screen, now);
+    times.mark(FrameTimes::Swap, now);
 }
 
-/* Runs steady frames until a report comes. */
 std::string runUntilReport(FrameTimes &times, double &now)
 {
     for (int i = 0; i < 1000; ++i)
@@ -62,8 +62,8 @@ TEST(frametimes_reports_the_mean_of_each_part)
 
     std::string report = runUntilReport(times, now);
 
-    CHECK_EQ(std::string("400 frames in 10.0 s, 40.0 of 40 fps. "
-                         "Mean ms: game 5.0, draw 1.0, sleep 18.0, screen 1.0."),
+    CHECK_EQ(std::string("320 frames in 10.0 s, 32.0 of 32 fps. "
+                         "Mean ms: scripts 7.8, draw 2.0, sleep 19.5, swap 2.0."),
              report);
 }
 
@@ -73,8 +73,9 @@ TEST(frametimes_gives_no_report_before_the_period_ends)
     double now = 0;
     start(times, now);
 
-    for (int i = 0; i < 399; ++i)
+    for (int i = 0; i < 320; ++i)
         CHECK(runFrame(times, now, steady).empty());
+    CHECK(!runFrame(times, now, steady).empty());
 }
 
 TEST(frametimes_leaves_the_time_before_the_first_mark_out)
@@ -84,7 +85,7 @@ TEST(frametimes_leaves_the_time_before_the_first_mark_out)
 
     std::string report = runUntilReport(times, now);
 
-    CHECK(has(report, "40.0 of 40 fps"));
+    CHECK(has(report, "32.0 of 32 fps"));
 }
 
 TEST(frametimes_gives_the_parts_of_the_late_frames)
@@ -94,11 +95,11 @@ TEST(frametimes_gives_the_parts_of_the_late_frames)
     start(times, now);
 
     runFrame(times, now, {0.050, 0.002, 0, 0.008});
-    runFrame(times, now, {0.030, 0.002, 0, 0.008});
+    runFrame(times, now, {0.040, 0.002, 0, 0.008});
     std::string report = runUntilReport(times, now);
 
     CHECK(has(report, " Late: 2 frames, longest 60.0 ms. "
-                      "Their sum in ms: game 80.0, draw 4.0, sleep 0.0, screen 16.0."));
+                      "Their sum in ms: scripts 90.0, draw 4.0, sleep 0.0, swap 16.0."));
 }
 
 TEST(frametimes_does_not_call_a_frame_late_below_the_limit)
@@ -107,7 +108,7 @@ TEST(frametimes_does_not_call_a_frame_late_below_the_limit)
     double now = 0;
     start(times, now);
 
-    runFrame(times, now, {0.030, 0.002, 0, 0.004});
+    runFrame(times, now, {0.040, 0.002, 0, 0.004});
     std::string report = runUntilReport(times, now);
 
     CHECK(!has(report, "Late"));
@@ -132,16 +133,16 @@ TEST(frametimes_reports_when_the_frame_rate_changes)
     double now = 0;
     start(times, now);
 
-    for (int i = 0; i < 40; ++i)
+    for (int i = 0; i < 32; ++i)
         runFrame(times, now, steady);
     std::string report = runFrame(times, now, steady, budget / 3);
 
-    CHECK(has(report, "40 frames in 1.0 s, 40.0 of 40 fps."));
+    CHECK(has(report, "32 frames in 1.0 s, 32.0 of 32 fps."));
 
     for (int i = 0; i < 9; ++i)
         runFrame(times, now, steady, budget / 3);
     report = runFrame(times, now, steady, budget);
 
-    CHECK(has(report, "10 frames in 0.2 s, 40.0 of 120 fps."));
+    CHECK(has(report, "10 frames in 0.3 s, 32.0 of 96 fps."));
     CHECK(has(report, "Late: 10 frames"));
 }

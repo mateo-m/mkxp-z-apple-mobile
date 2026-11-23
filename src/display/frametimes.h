@@ -12,16 +12,13 @@ class FrameTimes
 public:
     enum Part
     {
-        /* The scripts of the game, between two frames. */
-        Game,
+        Scripts,
         Draw,
         Sleep,
-        /* The swap, which waits for the screen. */
-        Screen,
+        Swap,
         PartCount
     };
 
-    /* Gives the time since the last call to `part`. */
     void mark(Part part, double seconds)
     {
         if (running)
@@ -30,10 +27,7 @@ public:
         running = true;
     }
 
-    /* Ends a frame. `budget` is the time that the frame rate gives to
-     * one frame. The result is a report of the frames before this one
-     * when they fill `reportSeconds` or had another budget, and ""
-     * otherwise. */
+    /* The report does not include this frame. */
     std::string frameDone(double budget, bool drawn)
     {
         std::string report;
@@ -62,10 +56,10 @@ public:
         return report;
     }
 
+private:
     static constexpr double reportSeconds = 10;
     static constexpr double lateFactor = 1.5;
 
-private:
     double seconds() const
     {
         double sum = 0;
@@ -77,31 +71,36 @@ private:
     std::string takeReport()
     {
         double span = seconds();
-        double meanMs = 1000.0 / frames;
-        char text[400];
-        int length = std::snprintf(
-            text, sizeof(text),
-            "%d frames in %.1f s, %.1f of %.0f fps. "
-            "Mean ms: game %.1f, draw %.1f, sleep %.1f, screen %.1f.",
-            frames, span, span > 0 ? frames / span : 0, 1 / frameBudget,
-            total[Game] * meanMs, total[Draw] * meanMs,
-            total[Sleep] * meanMs, total[Screen] * meanMs);
+        double toMeanMs = 1000.0 / frames;
+        char text[200];
+        std::snprintf(text, sizeof(text),
+                      "%d frames in %.1f s, %.1f of %.0f fps. "
+                      "Mean ms: scripts %.1f, draw %.1f, sleep %.1f, swap %.1f.",
+                      frames, span, span > 0 ? frames / span : 0, 1 / frameBudget,
+                      total[Scripts] * toMeanMs, total[Draw] * toMeanMs,
+                      total[Sleep] * toMeanMs, total[Swap] * toMeanMs);
+        std::string report = text;
         if (notDrawn > 0)
-            length += std::snprintf(text + length, sizeof(text) - length,
-                                    " %d not drawn.", notDrawn);
+        {
+            std::snprintf(text, sizeof(text), " %d not drawn.", notDrawn);
+            report += text;
+        }
         if (lateFrames > 0)
-            std::snprintf(text + length, sizeof(text) - length,
+        {
+            std::snprintf(text, sizeof(text),
                           " Late: %d frames, longest %.1f ms. "
-                          "Their sum in ms: game %.1f, draw %.1f, sleep %.1f, screen %.1f.",
+                          "Their sum in ms: scripts %.1f, draw %.1f, sleep %.1f, swap %.1f.",
                           lateFrames, longest * 1000,
-                          lateTotal[Game] * 1000, lateTotal[Draw] * 1000,
-                          lateTotal[Sleep] * 1000, lateTotal[Screen] * 1000);
+                          lateTotal[Scripts] * 1000, lateTotal[Draw] * 1000,
+                          lateTotal[Sleep] * 1000, lateTotal[Swap] * 1000);
+            report += text;
+        }
 
         frames = notDrawn = lateFrames = 0;
         longest = 0;
         for (int part = 0; part < PartCount; ++part)
             total[part] = lateTotal[part] = 0;
-        return text;
+        return report;
     }
 
     double last = 0;

@@ -974,9 +974,8 @@ struct GraphicsPrivate {
         if (!mkxp_debugLogEnabled())
             return;
 
-        int multiplier = std::max(mkxp_getFastForwardMultiplier(), 1);
         std::string report =
-            frameTimes.frameDone(fpsLimiter.frameSeconds() / multiplier, drawn);
+            frameTimes.frameDone(fpsLimiter.frameSeconds(), drawn);
         if (!report.empty())
             mkxp_debugLog("INFO", "frame-times", report.c_str());
     }
@@ -990,7 +989,7 @@ struct GraphicsPrivate {
     void swapGLBuffer() {
         delayFrame();
         graphicsGL_SwapWindow(threadData->window);
-        markFrameTime(FrameTimes::Screen);
+        markFrameTime(FrameTimes::Swap);
         frameTimeDone(true);
 
         ++frameCount;
@@ -1288,6 +1287,7 @@ struct GraphicsPrivate {
     void framePresented(TEXFBO &presented) {
         checkPause(presented);
         keepPresentedFrame(presented);
+        markFrameTime(FrameTimes::Draw);
     }
 };
 
@@ -1347,7 +1347,7 @@ void Graphics::update(bool checkForShutdown) {
         shState->checkShutdown();
         return;
     }
-    p->markFrameTime(FrameTimes::Game);
+    p->markFrameTime(FrameTimes::Scripts);
     p->threadData->rqWindowAdjust.wait();
     double now = shState->runTime();
     if (p->last_update > 0) {
@@ -1407,8 +1407,6 @@ void Graphics::update(bool checkForShutdown) {
             bool render = (p->presentSkipCounter % multiplier) == 0;
             p->presentSkipCounter++;
             if (!render) {
-                p->markFrameTime(FrameTimes::Draw);
-                p->frameTimeDone(false);
                 ++p->frameCount;
                 p->threadData->ethread->notifyFrame();
                 /* This branch skips the draw and the swap, so there is
@@ -1437,7 +1435,7 @@ void Graphics::update(bool checkForShutdown) {
 }
 
 void Graphics::freeze() {
-    p->markFrameTime(FrameTimes::Game);
+    p->markFrameTime(FrameTimes::Scripts);
     p->frozen = true;
     
     p->checkShutDownReset();
@@ -1449,7 +1447,7 @@ void Graphics::freeze() {
 }
 
 void Graphics::transition(int duration, const char *filename, int vague) {
-    p->markFrameTime(FrameTimes::Game);
+    p->markFrameTime(FrameTimes::Scripts);
     p->checkSyncLock();
     
     if (!p->frozen)
@@ -1594,6 +1592,7 @@ double Graphics::averageFrameRate() {
 }
 
 void Graphics::wait(int duration) {
+    p->markFrameTime(FrameTimes::Scripts);
     for (int i = 0; i < duration; ++i) {
         p->checkShutDownReset();
         p->redrawScreen();
@@ -1602,6 +1601,7 @@ void Graphics::wait(int duration) {
 }
 
 void Graphics::fadeout(int duration) {
+    p->markFrameTime(FrameTimes::Scripts);
     FBO::unbind();
     
     float curr = p->brightness;
@@ -1619,6 +1619,7 @@ void Graphics::fadeout(int duration) {
 }
 
 void Graphics::fadein(int duration) {
+    p->markFrameTime(FrameTimes::Scripts);
     FBO::unbind();
     
     float curr = p->brightness;
