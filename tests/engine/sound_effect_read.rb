@@ -16,10 +16,10 @@ end
 EngineTest.suite('sound-effect-read', 1)
 
 # Ruby cannot count the reads of the process. The kernel time of the
-# process is the nearest value: one read for each byte of the 70 KB
-# file takes more than 40 ms of it, and reads in blocks take less
-# than 1 ms.
-KERNEL_LIMIT_MS = 10
+# process is the nearest value. With one read for each byte of the
+# 70 KB file, the play takes 46 ms of it on an M2 Pro. With reads in
+# blocks, it takes 6 ms on the CI runner.
+KERNEL_LIMIT_MS = 20
 
 EngineTest.test('the first play of a sound effect reads its file in blocks') do
   before = Process.times.stime
