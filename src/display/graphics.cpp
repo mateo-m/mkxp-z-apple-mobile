@@ -1407,6 +1407,8 @@ void Graphics::update(bool checkForShutdown) {
             bool render = (p->presentSkipCounter % multiplier) == 0;
             p->presentSkipCounter++;
             if (!render) {
+                p->markFrameTime(FrameTimes::Draw);
+                p->frameTimeDone(false);
                 ++p->frameCount;
                 p->threadData->ethread->notifyFrame();
                 /* This branch skips the draw and the swap, so there is
