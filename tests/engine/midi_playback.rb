@@ -36,7 +36,7 @@ EngineTest.test('a MIDI track plays') do
   Audio.bgm_play('midi_tone', 100, 100)
   position = 0.0
   frames = 0
-  until position.positive? || frames == FRAMES
+  until position > 0 || frames == FRAMES
     Graphics.update
     position = Audio.bgm_pos
     frames += 1
@@ -44,7 +44,7 @@ EngineTest.test('a MIDI track plays') do
   Audio.bgm_stop
   EngineTest.info('bgm_pos', position)
   EngineTest.info('frames', frames)
-  EngineTest.assert(position.positive?, "bgm_pos is 0 after #{FRAMES} frames")
+  EngineTest.assert(position > 0, "bgm_pos is 0 after #{FRAMES} frames")
 end
 
 EngineTest.finish
