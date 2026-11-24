@@ -144,7 +144,7 @@ struct SharedStatePrivate
 			if (access(patch, F_OK) != 0)
 			{
 				std::string msg = std::string("skipped the missing ") + patch;
-				mkxp_debugLog("INFO", "patches", msg.c_str());
+				mkxp_debugLog("WARN", "patches", msg.c_str());
 				continue;
 			}
 			fileSystem.addPath(patch);
