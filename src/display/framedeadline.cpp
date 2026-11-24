@@ -18,12 +18,15 @@ namespace
 
 /* The game thread sleeps for most of each frame. iOS reads that as
  * light work and keeps the thread on the efficiency cores at a low
- * clock speed: on an A15, the scripts of a map frame take 7 ms, and
- * 1.6 ms on a performance core. The user-interactive QoS class, a fixed
- * priority and the real-time policy do not change that. A work interval
- * does, but only when it runs from one frame to the next and so holds
- * the sleep. An interval that ends when the work ends shows iOS a
- * deadline that is easy to meet, and the thread stays where it is. */
+ * clock speed. The user-interactive QoS class, a fixed priority and the
+ * real-time policy do not change that. A work interval does: iOS sets
+ * the speed of the thread from the time that the work has until its
+ * deadline. On an A15 at 40 frames per second, the scripts of a map
+ * frame take 7 ms with no interval, 8 ms with a deadline of one frame,
+ * 2.5 ms with a quarter of a frame, and 1.4 ms with an eighth.
+ * The interval must not hold the sleep of the limiter. With the sleep,
+ * each interval ends at its deadline and iOS has no steady signal: the
+ * same scripts then take from 2 ms to 11 ms. */
 class FrameDeadline
 {
 public:
@@ -39,22 +42,21 @@ public:
             os_release(interval);
     }
 
-    void nextFrame(uint64_t frameNanoseconds)
+    void start(uint64_t deadlineNanoseconds)
     {
-        if (state == Off)
-            return;
-        /* An interval that did not finish stays open in iOS, and the
-         * thread cannot leave while it is open. */
-        if (state == Open && os_workgroup_interval_finish(interval, nullptr) != 0)
+        /* Open: the last interval did not finish, and iOS does not
+         * start a second one. */
+        if (state == Off || state == Open)
             return;
 
         bool first = state == New;
         int error = first ? join() : 0;
         if (error == 0) {
             uint64_t now = mach_absolute_time();
-            uint64_t deadline = now + frameNanoseconds * timebase.denom / timebase.numer;
+            uint64_t deadline = now + deadlineNanoseconds * timebase.denom / timebase.numer;
             error = os_workgroup_interval_start(interval, now, deadline, nullptr);
-            state = error == 0 ? Open : Joined;
+            if (error == 0)
+                state = Open;
         }
         if (first) {
             char message[64];
@@ -62,6 +64,12 @@ public:
                           error == 0 ? "on" : "off", error);
             mkxp_debugLog("INFO", "frame-deadline", message);
         }
+    }
+
+    void end()
+    {
+        if (state == Open && os_workgroup_interval_finish(interval, nullptr) == 0)
+            state = Joined;
     }
 
 private:
@@ -88,10 +96,16 @@ private:
     mach_timebase_info_data_t timebase{};
 };
 
+thread_local FrameDeadline frameDeadline;
+
 } // namespace
 
-void startFrameDeadline(uint64_t frameNanoseconds)
+void startFrameWork(uint64_t deadlineNanoseconds)
 {
-    static thread_local FrameDeadline deadline;
-    deadline.nextFrame(frameNanoseconds);
+    frameDeadline.start(deadlineNanoseconds);
+}
+
+void endFrameWork()
+{
+    frameDeadline.end();
 }

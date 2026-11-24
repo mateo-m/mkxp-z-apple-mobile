@@ -6,7 +6,9 @@
 
 #include <cstdint>
 
-/* Call at the start of each frame, on the thread that runs it. */
-void startFrameDeadline(uint64_t frameNanoseconds);
+/* Call both on the thread that runs the frames: `startFrameWork` when
+ * the work of a frame starts, and `endFrameWork` when it ends. */
+void startFrameWork(uint64_t deadlineNanoseconds);
+void endFrameWork();
 
 #endif // FRAMEDEADLINE_H

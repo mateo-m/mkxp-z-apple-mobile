@@ -394,15 +394,18 @@ struct FPSLimiter {
         if (toDelay < 0)
             toDelay = 0;
         
+        endFrameWork();
         delayTicks(toDelay);
         
         uint64_t now = lastTickCount = SDL_GetPerformanceCounter();
         int64_t diff = now - adj.last;
         adj.last = now;
 
-        /* With fast-forward, the frame adjustment below still brings
+        /* A quarter of the frame time: on an A15, an eighth brings no
+         * fewer late frames and takes three times the extra energy.
+         * With fast-forward, the frame adjustment below still brings
          * the time between two calls to one full frame. */
-        startFrameDeadline(tpf / tickFreqNS);
+        startFrameWork(tpf / tickFreqNS / 4);
         
         /* Recalculate our temporal position
          * relative to the ideal timestep */
