@@ -29,7 +29,7 @@ end
 # reads in blocks, and 1.5 times that with one read for each byte.
 EngineTest.test('the first play of a sound effect reads its file in blocks') do
   each_byte_ms = kernel_ms do
-    File.open('Audio/SE/read_noise.ogg', 'rb') { |file| file.size.times { file.sysread(1) } }
+    File.open('Audio/SE/read_noise.ogg', 'rb') { |file| file.stat.size.times { file.sysread(1) } }
   end
   play_ms = kernel_ms { Audio.se_play('Audio/SE/read_noise', 0) }
   Audio.se_stop
