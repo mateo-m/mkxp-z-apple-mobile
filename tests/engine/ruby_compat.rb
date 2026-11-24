@@ -97,7 +97,9 @@ end
 
 EngineTest.load_preloads(%w[windows_fs platform_compat])
 
-# LonaRPG's light script runs @sprite.visible = @sprite.
+# LonaRPG's light script runs @sprite.visible = @sprite, and Galv's
+# Event Pop Ups in Hello Charlotte EP1 runs font.shadow = 20. The
+# test host runs as RGSS1, where Font has no shadow, so bold stands in.
 EngineTest.test('a flag setter takes any value as true, and nil as false') do
   sprite = Sprite.new
   begin
@@ -108,6 +110,9 @@ EngineTest.test('a flag setter takes any value as true, and nil as false') do
   ensure
     sprite.dispose
   end
+  font = Font.new
+  font.bold = 20
+  EngineTest.assert_equal(true, font.bold, 'bold after 20')
 end
 
 # Essentials writes $game_variables with Marshal.dump. A missing
