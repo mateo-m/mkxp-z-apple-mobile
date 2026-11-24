@@ -20,7 +20,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('ruby-compat', 11)
+EngineTest.suite('ruby-compat', 12)
 
 # A path with no per-cent sign in it, and a spare argument after it.
 # Pokemon Essentials writes many calls in this shape.
@@ -99,6 +99,19 @@ EngineTest.load_preloads(%w[windows_fs platform_compat])
 
 # Essentials writes $game_variables with Marshal.dump. A missing
 # constant turns into IOS::NullStub, and a variable can hold it.
+# LonaRPG's light script runs @sprite.visible = @sprite.
+EngineTest.test('a flag setter takes any value as true, and nil as false') do
+  sprite = Sprite.new
+  begin
+    sprite.visible = sprite
+    EngineTest.assert_equal(true, sprite.visible, 'visible after a Sprite')
+    sprite.visible = nil
+    EngineTest.assert_equal(false, sprite.visible, 'visible after nil')
+  ensure
+    sprite.dispose
+  end
+end
+
 EngineTest.test('a save that holds the null stub dumps and loads') do
   loaded = Marshal.load(Marshal.dump([1, IOS::NullStub]))
   EngineTest.assert_equal([1, IOS::NullStub], loaded, 'loaded values')
