@@ -400,8 +400,9 @@ struct FPSLimiter {
         int64_t diff = now - adj.last;
         adj.last = now;
 
-        static thread_local FrameDeadline deadline;
-        deadline.nextFrame(effectiveTpf / tickFreqNS);
+        /* With fast-forward, the frame adjustment below still brings
+         * the time between two calls to one full frame. */
+        startFrameDeadline(tpf / tickFreqNS);
         
         /* Recalculate our temporal position
          * relative to the ideal timestep */
