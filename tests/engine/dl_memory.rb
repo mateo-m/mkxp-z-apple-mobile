@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('dl-memory', 7)
+EngineTest.suite('dl-memory', 8)
 
 EngineTest.load_preloads(%w[windows_fs platform_compat win32_wrap])
 
@@ -40,6 +40,7 @@ EngineTest.test('GetKeyboardState writes to the address of a DL::CPtr') do
   EngineTest.assert_equal(1, result, 'GetKeyboardState result')
   # No key is down in the test host.
   EngineTest.assert_equal(0, state[0x41], 'state of the A key')
+  EngineTest.assert_equal(0, state[0x07], 'state of a key with no mapping')
 end
 
 EngineTest.test('GetKeyboardState writes to a String buffer') do
@@ -66,6 +67,15 @@ EngineTest.test('RtlMoveMemory reads one byte of a UTF-8 character') do
   buffer = "\0" * 2
   Win32API.new('kernel32.dll', 'RtlMoveMemory', 'PII', 'V').call(buffer, address, 1)
   EngineTest.assert_equal([0xC3, 0], buffer.unpack('C*'), 'bytes')
+end
+
+EngineTest.test('RtlMoveMemory writes one byte into a UTF-8 character') do
+  address = DL.malloc(1)
+  DL::CPtr.new(address, 1)[0] = 0x68
+  buffer = [0xC3, 0xA9].pack('C*')
+  buffer.force_encoding('UTF-8') if buffer.respond_to?(:force_encoding)
+  Win32API.new('kernel32.dll', 'RtlMoveMemory', 'PII', 'V').call(buffer, address, 1)
+  EngineTest.assert_equal([0x68, 0xA9], buffer.unpack('C*'), 'bytes')
 end
 
 EngineTest.finish

@@ -240,9 +240,23 @@ end
 def memcpy_string(dst, src)
   i = 0
   src.each_byte do |b|
-    dst[i] = b
+    # On Ruby 1.9 and later, dst[i] = b replaces the i-th character,
+    # not the i-th byte.
+    if defined?(Encoding) && i < dst.bytesize
+      dst.setbyte(i, b)
+    else
+      dst[i] = b
+    end
     i += 1
   end
+end
+
+# On Ruby 1.9 and later, String#[] counts characters, and Win32 counts
+# bytes.
+def binary_copy(str)
+  copy = str.to_s.dup
+  copy.force_encoding('ASCII-8BIT') if copy.respond_to?(:force_encoding)
+  copy
 end
 
 def state_pressed(states, sdl_scan)
@@ -312,14 +326,14 @@ module Win32API_Impl
         out_states = Win32API_Impl::FakeHeap.block(out_states) if out_states.is_a?(Integer)
         return 0 unless out_states
 
+        states = Array.new(256, 0)
         Scancodes::WIN32.each do |_name, val|
-          state = Input.asyncKeyState(val) > 0 ? PRESSED_BIT : 0
-          # On Ruby 1.9 and later, a String takes a byte only through setbyte.
-          if out_states.is_a?(String) && defined?(Encoding)
-            out_states.setbyte(val, state)
-          else
-            out_states[val] = state
-          end
+          states[val] = PRESSED_BIT if Input.asyncKeyState(val) > 0
+        end
+        if out_states.is_a?(String)
+          memcpy_string(out_states, states.pack('C*')[0, out_states.bytesize])
+        else
+          states.each_with_index { |state, i| out_states[i] = state }
         end
         1
       end
@@ -663,13 +677,13 @@ module Win32API_Impl
         return 0 unless destination.is_a?(String) && length > 0
 
         data = if source.is_a?(String)
-                 source[0, length]
+                 binary_copy(source)[0, length]
                else
                  Win32API_Impl::FakeHeap.read(source, length)
                end
         return 0 if data.nil?
 
-        memcpy_string(destination, data[0, destination.length].to_s)
+        memcpy_string(destination, data[0, destination.bytesize].to_s)
         1
       end
     end
@@ -1348,10 +1362,7 @@ module Win32API_Impl
     def self.alloc(bytes)
       address = @next_address
       @next_address += STRIDE
-      block = bytes.to_s.dup
-      # `read` cuts the block by characters, so it must hold bytes only.
-      block.force_encoding('ASCII-8BIT') if block.respond_to?(:force_encoding)
-      @blocks[address] = block
+      @blocks[address] = binary_copy(bytes)
       address
     end
 
