@@ -97,8 +97,6 @@ end
 
 EngineTest.load_preloads(%w[windows_fs platform_compat])
 
-# Essentials writes $game_variables with Marshal.dump. A missing
-# constant turns into IOS::NullStub, and a variable can hold it.
 # LonaRPG's light script runs @sprite.visible = @sprite.
 EngineTest.test('a flag setter takes any value as true, and nil as false') do
   sprite = Sprite.new
@@ -112,6 +110,8 @@ EngineTest.test('a flag setter takes any value as true, and nil as false') do
   end
 end
 
+# Essentials writes $game_variables with Marshal.dump. A missing
+# constant turns into IOS::NullStub, and a variable can hold it.
 EngineTest.test('a save that holds the null stub dumps and loads') do
   loaded = Marshal.load(Marshal.dump([1, IOS::NullStub]))
   EngineTest.assert_equal([1, IOS::NullStub], loaded, 'loaded values')
