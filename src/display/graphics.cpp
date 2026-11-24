@@ -30,6 +30,7 @@
 #include "etc-internal.h"
 #include "eventthread.h"
 #include "filesystem.h"
+#include "framedeadline.h"
 #include "framerateaverage.h"
 #include "frametimes.h"
 #include "gl-fun.h"
@@ -398,6 +399,9 @@ struct FPSLimiter {
         uint64_t now = lastTickCount = SDL_GetPerformanceCounter();
         int64_t diff = now - adj.last;
         adj.last = now;
+
+        static thread_local FrameDeadline deadline;
+        deadline.nextFrame(effectiveTpf / tickFreqNS);
         
         /* Recalculate our temporal position
          * relative to the ideal timestep */
