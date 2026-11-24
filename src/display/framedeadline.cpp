@@ -43,16 +43,25 @@ public:
     {
         if (state == Off)
             return;
-        if (state == New && !join())
-            return;
         /* An interval that did not finish stays open in iOS, and the
          * thread cannot leave while it is open. */
         if (state == Open && os_workgroup_interval_finish(interval, nullptr) != 0)
             return;
 
-        uint64_t now = mach_absolute_time();
-        uint64_t deadline = now + frameNanoseconds * timebase.denom / timebase.numer;
-        state = os_workgroup_interval_start(interval, now, deadline, nullptr) == 0 ? Open : Joined;
+        bool first = state == New;
+        int error = first ? join() : 0;
+        if (error == 0) {
+            uint64_t now = mach_absolute_time();
+            uint64_t deadline = now + frameNanoseconds * timebase.denom / timebase.numer;
+            error = os_workgroup_interval_start(interval, now, deadline, nullptr);
+            state = error == 0 ? Open : Joined;
+        }
+        if (first) {
+            char message[64];
+            std::snprintf(message, sizeof(message), "frame work interval: %s (%d)",
+                          error == 0 ? "on" : "off", error);
+            mkxp_debugLog("INFO", "frame-deadline", message);
+        }
     }
 
 private:
@@ -64,18 +73,13 @@ private:
         Open
     };
 
-    bool join()
+    int join()
     {
         mach_timebase_info(&timebase);
         interval = AudioWorkIntervalCreate("frame", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
         int error = interval ? os_workgroup_join(interval, &token) : -1;
         state = error == 0 ? Joined : Off;
-
-        char message[64];
-        std::snprintf(message, sizeof(message), "frame work interval: %s (%d)",
-                      error == 0 ? "on" : "off", error);
-        mkxp_debugLog("INFO", "frame-deadline", message);
-        return error == 0;
+        return error;
     }
 
     State state = New;
