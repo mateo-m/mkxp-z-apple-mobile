@@ -437,13 +437,12 @@ static BitmapPrivate *heldTextOwner = 0;
  * owner. Each pixel is zero while no bitmap holds text. */
 static std::vector<uint32_t> heldTextPixels;
 
-/* heldTextPixels keeps its largest size, so a larger bitmap holds no text */
 static const size_t heldTextMaxPixels = 2048 * 2048;
 
 /* A draw of the held texts copies and uploads the box around them. On an
  * iPhone 13 Pro, a box of 300 000 pixels takes less time than one more draw,
  * and a box of 1 000 000 pixels takes more. */
-static const int heldTextBoxGrowth = 640 * 480;
+static const int heldTextMaxBoxPixels = 640 * 480;
 
 struct BitmapOpenHandler : FileSystem::OpenHandler
 {
@@ -1136,12 +1135,12 @@ bool BitmapPrivate::holdText(const SDL_Surface *text, IntRect textRect, IntRect 
         shrinkRects(textRect.y, textRect.h, text->h, destRect.y, destRect.h, gl.height))
         return true;
     
-    if (textRect.w != destRect.w || textRect.h != destRect.h)
-        return false;
-    
     /* Text on cleared pixels needs no blend, and it is apart from each held
-     * text, because a held text counts as drawn pixels */
-    if ((size_t) gl.width * gl.height > heldTextMaxPixels || !touchesTaintedArea(destRect))
+     * text, because a held text counts as drawn pixels. Without
+     * GL_EXT_unpack_subimage, an upload of the box sends the whole
+     * heldTextPixels. */
+    if (!::gl.unpack_subimage || (size_t) gl.width * gl.height > heldTextMaxPixels ||
+        !touchesTaintedArea(destRect))
         return false;
     
     IntRect box = destRect;
@@ -1154,8 +1153,7 @@ bool BitmapPrivate::holdText(const SDL_Surface *text, IntRect textRect, IntRect 
         box = IntRect(left, top, right - left, bottom - top);
     }
     
-    if (heldTextOwner != this ||
-        box.w * box.h - heldTextBox.w * heldTextBox.h > heldTextBoxGrowth)
+    if (heldTextOwner != this || box.w * box.h > heldTextMaxBoxPixels)
     {
         Bitmap::drawHeldText();
         
@@ -1244,8 +1242,8 @@ void Bitmap::stretchBlt(IntRect destRect,
     stretchBlt(destRect, source, sourceRect, opacity, smooth, nullptr);
 }
 
-/* With parts, destRect touches a drawn area, and the blend path draws only
- * these parts of it */
+/* With parts, the caller recorded each part as drawn area, and the blend
+ * path draws only these parts of destRect */
 void Bitmap::stretchBlt(IntRect destRect,
                         const Bitmap &source, IntRect sourceRect,
                         int opacity, bool smooth,
@@ -1593,15 +1591,9 @@ void Bitmap::stretchBlt(IntRect destRect,
     if (blitTemp)
         SDL_FreeSurface(blitTemp);
     
-    if (parts)
-    {
-        for (const IntRect &part : *parts)
-            p->addTaintedArea(part);
-    }
-    else
-    {
+    if (!parts)
         p->addTaintedArea(destRect);
-    }
+    
     p->onModified();
 }
 
@@ -1949,9 +1941,8 @@ Color Bitmap::getPixel(int x, int y) const
 {
     guardDisposed();
     
-    /* The binding calls this outside the graphics lock for a bitmap that
-     * has a copy of its pixels on the CPU. A bitmap that holds text has no
-     * copy, so this draw runs only inside the lock. */
+    /* bitmapGetPixel takes the graphics lock only for a bitmap that has no
+     * copy of its pixels on the CPU. A bitmap that holds text has no copy. */
     p->drawOwnHeldText();
     
     GUARD_ANIMATED;
