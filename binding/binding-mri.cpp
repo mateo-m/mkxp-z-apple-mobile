@@ -2373,7 +2373,7 @@ static void mriBindingExecute() {
     }
 #endif
 
-#if RAPI_FULL >= 190
+#if RAPI_FULL >= 190 && RAPI_FULL < 200
     /* Ruby 1.9 starts here with ASCII-8BIT as the default external
      * encoding. LonaRPG reads its translation files with
      * File.read(path).encode("utf-8"), which then raises on the first

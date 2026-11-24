@@ -8,6 +8,8 @@
 #   tools/run-engine-tests.sh --suite text_reads.rb --ruby 31
 #   tools/run-engine-tests.sh --suite text_reads.rb --ruby 19
 #   tools/run-engine-tests.sh --suite text_reads.rb --ruby 18
+#   tools/run-engine-tests.sh --suite text_reads.rb --ruby 31 \
+#     --config '{"syntaxTransform":"legacy","rgssVersion":1}'
 #
 # This file must parse on Ruby 1.8, 1.9 and 3.1.
 
@@ -16,7 +18,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('text-reads', defined?(Encoding) ? 4 : 3)
+EngineTest.suite('text-reads', defined?(Encoding) ? 10 : 9)
 
 EngineTest.load_preloads(%w[windows_fs])
 
@@ -40,13 +42,53 @@ end
 EngineTest.test('a binary read keeps the CR') do
   EngineTest.assert_equal("[\r\n1,\r\n2\r\n]\r\n", File.open(TEXT_FILE, 'rb', &:read), "File.open 'rb'")
 end
+
+EngineTest.test('a read in mode r+ keeps the CR') do
+  EngineTest.assert_equal("[\r\n1,\r\n2\r\n]\r\n", File.open(TEXT_FILE, 'r+', &:read), "File.open 'r+'")
+end
+
+EngineTest.test('a read with an encoding drops the CR of each CR LF') do
+  mode = defined?(Encoding) ? 'r:utf-8' : 'r'
+  EngineTest.assert_equal(FOLDED, File.open(TEXT_FILE, mode, &:read), "File.open '#{mode}'")
+end
+
+EngineTest.test('File.new drops the CR of each CR LF') do
+  file = File.new(TEXT_FILE)
+  begin
+    EngineTest.assert_equal(FOLDED, file.read, 'File.new')
+  ensure
+    file.close
+  end
+end
 # rubocop:enable Style/FileRead
 
+EngineTest.test('File.readlines drops the CR of each CR LF') do
+  EngineTest.assert_equal(FOLDED.lines.to_a, File.readlines(TEXT_FILE), 'File.readlines')
+end
+
+EngineTest.test('File.foreach drops the CR of each CR LF') do
+  lines = []
+  File.foreach(TEXT_FILE) { |line| lines << line }
+  EngineTest.assert_equal(FOLDED.lines.to_a, lines, 'File.foreach')
+end
+
+# Ruby 1.9 keeps converted text in a buffer after gets, and a byte read
+# from that buffer can raise.
+EngineTest.test('a read after gets gives the next bytes') do
+  rest = File.open(TEXT_FILE, 'r') { |file| [file.gets, file.read(2)] }
+  first = FOLDED.lines.to_a[0]
+  EngineTest.assert_equal([first, FOLDED[first.length, 2]], rest, 'gets then read(2)')
+end
+
 # Ruby 1.8 has no Encoding.
+# A game that targets Ruby 1.8 on Ruby 3.1 reads raw bytes.
 if defined?(Encoding)
-  EngineTest.test('a text file reads as UTF-8') do
-    EngineTest.assert_equal(Encoding::UTF_8, Encoding.default_external, 'Encoding.default_external')
-    EngineTest.assert_equal(Encoding::UTF_8, File.read(TEXT_FILE).encoding, 'File.read encoding')
+  EngineTest.test('a text file reads in the encoding of the target Ruby') do
+    legacy = CFG['syntaxTransform'] == 'legacy' && CFG['rgssVersion'] != 3
+    expected = legacy ? Encoding::ASCII_8BIT : Encoding::UTF_8
+    EngineTest.info('syntaxTransform', CFG['syntaxTransform'].inspect)
+    EngineTest.assert_equal(expected, Encoding.default_external, 'Encoding.default_external')
+    EngineTest.assert_equal(expected, File.read(TEXT_FILE).encoding, 'File.read encoding')
   end
 end
 
