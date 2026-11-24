@@ -16,7 +16,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('text-draw', 10)
+EngineTest.suite('text-draw', 14)
 
 BACK = Color.new(40, 90, 200, 255)
 THIN = Color.new(200, 60, 30, 128)
@@ -52,7 +52,17 @@ def largest_difference(one, other)
 end
 
 def text_pixels(bitmap, back)
-  bitmap.raw_data.unpack('C*').each_slice(4).reject { |pixel| pixel == back }.size
+  count = 0
+  bitmap.raw_data.unpack('C*').each_slice(4) { |pixel| count += 1 unless pixel == back }
+  count
+end
+
+def assert_same_pixels(expected, actual, label)
+  EngineTest.assert(expected == actual, "#{label}: the pixels differ")
+end
+
+def assert_other_pixels(unexpected, actual, label)
+  EngineTest.assert(unexpected != actual, "#{label}: the pixels are the same")
 end
 
 # The picture draw of a text from a cleared bitmap is the same blend
@@ -74,16 +84,41 @@ end
 
 BACK_PIXEL = [40, 90, 200, 255].freeze
 
-EngineTest.test('texts on drawn pixels are the picture draws of the same texts') do
+# All the texts go to the first bitmap before the first picture draw,
+# because a call on one more bitmap sends the texts to the texture.
+def compare_with_pictures(texts, pictures, lines, label)
+  lines.each { |x, y, width, text| texts.draw_text(x, y, width, LINE, text) }
+  lines.each { |x, y, width, text| draw_as_picture(pictures, x, y, width, text) } # rubocop:disable Style/CombinableLoops
+  assert_same_picture(pictures, texts, label)
+end
+
+def half_drawn_bitmap
+  bitmap = Bitmap.new(WIDTH, HEIGHT)
+  bitmap.fill_rect(0, 0, WIDTH / 2, HEIGHT, BACK)
+  bitmap.font.size = 22
+  bitmap.font.color = INK
+  bitmap
+end
+
+def cleared_bitmap
+  bitmap = Bitmap.new(WIDTH, HEIGHT)
+  bitmap.font.size = 22
+  bitmap.font.color = INK
+  bitmap
+end
+
+def edge_lines(bitmap)
+  lines = [[-20, 2, 'Left edge gjpqy'], [WIDTH - 60, 30, 'Right edge gjpqy'],
+           [70, HEIGHT - 12, 'Bottom edge gjpqy'], [130, -10, 'Top edge']]
+  lines.map { |x, y, text| [x, y, bitmap.text_size(text).width + 2, text] }
+end
+
+EngineTest.test('texts that overlap on drawn pixels are the picture draws of the same texts') do
   with_bitmaps(drawn_bitmap, drawn_bitmap) do |texts, pictures|
     lines = [[4, 2, 'Earthquake gjpqy'], [30, 14, 'Swords Dance'], [60, 26, 'Stone Edge gjpqy'],
              [100, 60, 'Protect']]
-    lines.each do |x, y, text|
-      width = texts.text_size(text).width + 2
-      texts.draw_text(x, y, width, LINE, text)
-      draw_as_picture(pictures, x, y, width, text)
-    end
-    assert_same_picture(pictures, texts, 'four texts')
+    lines = lines.map { |x, y, text| [x, y, texts.text_size(text).width + 2, text] }
+    compare_with_pictures(texts, pictures, lines, 'four texts')
     on_back = text_pixels(texts, BACK_PIXEL) - (WIDTH * HEIGHT / 2)
     EngineTest.assert(on_back > 200, "the texts changed #{on_back} pixels of the left half")
   end
@@ -93,16 +128,44 @@ EngineTest.test('a narrow text between two texts keeps its place in the order') 
   with_bitmaps(drawn_bitmap, drawn_bitmap) do |texts, pictures|
     full = texts.text_size('Dragon Dance gjpqy').width + 2
     lines = [[4, 20, full], [20, 26, full * 2 / 3], [36, 32, full]]
-    lines.each do |x, y, width|
-      texts.draw_text(x, y, width, LINE, 'Dragon Dance gjpqy')
-      draw_as_picture(pictures, x, y, width, 'Dragon Dance gjpqy')
-    end
-    assert_same_picture(pictures, texts, 'three texts')
+    lines = lines.map { |x, y, width| [x, y, width, 'Dragon Dance gjpqy'] }
+    compare_with_pictures(texts, pictures, lines, 'three texts')
   end
 end
 
+EngineTest.test('texts on cleared pixels and across the edges are the picture draws') do
+  with_bitmaps(cleared_bitmap, cleared_bitmap) do |texts, pictures|
+    compare_with_pictures(texts, pictures, edge_lines(texts), 'four texts')
+    EngineTest.assert(text_pixels(texts, [0, 0, 0, 0]) > 200, 'the texts left no pixels')
+  end
+end
+
+EngineTest.test('texts on drawn and on cleared pixels in one frame are the picture draws') do
+  with_bitmaps(half_drawn_bitmap, half_drawn_bitmap) do |texts, pictures|
+    compare_with_pictures(texts, pictures, edge_lines(texts), 'four texts')
+  end
+end
+
+# A blur moves pixels into places that the engine does not record as
+# drawn. The pixel between the two texts is one of them.
+EngineTest.test('two texts keep the blurred pixels between them') do
+  with_bitmaps(cleared_bitmap) do |bitmap|
+    bitmap.fill_rect(40, 12, 40, 30, BACK)
+    bitmap.blur
+    between = [60, 11]
+    blurred = EngineTest.pixel(bitmap, between)
+    EngineTest.assert(blurred[3] > 0, "the blur left no pixel at #{between.inspect}")
+    bitmap.draw_text(0, 0, 30, 12, 'a')
+    bitmap.draw_text(100, 0, 30, 12, 'b')
+    EngineTest.assert_equal(blurred, EngineTest.pixel(bitmap, between), 'the pixel between the texts')
+  end
+end
+
+# The first read makes a copy of the pixels on the CPU. The second
+# read must not use that copy.
 EngineTest.test('a text is in the bitmap for the next read of a pixel') do
   with_bitmaps(drawn_bitmap) do |bitmap|
+    EngineTest.assert_equal(BACK_PIXEL, EngineTest.pixel(bitmap, [4, 44]), 'the pixel before the text')
     bitmap.draw_text(4, 30, 110, LINE, 'MMMMMM')
     changed = (4...100).reject { |x| EngineTest.pixel(bitmap, [x, 44]) == BACK_PIXEL }
     EngineTest.assert(!changed.empty?, 'get_pixel found no pixel of the text')
@@ -114,7 +177,7 @@ EngineTest.test('a fill after a text covers the text') do
     bitmap.draw_text(4, 30, 200, LINE, 'Under the fill')
     bitmap.fill_rect(0, 0, WIDTH, HEIGHT, BACK)
     filled.fill_rect(0, 0, WIDTH, HEIGHT, BACK)
-    EngineTest.assert_equal(filled.raw_data, bitmap.raw_data, 'pixels after the fill')
+    assert_same_pixels(filled.raw_data, bitmap.raw_data, 'after the fill')
   end
 end
 
@@ -138,26 +201,29 @@ EngineTest.test('each of two bitmaps gets its own texts') do
     plain_data = plain.raw_data
     top_data = top.raw_data
     bottom_data = bottom.raw_data
-    EngineTest.assert_equal(plain_data[half, half], top_data[half, half], 'lower half of the first bitmap')
-    EngineTest.assert_equal(plain_data[0, half], bottom_data[0, half], 'upper half of the second bitmap')
-    EngineTest.refute_equal(plain_data[0, half], top_data[0, half], 'upper half of the first bitmap')
-    EngineTest.refute_equal(plain_data[half, half], bottom_data[half, half],
-                            'lower half of the second bitmap')
+    assert_same_pixels(plain_data[half, half], top_data[half, half], 'lower half of the first bitmap')
+    assert_same_pixels(plain_data[0, half], bottom_data[0, half], 'upper half of the second bitmap')
+    assert_other_pixels(plain_data[0, half], top_data[0, half], 'upper half of the first bitmap')
+    assert_other_pixels(plain_data[half, half], bottom_data[half, half], 'lower half of the second bitmap')
   end
 end
 
-EngineTest.test('a copy and a picture draw from a bitmap have its text') do
+EngineTest.test('a copy of a bitmap has its text') do
+  with_bitmaps(drawn_bitmap, drawn_bitmap) do |bitmap, plain|
+    bitmap.draw_text(4, 30, 200, LINE, 'Source gjpqy')
+    with_bitmaps(bitmap.dup) do |copy|
+      assert_other_pixels(plain.raw_data, copy.raw_data, 'the copy and a bitmap without text')
+      assert_same_pixels(bitmap.raw_data, copy.raw_data, 'the copy')
+    end
+  end
+end
+
+EngineTest.test('a picture draw from a bitmap has its text') do
   with_bitmaps(drawn_bitmap, drawn_bitmap, Bitmap.new(WIDTH, HEIGHT)) do |bitmap, plain, target|
     bitmap.draw_text(4, 30, 200, LINE, 'Source gjpqy')
     target.blt(0, 0, bitmap, bitmap.rect)
-    copy = bitmap.dup
-    begin
-      EngineTest.refute_equal(plain.raw_data, copy.raw_data, 'pixels of the copy')
-      EngineTest.assert_equal(bitmap.raw_data, copy.raw_data, 'pixels of the copy')
-      EngineTest.assert_equal(bitmap.raw_data, target.raw_data, 'pixels of the picture draw')
-    ensure
-      copy.dispose
-    end
+    assert_other_pixels(plain.raw_data, target.raw_data, 'the picture draw and a bitmap without text')
+    assert_same_pixels(bitmap.raw_data, target.raw_data, 'the picture draw')
   end
 end
 
@@ -182,7 +248,7 @@ EngineTest.test('the screen shows a text without one more call on the bitmap') d
     with_bitmaps(Graphics.snap_to_bitmap) do |before|
       sprite.bitmap.draw_text(4, 30, 200, LINE, 'MMMMMM')
       with_bitmaps(Graphics.snap_to_bitmap) do |after|
-        EngineTest.refute_equal(before.raw_data, after.raw_data, 'the screen after the text')
+        assert_other_pixels(before.raw_data, after.raw_data, 'the screen after the text')
       end
     end
   ensure

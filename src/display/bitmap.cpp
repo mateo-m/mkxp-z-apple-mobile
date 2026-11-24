@@ -54,7 +54,6 @@
 #include <math.h>
 #include <algorithm>
 #include <memory>
-#include <vector>
 
 extern "C" {
 #include "libnsgif/libnsgif.h"
@@ -242,8 +241,7 @@ struct BitmapPrivate
 
     /* A text draw onto drawn pixels costs two render passes. ANGLE on Metal
      * ends a command buffer after each 16 passes, and the thread then waits
-     * for the GPU. Thus the texts of the draw_text calls collect here on the
-     * CPU, and go to the texture as one draw before its next use. */
+     * for the GPU. */
     uint32_t *heldText;
     std::vector<IntRect> heldTextRects;
 
@@ -972,7 +970,6 @@ DEF_ATTR_RD_SIMPLE(Bitmap, Hires, Bitmap*, p->selfHires)
 
 void Bitmap::setHires(Bitmap *hires) {
     guardDisposed();
-    drawHeldText();
 
     Debug() << "BUG: High-res Bitmap setHires not fully implemented, expect bugs";
     hires->setLores(this);
@@ -1095,8 +1092,7 @@ static bool shrinkRects(int &sourcePos, int &sourceLen, const int &sBitmapLen,
     return ret || sourceLen == 0 || destLen == 0;
 }
 
-/* The bitmap blit equation (see shader/bitmapBlit.frag) at full opacity,
- * on RGBA bytes */
+/* Must give the pixels of shader/bitmapBlit.frag at full opacity */
 static inline void blendPixel(uint8_t *dest, const uint8_t *source)
 {
     if (dest[3] == 0 || source[3] == 255)
@@ -1118,7 +1114,6 @@ static inline void blendPixel(uint8_t *dest, const uint8_t *source)
     dest[3] = alpha * 255.0f + 0.5f;
 }
 
-/* Returns false when the text needs the GPU path */
 bool BitmapPrivate::holdText(const SDL_Surface *text, IntRect textRect, IntRect destRect)
 {
     if (destRect.w <= 0 || destRect.h <= 0)
@@ -1152,6 +1147,7 @@ bool BitmapPrivate::holdText(const SDL_Surface *text, IntRect textRect, IntRect 
     }
     
     heldTextRects.push_back(destRect);
+    onModified();
     return true;
 }
 
@@ -1189,7 +1185,28 @@ void Bitmap::drawHeldText()
                         SDL_GetError());
     
     Bitmap text(surf, nullptr, true);
-    p->self->stretchBlt(area, text, area, 255, false, &rects);
+    
+    bool onDrawnPixels = false;
+    for (const IntRect &rect : rects)
+        onDrawnPixels = onDrawnPixels || p->touchesTaintedArea(rect);
+    
+    if (onDrawnPixels)
+    {
+        p->self->stretchBlt(area, text, area, 255, false, &rects);
+        return;
+    }
+    
+    /* One upload of the area is wrong: a blur moves pixels into places
+     * that have no record as a drawn area */
+    TEX::bind(p->getGLTypes().tex);
+    for (const IntRect &rect : rects)
+    {
+        GLMeta::subRectImageUpload(surf->w, rect.x, rect.y, rect.x, rect.y,
+                                   rect.w, rect.h, surf, GL_RGBA);
+        p->addTaintedArea(rect);
+    }
+    GLMeta::subRectImageEnd();
+    p->onModified();
 }
 
 void Bitmap::stretchBlt(IntRect destRect,
@@ -1200,9 +1217,8 @@ void Bitmap::stretchBlt(IntRect destRect,
     stretchBlt(destRect, source, sourceRect, opacity, smooth, nullptr);
 }
 
-/* With parts, the blend path draws only these parts of destRect. The other
- * paths run only on a cleared area, where the full destRect gives the same
- * pixels. */
+/* With parts, destRect touches a drawn area, and the blend path draws only
+ * these parts of it */
 void Bitmap::stretchBlt(IntRect destRect,
                         const Bitmap &source, IntRect sourceRect,
                         int opacity, bool smooth,
@@ -1903,7 +1919,12 @@ static uint32_t &getPixelAt(SDL_Surface *surf, SDL_PixelFormat *form, int x, int
 Color Bitmap::getPixel(int x, int y) const
 {
     guardDisposed();
-    drawHeldText();
+    
+    /* The binding calls this outside the graphics lock for a bitmap that
+     * has a copy of its pixels on the CPU. A bitmap that holds text has no
+     * copy, so only that bitmap may draw here. */
+    if (heldTextOwner == p)
+        drawHeldText();
     
     GUARD_ANIMATED;
     
@@ -2870,8 +2891,6 @@ TEXFBO &Bitmap::getGLTypes() const
 
 SDL_Surface *Bitmap::surface() const
 {
-    drawHeldText();
-    
     if (hasHires()) {
         Debug() << "BUG: High-res Bitmap surface not implemented";
     }
