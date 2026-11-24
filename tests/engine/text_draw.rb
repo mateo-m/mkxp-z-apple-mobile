@@ -16,11 +16,12 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('text-draw', 18)
+EngineTest.suite('text-draw', 21)
 
 BACK = Color.new(40, 90, 200, 255)
 THIN = Color.new(200, 60, 30, 128)
 INK = Color.new(255, 230, 40, 200)
+COVER = Color.new(10, 200, 60, 255)
 WIDTH = 240
 HEIGHT = 96
 LINE = 28
@@ -71,10 +72,10 @@ end
 
 # The picture draw of a text from a cleared bitmap is the same blend
 # as the text draw. The two differ only in the rounding of a channel.
-def assert_same_picture(expected, actual, label)
+def assert_same_picture(expected, actual, label, limit = 2)
   EngineTest.assert_equal(expected.raw_data.size, actual.raw_data.size, "#{label}, size")
   difference = largest_difference(expected.raw_data, actual.raw_data)
-  EngineTest.assert(difference <= 2, "#{label}: a channel differs by #{difference}")
+  EngineTest.assert(difference <= limit, "#{label}: a channel differs by #{difference}")
 end
 
 def draw_as_picture(bitmap, x, y, width, text)
@@ -172,17 +173,19 @@ EngineTest.test('texts far apart on a large bitmap are the picture draws') do
 end
 
 # The engine sends the two texts to the texture as one draw of the box
-# around them. The pixel between the texts is in the box.
-EngineTest.test('two texts keep the blurred pixels between them') do
+# around them. The pixel between the texts is in the box. A fill with
+# no opacity keeps its color in the pixel.
+EngineTest.test('two texts keep a pixel with a color and no opacity between them') do
   with_bitmaps(cleared_bitmap) do |bitmap|
-    bitmap.fill_rect(40, 12, 40, 30, BACK)
-    bitmap.blur
-    between = [60, 11]
-    blurred = EngineTest.pixel(bitmap, between)
-    EngineTest.assert(blurred[3] > 0, "the blur left no pixel at #{between.inspect}")
-    bitmap.draw_text(0, 0, 30, 12, 'a')
-    bitmap.draw_text(100, 0, 30, 12, 'b')
-    EngineTest.assert_equal(blurred, EngineTest.pixel(bitmap, between), 'the pixel between the texts')
+    filled = [200, 60, 30, 0]
+    bitmap.fill_rect(100, 0, 20, 12, Color.new(*filled))
+    bitmap.fill_rect(0, 0, 60, 12, BACK)
+    bitmap.fill_rect(160, 0, 60, 12, BACK)
+    between = [110, 6]
+    EngineTest.assert_equal(filled, EngineTest.pixel(bitmap, between), 'the pixel after the fills')
+    bitmap.draw_text(0, 0, 60, 12, 'a')
+    bitmap.draw_text(160, 0, 60, 12, 'b')
+    EngineTest.assert_equal(filled, EngineTest.pixel(bitmap, between), 'the pixel between the texts')
   end
 end
 
@@ -217,13 +220,58 @@ EngineTest.test('a text is in the bitmap for the next read of a pixel') do
   end
 end
 
-EngineTest.test('a fill after a text covers the text') do
-  with_bitmaps(drawn_bitmap, Bitmap.new(WIDTH, HEIGHT)) do |bitmap, filled|
-    bitmap.draw_text(4, 30, 200, LINE, 'Under the fill')
-    bitmap.fill_rect(0, 0, WIDTH, HEIGHT, BACK)
-    filled.fill_rect(0, 0, WIDTH, HEIGHT, BACK)
-    assert_same_pixels(filled.raw_data, bitmap.raw_data, 'after the fill')
+# The block does the same call on a bitmap that holds a text and on a
+# bitmap with no text.
+def assert_covers_text(label)
+  with_bitmaps(drawn_bitmap, drawn_bitmap) do |bitmap, plain|
+    bitmap.draw_text(4, 30, 200, LINE, 'Under gjpqy')
+    yield bitmap
+    yield plain
+    assert_same_pixels(plain.raw_data, bitmap.raw_data, label)
   end
+end
+
+EngineTest.test('a call that covers the bitmap after a text covers the text') do
+  assert_covers_text('after the fill') { |bitmap| bitmap.fill_rect(0, 0, WIDTH, HEIGHT, BACK) }
+  assert_covers_text('after the gradient fill') do |bitmap|
+    bitmap.gradient_fill_rect(0, 0, WIDTH, HEIGHT, BACK, COVER)
+  end
+  assert_covers_text('after the clear of a rectangle') { |bitmap| bitmap.clear_rect(0, 0, WIDTH, HEIGHT) }
+  with_bitmaps(Bitmap.new(WIDTH, HEIGHT)) do |cover|
+    cover.fill_rect(0, 0, WIDTH, HEIGHT, COVER)
+    assert_covers_text('after the picture draw') { |bitmap| bitmap.blt(0, 0, cover, cover.rect) }
+    assert_covers_text('after the stretched picture draw') do |bitmap|
+      bitmap.stretch_blt(bitmap.rect, cover, Rect.new(0, 0, 8, 8))
+    end
+    assert_covers_text('after new raw pixels') { |bitmap| bitmap.raw_data = cover.raw_data }
+  end
+end
+
+EngineTest.test('a pixel write after a text stays on top of the text') do
+  with_bitmaps(drawn_bitmap) do |bitmap|
+    bitmap.draw_text(4, 30, 110, LINE, 'MMMMMM')
+    (4...100).each { |x| bitmap.set_pixel(x, 44, COVER) }
+    row = bitmap.raw_data[((44 * WIDTH) + 4) * 4, 96 * 4]
+    assert_same_pixels([10, 200, 60, 255].pack('C*') * 96, row, 'the row of the pixel writes')
+  end
+end
+
+# The block changes the pixels of a bitmap. The change must include a
+# text, as it includes the picture draw of the same text.
+def assert_changes_text(label, limit, &change)
+  with_bitmaps(drawn_bitmap, drawn_bitmap, drawn_bitmap) do |texts, pictures, plain|
+    texts.draw_text(4, 30, 200, LINE, 'Earthquake gjpqy')
+    draw_as_picture(pictures, 4, 30, 200, 'Earthquake gjpqy')
+    [texts, pictures, plain].each(&change)
+    assert_other_pixels(plain.raw_data, texts.raw_data, "#{label} and a bitmap without text")
+    assert_same_picture(pictures, texts, label, limit)
+  end
+end
+
+EngineTest.test('a hue change or a blur after a text changes the text') do
+  assert_changes_text('the hue change', 6) { |bitmap| bitmap.hue_change(120) }
+  assert_changes_text('the blur', 4, &:blur)
+  assert_changes_text('the radial blur', 4) { |bitmap| bitmap.radial_blur(30, 4) }
 end
 
 EngineTest.test('a clear after a text removes the text, and a later text stays') do
@@ -372,26 +420,48 @@ def rounds_ms(bitmap)
   (Time.now - start) * 1000
 end
 
+# The first block draws texts that are far apart, and the second block
+# draws the same texts near each other.
+def assert_far_time(bitmap, names, limit, far, near)
+  far_ms = []
+  near_ms = []
+  5.times do
+    far_ms << rounds_ms(bitmap, &far)
+    near_ms << rounds_ms(bitmap, &near)
+  end
+  far_text = format('%.1f', far_ms.min)
+  near_text = format('%.1f', near_ms.min)
+  EngineTest.info("#{names[0]}_ms", far_text)
+  EngineTest.info("#{names[1]}_ms", near_text)
+  EngineTest.assert(far_ms.min < near_ms.min * limit, "#{far_text} ms far apart, and #{near_text} ms near")
+end
+
 # The engine sends the box around the texts to the texture. Two texts
 # in opposite corners of a large bitmap must not make the box as large
 # as the bitmap. On an iPhone 13 Pro, such a box took 80 times the
 # time of two texts side by side, and two boxes take 2 to 7 times.
 EngineTest.test('two texts far apart on a large bitmap take the time of two texts side by side') do
   with_bitmaps(drawn_bitmap(2048, 2048)) do |bitmap|
-    far_ms = []
-    near_ms = []
-    5.times do
-      far_ms << rounds_ms(bitmap) { corner_texts(bitmap) }
-      near_ms << rounds_ms(bitmap) do
-        bitmap.draw_text(2, 2, 120, LINE, 'Earthquake')
-        bitmap.draw_text(130, 2, 120, LINE, 'Protect gjpqy')
-      end
+    far = proc { corner_texts(bitmap) }
+    near = proc do
+      bitmap.draw_text(2, 2, 120, LINE, 'Earthquake')
+      bitmap.draw_text(130, 2, 120, LINE, 'Protect gjpqy')
     end
-    far = format('%.1f', far_ms.min)
-    near = format('%.1f', near_ms.min)
-    EngineTest.info('far_ms', far)
-    EngineTest.info('near_ms', near)
-    EngineTest.assert(far_ms.min < near_ms.min * 20, "#{far} ms far apart, and #{near} ms side by side")
+    assert_far_time(bitmap, %w[far near], 20, far, near)
+  end
+end
+
+STEPS = 16
+
+# Each text makes the box around the texts only a little larger. On an
+# iPhone 13 Pro with RGSS1, a box that grew with each text took 11
+# times the time of the texts in a row, and boxes of a limited size
+# take 4 times.
+EngineTest.test('texts on a diagonal of a large bitmap take the time of texts in a row') do
+  with_bitmaps(drawn_bitmap(2048, 2048)) do |bitmap|
+    diagonal = proc { STEPS.times { |i| bitmap.draw_text(128 * i, 128 * i, 120, LINE, 'Earthquake') } }
+    row = proc { STEPS.times { |i| bitmap.draw_text(128 * i, 2, 120, LINE, 'Earthquake') } }
+    assert_far_time(bitmap, %w[diagonal row], 8, diagonal, row)
   end
 end
 
