@@ -1341,8 +1341,9 @@ module Win32API_Impl
     BASE = 0x7F00_0000
     STRIDE = 0x1000
 
-    @blocks = {}
-    @next_address = BASE
+    # F12 loads this file again. A game can still hold an old address.
+    @blocks ||= {}
+    @next_address ||= BASE
 
     def self.alloc(bytes)
       address = @next_address
