@@ -64,6 +64,7 @@ game, which is the only way to reach the drawing code.
 | `pause_clock.rb` | The clocks and the average frame rate leave out a pause, a game dialog, and a cancelled pause. `tests/host/host.m` reads each dialog text as a command. |
 | `sound_effect_read.rb` | The first play of a sound effect reads its file in blocks, not one byte for each read. |
 | `text_draw.rb` | A text of `draw_text` is in the bitmap for the next call and on the screen, in the order of the calls, and many texts on drawn pixels in one frame take the time of the texts on cleared pixels. |
+| `hires_pixel.rb` | With high-res mode on, `get_pixel` gives the values of RPG Maker: a fully clear pixel keeps its color, and a pixel outside the bitmap is 0, 0, 0, 0. |
 | `file_lookup_order.rb` | A path without an extension loads the first matching file in name order, and a folder path loads no file. |
 | `case_lookup.rb` | The file, IO, and folder calls find a file or a folder whose name is in another case, also a file that the game made after launch, on each bundled interpreter. |
 | `gc_clone.rb` | A clone keeps its instance variables and singleton methods, and a copied array and an object from `ObjectSpace.each_object` stay alive, through a collection, on each bundled interpreter. |
@@ -208,13 +209,13 @@ tools/run-engine-tests.sh --suite legacy_methods_off.rb --ruby 31
 ## Script folder
 
 `script-folder/` is a game whose one `Scripts.rxdata` section evals
-every file of `Data/Scripts`, the way the Essentials v21 script
+every `.rb` file of `Data/Scripts`, the way the Essentials v21 script
 extractor leaves a game. The last of those files runs the game, so
 the engine splits that section into one section per file and runs the
 postloads before the last one. The suite checks that the postloads
-see the classes of `Data/Scripts`, that the files keep the order of
-the loader, and that `$RGSS_SCRIPTS` still holds the sections of
-`Scripts.rxdata`:
+see the classes of `Data/Scripts`, that only the `.rb` files outside
+dot folders run, in the order of the loader, and that `$RGSS_SCRIPTS`
+still holds the sections of `Scripts.rxdata`:
 
 ```sh
 ruby tests/script-folder/pack_scripts.rb
