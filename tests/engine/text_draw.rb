@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# The engine keeps the texts of draw_text on the CPU and sends them to
-# the texture before the next use of a bitmap. A game must not see
-# this: each text is in the bitmap for the next call, in the order of
-# the calls. Many texts on drawn pixels in one frame must not make the
-# frame wait for the GPU.
+# The engine keeps a text of draw_text on the CPU when the text is on
+# drawn pixels, and sends the texts to the texture before the next use
+# of the bitmap. A game must not see this: each text is in the bitmap
+# for the next call, in the order of the calls. Many texts on drawn
+# pixels in one frame must not make the frame wait for the GPU.
 #
 #   tools/run-engine-tests.sh --suite text_draw.rb
 #
@@ -16,7 +16,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('text-draw', 14)
+EngineTest.suite('text-draw', 17)
 
 BACK = Color.new(40, 90, 200, 255)
 THIN = Color.new(200, 60, 30, 128)
@@ -25,10 +25,10 @@ WIDTH = 240
 HEIGHT = 96
 LINE = 28
 
-def drawn_bitmap
-  bitmap = Bitmap.new(WIDTH, HEIGHT)
-  bitmap.fill_rect(0, 0, WIDTH / 2, HEIGHT, BACK)
-  bitmap.fill_rect(WIDTH / 2, 0, WIDTH / 2, HEIGHT, THIN)
+def drawn_bitmap(width = WIDTH, height = HEIGHT)
+  bitmap = Bitmap.new(width, height)
+  bitmap.fill_rect(0, 0, width / 2, height, BACK)
+  bitmap.fill_rect(width / 2, 0, width / 2, height, THIN)
   bitmap.font.size = 22
   bitmap.font.color = INK
   bitmap
@@ -40,11 +40,15 @@ ensure
   bitmaps.each { |bitmap| bitmap.dispose unless bitmap.disposed? }
 end
 
+# A pixel with no opacity shows no color, and SDL_ttf gives such a
+# pixel the color of the text.
 def largest_difference(one, other)
   a = one.unpack('C*')
   b = other.unpack('C*')
   largest = 0
   a.each_index do |i|
+    next if a[i | 3].zero? && b[i | 3].zero?
+
     difference = (a[i] - b[i]).abs
     largest = difference if difference > largest
   end
@@ -84,11 +88,11 @@ end
 
 BACK_PIXEL = [40, 90, 200, 255].freeze
 
-# All the texts go to the first bitmap before the first picture draw,
-# because a call on one more bitmap sends the texts to the texture.
 def compare_with_pictures(texts, pictures, lines, label)
-  lines.each { |x, y, width, text| texts.draw_text(x, y, width, LINE, text) }
-  lines.each { |x, y, width, text| draw_as_picture(pictures, x, y, width, text) } # rubocop:disable Style/CombinableLoops
+  lines.each do |x, y, width, text|
+    texts.draw_text(x, y, width, LINE, text)
+    draw_as_picture(pictures, x, y, width, text)
+  end
   assert_same_picture(pictures, texts, label)
 end
 
@@ -109,7 +113,8 @@ end
 
 def edge_lines(bitmap)
   lines = [[-20, 2, 'Left edge gjpqy'], [WIDTH - 60, 30, 'Right edge gjpqy'],
-           [70, HEIGHT - 12, 'Bottom edge gjpqy'], [130, -10, 'Top edge']]
+           [70, HEIGHT - 12, 'Bottom edge gjpqy'], [130, -10, 'Top edge'],
+           [-20, -10, 'Top left gjpqy'], [WIDTH - 60, HEIGHT - 12, 'Bottom right gjpqy']]
   lines.map { |x, y, text| [x, y, bitmap.text_size(text).width + 2, text] }
 end
 
@@ -133,21 +138,41 @@ EngineTest.test('a narrow text between two texts keeps its place in the order') 
   end
 end
 
+EngineTest.test('a narrow text on cleared pixels keeps its place between texts on drawn pixels') do
+  with_bitmaps(half_drawn_bitmap, half_drawn_bitmap) do |texts, pictures|
+    full = texts.text_size('Protect').width + 2
+    lines = [[4, 2, full, 'Protect'], [(WIDTH / 2) + 8, 40, full * 2 / 3, 'Protect'],
+             [70, 34, texts.text_size('Swords Dance').width + 2, 'Swords Dance']]
+    compare_with_pictures(texts, pictures, lines, 'three texts')
+  end
+end
+
 EngineTest.test('texts on cleared pixels and across the edges are the picture draws') do
   with_bitmaps(cleared_bitmap, cleared_bitmap) do |texts, pictures|
-    compare_with_pictures(texts, pictures, edge_lines(texts), 'four texts')
+    compare_with_pictures(texts, pictures, edge_lines(texts), 'six texts')
     EngineTest.assert(text_pixels(texts, [0, 0, 0, 0]) > 200, 'the texts left no pixels')
   end
 end
 
 EngineTest.test('texts on drawn and on cleared pixels in one frame are the picture draws') do
   with_bitmaps(half_drawn_bitmap, half_drawn_bitmap) do |texts, pictures|
-    compare_with_pictures(texts, pictures, edge_lines(texts), 'four texts')
+    compare_with_pictures(texts, pictures, edge_lines(texts), 'six texts')
   end
 end
 
-# A blur moves pixels into places that the engine does not record as
-# drawn. The pixel between the two texts is one of them.
+# The engine sends texts that are far apart to the texture in more
+# than one step. The third and the fourth text overlap the first two.
+EngineTest.test('texts far apart on a large bitmap are the picture draws') do
+  with_bitmaps(drawn_bitmap(1024, 768), drawn_bitmap(1024, 768)) do |texts, pictures|
+    lines = [[4, 2, 'Earthquake gjpqy'], [850, 720, 'Swords Dance'], [30, 14, 'Stone Edge gjpqy'],
+             [870, 728, 'Protect gjpqy']]
+    lines = lines.map { |x, y, text| [x, y, texts.text_size(text).width + 2, text] }
+    compare_with_pictures(texts, pictures, lines, 'four texts')
+  end
+end
+
+# The engine sends the two texts to the texture as one draw of the box
+# around them. The pixel between the texts is in the box.
 EngineTest.test('two texts keep the blurred pixels between them') do
   with_bitmaps(cleared_bitmap) do |bitmap|
     bitmap.fill_rect(40, 12, 40, 30, BACK)
@@ -227,12 +252,30 @@ EngineTest.test('a picture draw from a bitmap has its text') do
   end
 end
 
-EngineTest.test('a disposed bitmap does not give its text to the next bitmap') do
-  bitmap = drawn_bitmap
-  bitmap.draw_text(4, 30, 200, LINE, 'Gone gjpqy')
-  bitmap.dispose
-  with_bitmaps(Bitmap.new(WIDTH, HEIGHT)) do |later|
-    EngineTest.assert_equal(0, text_pixels(later, [0, 0, 0, 0]), 'pixels of the next bitmap')
+def corner_texts(bitmap)
+  bitmap.draw_text(2, 2, 120, LINE, 'Earthquake')
+  bitmap.draw_text(bitmap.width - 122, bitmap.height - LINE - 2, 120, LINE, 'Protect gjpqy')
+end
+
+def corner_text_pixels
+  with_bitmaps(drawn_bitmap(WIDTH + 40)) do |bitmap|
+    corner_texts(bitmap)
+    bitmap.raw_data
+  end
+end
+
+# The later bitmaps have a different width than the bitmap that lost
+# its text.
+EngineTest.test('a text that a dispose or a clear removed is not in the texts of a later bitmap') do
+  expected = corner_text_pixels
+  disposed = drawn_bitmap
+  disposed.draw_text(4, 30, 200, LINE, 'Gone gjpqy')
+  disposed.dispose
+  assert_same_pixels(expected, corner_text_pixels, 'after the dispose')
+  with_bitmaps(drawn_bitmap) do |cleared|
+    cleared.draw_text(4, 30, 200, LINE, 'Gone gjpqy')
+    cleared.clear
+    assert_same_pixels(expected, corner_text_pixels, 'after the clear')
   end
 end
 
@@ -270,7 +313,7 @@ end
 # A battle menu of Pokemon Essentials draws 248 texts on drawn pixels
 # in one frame. The time is not the same on each computer, so the
 # test compares it with the time of the same texts on cleared pixels.
-# On an iPhone 13 Pro, the texts on drawn pixels took 15 times that
+# On an iPhone 13 Pro, the texts on drawn pixels took 10 times that
 # with one GPU draw for each text.
 EngineTest.test('many texts on drawn pixels take the time of the texts on cleared pixels') do
   with_bitmaps(Bitmap.new(8, 8)) do |probe|
@@ -295,6 +338,40 @@ EngineTest.test('many texts on drawn pixels take the time of the texts on cleare
       EngineTest.assert(drawn_ms.min < cleared_ms.min * 4,
                         "#{on_drawn} ms on drawn pixels, and #{on_cleared} ms on cleared pixels")
     end
+  end
+end
+
+ROUNDS = 16
+
+def rounds_ms(bitmap)
+  start = Time.now
+  ROUNDS.times do
+    yield
+    bitmap.fill_rect(0, 0, 1, 1, BACK)
+  end
+  (Time.now - start) * 1000
+end
+
+# The engine sends the box around the texts to the texture. Two texts
+# in opposite corners of a large bitmap must not make the box as large
+# as the bitmap. On an iPhone 13 Pro, such a box took 80 times the
+# time of two texts side by side, and two boxes take 2 to 7 times.
+EngineTest.test('two texts far apart on a large bitmap take the time of two texts side by side') do
+  with_bitmaps(drawn_bitmap(2048, 2048)) do |bitmap|
+    far_ms = []
+    near_ms = []
+    5.times do
+      far_ms << rounds_ms(bitmap) { corner_texts(bitmap) }
+      near_ms << rounds_ms(bitmap) do
+        bitmap.draw_text(2, 2, 120, LINE, 'Earthquake')
+        bitmap.draw_text(130, 2, 120, LINE, 'Protect gjpqy')
+      end
+    end
+    far = format('%.1f', far_ms.min)
+    near = format('%.1f', near_ms.min)
+    EngineTest.info('far_ms', far)
+    EngineTest.info('near_ms', near)
+    EngineTest.assert(far_ms.min < near_ms.min * 20, "#{far} ms far apart, and #{near} ms side by side")
   end
 end
 

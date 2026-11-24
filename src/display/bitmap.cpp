@@ -53,7 +53,6 @@
 
 #include <math.h>
 #include <algorithm>
-#include <memory>
 
 extern "C" {
 #include "libnsgif/libnsgif.h"
@@ -242,8 +241,8 @@ struct BitmapPrivate
     /* A text draw onto drawn pixels costs two render passes. ANGLE on Metal
      * ends a command buffer after each 16 passes, and the thread then waits
      * for the GPU. */
-    uint32_t *heldText;
     std::vector<IntRect> heldTextRects;
+    IntRect heldTextBox;
 
     // For high-resolution texture replacement.
     Bitmap *selfHires;
@@ -253,7 +252,6 @@ struct BitmapPrivate
     BitmapPrivate(Bitmap *self)
     : self(self),
     megaSurface(0),
-    heldText(0),
     selfHires(0),
     selfLores(0),
     surface(0),
@@ -429,9 +427,23 @@ struct BitmapPrivate
     }
 
     bool holdText(const SDL_Surface *text, IntRect textRect, IntRect destRect);
+    void drawOwnHeldText();
+    void dropHeldText();
 };
 
 static BitmapPrivate *heldTextOwner = 0;
+
+/* The held texts of the owner, blended together. A row has the width of the
+ * owner. Each pixel is zero while no bitmap holds text. */
+static std::vector<uint32_t> heldTextPixels;
+
+/* heldTextPixels keeps its largest size, so a larger bitmap holds no text */
+static const size_t heldTextMaxPixels = 2048 * 2048;
+
+/* A draw of the held texts copies and uploads the box around them. On an
+ * iPhone 13 Pro, a box of 300 000 pixels takes less time than one more draw,
+ * and a box of 1 000 000 pixels takes more. */
+static const int heldTextBoxGrowth = 640 * 480;
 
 struct BitmapOpenHandler : FileSystem::OpenHandler
 {
@@ -763,7 +775,7 @@ Bitmap::Bitmap(void *pixeldata, int width, int height)
 Bitmap::Bitmap(const Bitmap &other, int frame)
 {
     other.guardDisposed();
-    drawHeldText();
+    other.p->drawOwnHeldText();
     other.ensureNonMega();
     if (frame > -2) other.ensureAnimated();
     
@@ -970,6 +982,7 @@ DEF_ATTR_RD_SIMPLE(Bitmap, Hires, Bitmap*, p->selfHires)
 
 void Bitmap::setHires(Bitmap *hires) {
     guardDisposed();
+    p->drawOwnHeldText();
 
     Debug() << "BUG: High-res Bitmap setHires not fully implemented, expect bugs";
     hires->setLores(this);
@@ -1126,29 +1139,67 @@ bool BitmapPrivate::holdText(const SDL_Surface *text, IntRect textRect, IntRect 
     if (textRect.w != destRect.w || textRect.h != destRect.h)
         return false;
     
-    if (heldTextOwner != this)
+    /* Text on cleared pixels needs no blend, and it is apart from each held
+     * text, because a held text counts as drawn pixels */
+    if ((size_t) gl.width * gl.height > heldTextMaxPixels || !touchesTaintedArea(destRect))
+        return false;
+    
+    IntRect box = destRect;
+    if (heldTextOwner == this)
+    {
+        int left = std::min(heldTextBox.x, destRect.x);
+        int top = std::min(heldTextBox.y, destRect.y);
+        int right = std::max(heldTextBox.x + heldTextBox.w, destRect.x + destRect.w);
+        int bottom = std::max(heldTextBox.y + heldTextBox.h, destRect.y + destRect.h);
+        box = IntRect(left, top, right - left, bottom - top);
+    }
+    
+    if (heldTextOwner != this ||
+        box.w * box.h - heldTextBox.w * heldTextBox.h > heldTextBoxGrowth)
     {
         Bitmap::drawHeldText();
         
-        heldText = (uint32_t*) calloc((size_t) gl.width * gl.height, sizeof(uint32_t));
-        if (!heldText)
-            return false;
+        size_t pixels = (size_t) gl.width * gl.height;
+        if (heldTextPixels.size() < pixels)
+            heldTextPixels.resize(pixels);
         
         heldTextOwner = this;
+        box = destRect;
     }
     
     for (int y = 0; y < destRect.h; ++y)
     {
         const uint8_t *source = (const uint8_t*) text->pixels + (textRect.y + y) * text->pitch + textRect.x * 4;
-        uint8_t *dest = (uint8_t*) (heldText + (size_t) (destRect.y + y) * gl.width + destRect.x);
+        uint8_t *dest = (uint8_t*) &heldTextPixels[(size_t) (destRect.y + y) * gl.width + destRect.x];
         
         for (int x = 0; x < destRect.w; ++x)
             blendPixel(dest + x * 4, source + x * 4);
     }
     
+    heldTextBox = box;
     heldTextRects.push_back(destRect);
+    addTaintedArea(destRect);
     onModified();
     return true;
+}
+
+void BitmapPrivate::drawOwnHeldText()
+{
+    if (heldTextOwner == this)
+        Bitmap::drawHeldText();
+}
+
+void BitmapPrivate::dropHeldText()
+{
+    if (heldTextOwner == this)
+        heldTextOwner = 0;
+    
+    for (int y = heldTextBox.y; y < heldTextBox.y + heldTextBox.h; ++y)
+        memset(&heldTextPixels[(size_t) y * gl.width + heldTextBox.x], 0,
+               heldTextBox.w * sizeof(uint32_t));
+    
+    heldTextBox = IntRect();
+    heldTextRects.clear();
 }
 
 void Bitmap::drawHeldText()
@@ -1160,24 +1211,14 @@ void Bitmap::drawHeldText()
     
     heldTextOwner = 0;
     
-    std::unique_ptr<uint32_t, void (*)(void*)> pixels(p->heldText, free);
-    p->heldText = 0;
-    
-    std::vector<IntRect> rects;
-    rects.swap(p->heldTextRects);
-    
-    int left = p->gl.width, top = p->gl.height, right = 0, bottom = 0;
-    for (const IntRect &rect : rects)
+    struct Drop
     {
-        left = std::min(left, rect.x);
-        top = std::min(top, rect.y);
-        right = std::max(right, rect.x + rect.w);
-        bottom = std::max(bottom, rect.y + rect.h);
-    }
-    IntRect area(left, top, right - left, bottom - top);
+        BitmapPrivate *p;
+        ~Drop() { p->dropHeldText(); }
+    } drop = { p };
     
     SDL_Surface *surf = SDL_CreateRGBSurfaceFrom
-    (pixels.get(), p->gl.width, p->gl.height, p->format->BitsPerPixel, p->gl.width * 4,
+    (heldTextPixels.data(), p->gl.width, p->gl.height, p->format->BitsPerPixel, p->gl.width * 4,
      p->format->Rmask, p->format->Gmask, p->format->Bmask, p->format->Amask);
     
     if (!surf)
@@ -1186,34 +1227,20 @@ void Bitmap::drawHeldText()
     
     Bitmap text(surf, nullptr, true);
     
-    bool onDrawnPixels = false;
-    for (const IntRect &rect : rects)
-        onDrawnPixels = onDrawnPixels || p->touchesTaintedArea(rect);
-    
-    if (onDrawnPixels)
-    {
-        p->self->stretchBlt(area, text, area, 255, false, &rects);
-        return;
-    }
-    
-    /* One upload of the area is wrong: a blur moves pixels into places
-     * that have no record as a drawn area */
-    TEX::bind(p->getGLTypes().tex);
-    for (const IntRect &rect : rects)
-    {
-        GLMeta::subRectImageUpload(surf->w, rect.x, rect.y, rect.x, rect.y,
-                                   rect.w, rect.h, surf, GL_RGBA);
-        p->addTaintedArea(rect);
-    }
-    GLMeta::subRectImageEnd();
-    p->onModified();
+    p->self->stretchBlt(p->heldTextBox, text, p->heldTextBox, 255, false, &p->heldTextRects);
 }
 
 void Bitmap::stretchBlt(IntRect destRect,
                         const Bitmap &source, IntRect sourceRect,
                         int opacity, bool smooth)
 {
-    drawHeldText();
+    guardDisposed();
+    
+    if (source.isDisposed())
+        return;
+    
+    p->drawOwnHeldText();
+    source.p->drawOwnHeldText();
     stretchBlt(destRect, source, sourceRect, opacity, smooth, nullptr);
 }
 
@@ -1588,7 +1615,7 @@ void Bitmap::fillRect(int x, int y,
 void Bitmap::fillRect(const IntRect &rect, const Vec4 &color)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_ANIMATED;
     
@@ -1639,7 +1666,7 @@ void Bitmap::gradientFillRect(const IntRect &rect,
                               bool vertical)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_MEGA;
     GUARD_ANIMATED;
@@ -1697,7 +1724,7 @@ void Bitmap::clearRect(int x, int y, int width, int height)
 void Bitmap::clearRect(const IntRect &rect)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_ANIMATED;
     
@@ -1726,7 +1753,7 @@ void Bitmap::clearRect(const IntRect &rect)
 void Bitmap::blur()
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_MEGA;
     GUARD_ANIMATED;
@@ -1779,7 +1806,7 @@ void Bitmap::blur()
 void Bitmap::radialBlur(int angle, int divisions)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_MEGA;
     GUARD_ANIMATED;
@@ -1881,7 +1908,7 @@ void Bitmap::radialBlur(int angle, int divisions)
 void Bitmap::clear()
 {
     guardDisposed();
-    drawHeldText();
+    p->dropHeldText();
     
     GUARD_ANIMATED;
     
@@ -1922,9 +1949,8 @@ Color Bitmap::getPixel(int x, int y) const
     
     /* The binding calls this outside the graphics lock for a bitmap that
      * has a copy of its pixels on the CPU. A bitmap that holds text has no
-     * copy, so only that bitmap may draw here. */
-    if (heldTextOwner == p)
-        drawHeldText();
+     * copy, so this draw runs only inside the lock. */
+    p->drawOwnHeldText();
     
     GUARD_ANIMATED;
     
@@ -2010,7 +2036,7 @@ Color Bitmap::getPixel(int x, int y) const
 void Bitmap::setPixel(int x, int y, const Color &color)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_ANIMATED;
     
@@ -2076,7 +2102,7 @@ bool Bitmap::getRaw(void *output, int output_size)
     if (output_size != width()*height()*4) return false;
     
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     if (hasHires()) {
         Debug() << "GAME BUG: Game is calling getRaw on low-res Bitmap; you may want to patch the game to improve graphics quality.";
@@ -2096,7 +2122,7 @@ bool Bitmap::getRaw(void *output, int output_size)
 void Bitmap::replaceRaw(void *pixel_data, int size)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_MEGA;
     
@@ -2121,7 +2147,7 @@ void Bitmap::replaceRaw(void *pixel_data, int size)
 void Bitmap::uploadCPURect(int x, int y, int w, int h)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
 
     /* Mega surfaces have no GPU texture; painting on them is valid
      * but there's nothing to sync. Callers that hold a mega-surface
@@ -2188,7 +2214,7 @@ void Bitmap::uploadCPURect(int x, int y, int w, int h)
 void Bitmap::saveToFile(const char *filename)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     if (hasHires()) {
         Debug() << "GAME BUG: Game is calling saveToFile on low-res Bitmap; you may want to patch the game to improve graphics quality.";
@@ -2249,7 +2275,7 @@ void Bitmap::saveToFile(const char *filename)
 void Bitmap::hueChange(int hue)
 {
     guardDisposed();
-    drawHeldText();
+    p->drawOwnHeldText();
     
     GUARD_MEGA;
     GUARD_ANIMATED;
@@ -2768,7 +2794,10 @@ void Bitmap::drawText(const IntRect &rect, const char *str, int align)
     if (!smooth && p->holdText(txtSurf, sourceRect, destRect))
         return;
     
-    stretchBlt(destRect, txtBitmap, sourceRect, 255, smooth);
+    if (p->touchesTaintedArea(destRect))
+        p->drawOwnHeldText();
+    
+    stretchBlt(destRect, txtBitmap, sourceRect, 255, smooth, nullptr);
 }
 
 /* http://www.lemoda.net/c/utf8-to-ucs2/index.html */
@@ -3036,8 +3065,9 @@ int Bitmap::currentFrameI() const
 int Bitmap::addFrame(Bitmap &source, int position)
 {
     guardDisposed();
-    drawHeldText();
     source.guardDisposed();
+    p->drawOwnHeldText();
+    source.p->drawOwnHeldText();
     
     GUARD_MEGA;
     
@@ -3325,9 +3355,7 @@ void Bitmap::assumeRubyGC()
 
 void Bitmap::releaseResources()
 {
-    if (heldTextOwner == p)
-        heldTextOwner = 0;
-    free(p->heldText);
+    p->dropHeldText();
     
     if (p->selfHires && !p->assumingRubyGC) {
         delete p->selfHires;
