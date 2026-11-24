@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('dl-memory', 6)
+EngineTest.suite('dl-memory', 7)
 
 EngineTest.load_preloads(%w[windows_fs platform_compat win32_wrap])
 
@@ -55,6 +55,17 @@ EngineTest.test('RtlMoveMemory reads the memory of DL.malloc') do
   buffer = "\xff" * 4
   Win32API.new('kernel32.dll', 'RtlMoveMemory', 'PII', 'V').call(buffer, address, 4)
   EngineTest.assert_equal([0, 7, 0, 0], buffer.unpack('C*'), 'bytes')
+end
+
+# In UTF-8, the bytes 0xC3 0xA9 are one character.
+EngineTest.test('RtlMoveMemory reads one byte of a UTF-8 character') do
+  address = DL.malloc(2)
+  pointer = DL::CPtr.new(address, 2)
+  pointer[0] = 0xC3
+  pointer[1] = 0xA9
+  buffer = "\0" * 2
+  Win32API.new('kernel32.dll', 'RtlMoveMemory', 'PII', 'V').call(buffer, address, 1)
+  EngineTest.assert_equal([0xC3, 0], buffer.unpack('C*'), 'bytes')
 end
 
 EngineTest.finish

@@ -1348,7 +1348,10 @@ module Win32API_Impl
     def self.alloc(bytes)
       address = @next_address
       @next_address += STRIDE
-      @blocks[address] = bytes.to_s
+      block = bytes.to_s.dup
+      # `read` cuts the block by characters, so it must hold bytes only.
+      block.force_encoding('ASCII-8BIT') if block.respond_to?(:force_encoding)
+      @blocks[address] = block
       address
     end
 
