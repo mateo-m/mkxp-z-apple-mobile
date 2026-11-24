@@ -913,6 +913,41 @@ module DL
     table.each { |fn| h[fn] = fn }
     h
   end
+
+  # Hime's full keyboard script (LonaRPG) runs
+  # `DL::CPtr.new(DL.malloc(256), 256)` and passes `ptr.to_i` to
+  # GetKeyboardState. There is no real memory here, so an address is a
+  # key that leads the Win32API stand-ins back to the bytes.
+  @memory = {}
+
+  def self.malloc(size)
+    address = 0x1000 * (@memory.size + 1)
+    @memory[address] = Array.new(size.to_i, 0)
+    address
+  end
+
+  def self.memory_at(address)
+    @memory[address]
+  end
+
+  class CPtr
+    def initialize(address, size = 0)
+      @address = address.to_i
+      @bytes = DL.memory_at(@address) || Array.new(size.to_i, 0)
+    end
+
+    def to_i
+      @address
+    end
+
+    def [](index)
+      @bytes[index]
+    end
+
+    def []=(index, value)
+      @bytes[index] = value.to_i & 0xff
+    end
+  end
 end
 
 # --- Socket / network stubs ---

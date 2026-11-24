@@ -309,6 +309,8 @@ module Win32API_Impl
       PRESSED_BIT = 0x80
       def call(args)
         out_states = args[0]
+        out_states = DL.memory_at(out_states) if out_states.is_a?(Integer)
+        return 0 unless out_states
 
         Scancodes::WIN32.each do |_name, val|
           pressed = Input.asyncKeyState(val) > 0
