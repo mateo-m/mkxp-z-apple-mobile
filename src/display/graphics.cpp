@@ -1400,12 +1400,8 @@ void Graphics::update(bool checkForShutdown) {
     // below), so logic advances Nx per visible frame while the
     // screen refreshes at the display's native rate.
     //
-    // This is the vsync-mode counterpart of the FPSLimiter::delay
-    // multiplier path. With syncToRefreshrate=true (iOS default) the
-    // limiter is `disabled`, so the divisor inside delay() never
-    // runs and pacing comes from eglSwapBuffers' Metal drawable
-    // wait. Skipping redrawScreen entirely here releases the Ruby
-    // thread without hitting that wait.
+    // Skipping redrawScreen here also skips the limiter and the wait
+    // for the Metal drawable in eglSwapBuffers.
     {
         int multiplier = mkxp_getFastForwardMultiplier();
         if (multiplier > 1) {
