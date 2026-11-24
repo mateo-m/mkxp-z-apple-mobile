@@ -1959,6 +1959,9 @@ Color Bitmap::getPixel(int x, int y) const
                      (pixel >> p->format->Ashift) & 0xFF);
     }
     
+    if (x < 0 || y < 0 || x >= width() || y >= height())
+        return Vec4();
+
     if (hasHires()) {
         Debug() << "GAME BUG: Game is calling getPixel on low-res Bitmap; you may want to patch the game to improve graphics quality.";
 
@@ -1966,7 +1969,8 @@ Color Bitmap::getPixel(int x, int y) const
         int yHires = y * p->selfHires->height() / height();
 
         // We take the average color from the high-res Bitmap.
-        // RGB channels skip fully transparent pixels when averaging.
+        // RGB channels skip fully transparent pixels when averaging,
+        // unless every pixel of the block is fully transparent.
         int w = p->selfHires->width() / width();
         int h = p->selfHires->height() / height();
 
@@ -1975,6 +1979,9 @@ Color Bitmap::getPixel(int x, int y) const
             double gSum = 0.;
             double bSum = 0.;
             double aSum = 0.;
+            double rClearSum = 0.;
+            double gClearSum = 0.;
+            double bClearSum = 0.;
 
             long long rgbCount = 0;
             long long aCount = 0;
@@ -1987,10 +1994,21 @@ Color Bitmap::getPixel(int x, int y) const
                         gSum += thisColor.getGreen();
                         bSum += thisColor.getBlue();
                         rgbCount++;
+                    } else {
+                        rClearSum += thisColor.getRed();
+                        gClearSum += thisColor.getGreen();
+                        bClearSum += thisColor.getBlue();
                     }
                     aSum += thisColor.getAlpha();
                     aCount++;
                 }
+            }
+
+            if (rgbCount == 0) {
+                rSum = rClearSum;
+                gSum = gClearSum;
+                bSum = bClearSum;
+                rgbCount = aCount;
             }
 
             double rAvg = rSum / (double)rgbCount;
@@ -2001,9 +2019,6 @@ Color Bitmap::getPixel(int x, int y) const
             return Color(rAvg, gAvg, bAvg, aAvg);
         }
     }
-
-    if (x < 0 || y < 0 || x >= width() || y >= height())
-        return Vec4();
 
     if (!p->surface)
     {
