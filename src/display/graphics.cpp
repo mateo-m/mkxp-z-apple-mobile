@@ -317,7 +317,7 @@ struct FPSLimiter {
     uint64_t lastTickCount;
     
     /* ticks per frame */
-    int64_t tpf;
+    int64_t tpf = 0;
     
     /* Ticks per second */
     const uint64_t tickFreq;
@@ -355,7 +355,11 @@ struct FPSLimiter {
     }
     
     void setDesiredFPS(uint16_t value) {
-        tpf = tickFreq / value;
+        // Some games set Graphics.frame_rate on each frame.
+        const int64_t newTpf = tickFreq / value;
+        if (newTpf == tpf)
+            return;
+        tpf = newTpf;
         if (mkxp_debugLogEnabled()) {
             char msg[80];
             std::snprintf(msg, sizeof(msg),
