@@ -32,6 +32,7 @@ EngineTest.test('File.read drops the CR of each CR LF') do
   EngineTest.assert_equal(FOLDED, File.read(TEXT_FILE), 'File.read')
 end
 
+# rubocop:disable Style/FileRead -- these tests read through File.open with a mode, and File.binread is not on Ruby 1.8.
 EngineTest.test('a block read in mode r drops the CR of each CR LF') do
   EngineTest.assert_equal(FOLDED, File.open(TEXT_FILE, 'r', &:read), "File.open 'r'")
 end
@@ -39,6 +40,7 @@ end
 EngineTest.test('a binary read keeps the CR') do
   EngineTest.assert_equal("[\r\n1,\r\n2\r\n]\r\n", File.open(TEXT_FILE, 'rb', &:read), "File.open 'rb'")
 end
+# rubocop:enable Style/FileRead
 
 # Ruby 1.8 has no Encoding.
 if defined?(Encoding)
