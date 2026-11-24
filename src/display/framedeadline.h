@@ -6,8 +6,7 @@
 
 #include <cstdint>
 
-/* Call both on the thread that runs the frames: `startFrameWork` when
- * the work of a frame starts, and `endFrameWork` when it ends. */
+/* Call both on the thread that runs the frames. */
 void startFrameWork(uint64_t deadlineNanoseconds);
 void endFrameWork();
 

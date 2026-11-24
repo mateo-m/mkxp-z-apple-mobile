@@ -22,7 +22,7 @@ def kernel_ms
 end
 
 # Ruby cannot count the reads of the process. The kernel time of the
-# process is the nearest value, but it grows with the load of the
+# process is the nearest value, but it is not the same on each
 # computer: the same play took 4 ms and 25 ms on two CI runners. So
 # the test compares it with the kernel time of one read for each byte
 # of the same file. On an M2 Pro, the play takes 0.02 times that with

@@ -23,15 +23,14 @@ namespace
  * the speed of the thread from the time that the work has until its
  * deadline. On an A15 at 40 frames per second, the scripts of a map
  * frame take 7 ms with no interval, 8 ms with a deadline of one frame,
- * 2.5 ms with a quarter of a frame, and 1.4 ms with an eighth.
+ * 2.6 ms with a quarter of a frame, and 1.4 ms with an eighth.
  * The interval must not hold the sleep of the limiter. With the sleep,
  * each interval ends at its deadline and iOS has no steady signal: the
  * same scripts then take from 2 ms to 11 ms. */
 class FrameDeadline
 {
 public:
-    /* The thread that joined must leave before it ends, or iOS stops
-     * the process. */
+    /* A thread that ends while it is joined is undefined behavior. */
     ~FrameDeadline()
     {
         if (state == Open)

@@ -401,9 +401,7 @@ struct FPSLimiter {
         int64_t diff = now - adj.last;
         adj.last = now;
 
-        /* A quarter of the frame time: on an A15, an eighth brings no
-         * fewer late frames and takes three times the extra energy.
-         * With fast-forward, the frame adjustment below still brings
+        /* With fast-forward, the frame adjustment below still brings
          * the time between two calls to one full frame. */
         startFrameWork(tpf / tickFreqNS / 4);
         
