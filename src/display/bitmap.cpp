@@ -1969,8 +1969,7 @@ Color Bitmap::getPixel(int x, int y) const
         int yHires = y * p->selfHires->height() / height();
 
         // We take the average color from the high-res Bitmap.
-        // RGB channels skip fully transparent pixels when averaging,
-        // unless every pixel of the block is fully transparent.
+        // RGB channels skip fully transparent pixels when averaging.
         int w = p->selfHires->width() / width();
         int h = p->selfHires->height() / height();
 

@@ -22,12 +22,6 @@ EngineTest.suite('hires-pixel', 5)
 
 SIZE = 32
 
-# The raw channels, so that a NaN shows in the failure text.
-def channels(bitmap, x, y)
-  colour = bitmap.get_pixel(x, y)
-  [colour.red, colour.green, colour.blue, colour.alpha]
-end
-
 EngineTest.test('the bitmap has a high-res copy') do
   EngineTest.bitmap(SIZE, SIZE) do |bitmap|
     EngineTest.refute_equal(nil, bitmap.hires, 'Bitmap#hires')
@@ -37,20 +31,20 @@ end
 
 EngineTest.test('a new bitmap reads 0, 0, 0, 0') do
   EngineTest.bitmap(SIZE, SIZE) do |bitmap|
-    EngineTest.assert_equal([0.0, 0.0, 0.0, 0.0], channels(bitmap, 0, 0), 'pixel 0, 0')
+    EngineTest.assert_equal([0, 0, 0, 0], EngineTest.pixel(bitmap, [0, 0]), 'pixel 0, 0')
   end
 end
 
 EngineTest.test('a fully clear pixel keeps its color') do
   EngineTest.bitmap(SIZE, SIZE, Color.new(255, 128, 0, 0)) do |bitmap|
-    EngineTest.assert_equal([255.0, 128.0, 0.0, 0.0], channels(bitmap, 3, 3), 'pixel 3, 3')
+    EngineTest.assert_equal([255, 128, 0, 0], EngineTest.pixel(bitmap, [3, 3]), 'pixel 3, 3')
   end
 end
 
 EngineTest.test('a pixel outside the bitmap reads 0, 0, 0, 0') do
   EngineTest.bitmap(SIZE, SIZE, Color.new(10, 20, 30, 255)) do |bitmap|
-    [[SIZE, 0], [0, SIZE], [-1, 0], [0, -1]].each do |x, y|
-      EngineTest.assert_equal([0.0, 0.0, 0.0, 0.0], channels(bitmap, x, y), "pixel #{x}, #{y}")
+    [[SIZE, 0], [0, SIZE], [-1, 0], [0, -1]].each do |point|
+      EngineTest.assert_equal([0, 0, 0, 0], EngineTest.pixel(bitmap, point), "pixel #{point.inspect}")
     end
   end
 end
@@ -61,7 +55,8 @@ EngineTest.test('a block takes the color of its opaque pixels') do
   EngineTest.bitmap(SIZE, SIZE) do |bitmap|
     block = (bitmap.hires.width / SIZE) * (bitmap.hires.height / SIZE)
     bitmap.hires.set_pixel(0, 0, Color.new(200, 100, 50, 255))
-    EngineTest.assert_equal([200.0, 100.0, 50.0, 255.0 / block], channels(bitmap, 0, 0), 'pixel 0, 0')
+    expected = [200, 100, 50, (255.0 / block).round]
+    EngineTest.assert_equal(expected, EngineTest.pixel(bitmap, [0, 0]), 'pixel 0, 0')
   end
 end
 
