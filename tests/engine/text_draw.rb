@@ -453,15 +453,25 @@ end
 
 STEPS = 16
 
-# Each text makes the box around the texts only a little larger. On an
-# iPhone 13 Pro with RGSS1, a box that grew with each text took 11
-# times the time of the texts in a row, and boxes of a limited size
-# take 4 times.
-EngineTest.test('texts on a diagonal of a large bitmap take the time of texts in a row') do
+# The texts go down the left edge, then along a row. Each text of the
+# row makes the box around the texts only a little larger. In the
+# second block, a fill sends the texts of the left edge to the texture
+# before the row.
+EngineTest.test('texts along two edges of a large bitmap take the time of the same texts in two groups') do
   with_bitmaps(drawn_bitmap(2048, 2048)) do |bitmap|
-    diagonal = proc { STEPS.times { |i| bitmap.draw_text(128 * i, 128 * i, 120, LINE, 'Earthquake') } }
-    row = proc { STEPS.times { |i| bitmap.draw_text(128 * i, 2, 120, LINE, 'Earthquake') } }
-    assert_far_time(bitmap, %w[diagonal row], 8, diagonal, row)
+    last = 120 * (STEPS - 1)
+    column = proc { STEPS.times { |i| bitmap.draw_text(0, 120 * i, 120, LINE, 'Earthquake') } }
+    row = proc { (1...STEPS).each { |i| bitmap.draw_text(120 * i, last, 120, LINE, 'Earthquake') } }
+    edges = proc do
+      column.call
+      row.call
+    end
+    groups = proc do
+      column.call
+      bitmap.fill_rect(0, 0, 1, 1, BACK)
+      row.call
+    end
+    assert_far_time(bitmap, %w[edges groups], 2, edges, groups)
   end
 end
 
