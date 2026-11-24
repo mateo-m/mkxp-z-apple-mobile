@@ -42,6 +42,7 @@
 #include "patcher.h"
 #include "app_bridge.h"
 
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string>
@@ -141,7 +142,7 @@ struct SharedStatePrivate
 		for (size_t i = 0; i < config.patches.size(); ++i)
 		{
 			const char *patch = config.patches[i].c_str();
-			if (access(patch, F_OK) != 0)
+			if (access(patch, F_OK) != 0 && errno == ENOENT)
 			{
 				std::string msg = std::string("skipped the missing ") + patch;
 				mkxp_debugLog("WARN", "patches", msg.c_str());
