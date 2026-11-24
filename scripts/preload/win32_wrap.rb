@@ -313,9 +313,13 @@ module Win32API_Impl
         return 0 unless out_states
 
         Scancodes::WIN32.each do |_name, val|
-          pressed = Input.asyncKeyState(val) > 0
-
-          out_states[val] = pressed ? PRESSED_BIT : 0
+          state = Input.asyncKeyState(val) > 0 ? PRESSED_BIT : 0
+          # On Ruby 1.9 and later, a String takes a byte only through setbyte.
+          if out_states.is_a?(String) && defined?(Encoding)
+            out_states.setbyte(val, state)
+          else
+            out_states[val] = state
+          end
         end
         1
       end

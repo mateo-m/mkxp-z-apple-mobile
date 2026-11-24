@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('dl-memory', 5)
+EngineTest.suite('dl-memory', 6)
 
 EngineTest.load_preloads(%w[windows_fs platform_compat win32_wrap])
 
@@ -40,6 +40,13 @@ EngineTest.test('GetKeyboardState writes to the address of a DL::CPtr') do
   EngineTest.assert_equal(1, result, 'GetKeyboardState result')
   # No key is down in the test host.
   EngineTest.assert_equal(0, state[0x41], 'state of the A key')
+end
+
+EngineTest.test('GetKeyboardState writes to a String buffer') do
+  buffer = "\xff" * 256
+  result = Win32API.new('user32.dll', 'GetKeyboardState', 'P', 'I').call(buffer)
+  EngineTest.assert_equal(1, result, 'GetKeyboardState result')
+  EngineTest.assert_equal(0, buffer.unpack('C*')[0x41], 'state of the A key')
 end
 
 EngineTest.test('RtlMoveMemory reads the memory of DL.malloc') do
