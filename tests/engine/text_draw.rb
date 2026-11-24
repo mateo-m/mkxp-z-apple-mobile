@@ -16,7 +16,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('text-draw', 17)
+EngineTest.suite('text-draw', 18)
 
 BACK = Color.new(40, 90, 200, 255)
 THIN = Color.new(200, 60, 30, 128)
@@ -184,6 +184,26 @@ EngineTest.test('two texts keep the blurred pixels between them') do
     bitmap.draw_text(100, 0, 30, 12, 'b')
     EngineTest.assert_equal(blurred, EngineTest.pixel(bitmap, between), 'the pixel between the texts')
   end
+end
+
+MOVED = [80, 25].freeze
+
+# A blur moves pixels to places where no call drew. The text starts
+# with spaces, so it has no ink at the pixel.
+def assert_text_keeps_moved_pixel(label)
+  with_bitmaps(cleared_bitmap) do |bitmap|
+    bitmap.fill_rect(40, 12, 40, 30, BACK)
+    yield bitmap
+    moved = EngineTest.pixel(bitmap, MOVED)
+    EngineTest.assert(moved[3] > 0, "#{label} left no pixel at #{MOVED.inspect}")
+    bitmap.draw_text(80, 12, 150, LINE, '      i')
+    EngineTest.assert_equal(moved, EngineTest.pixel(bitmap, MOVED), "the pixel under the text after #{label}")
+  end
+end
+
+EngineTest.test('a text keeps the pixels that a blur moved under it') do
+  assert_text_keeps_moved_pixel('the blur', &:blur)
+  assert_text_keeps_moved_pixel('the radial blur') { |bitmap| bitmap.radial_blur(30, 4) }
 end
 
 # The first read makes a copy of the pixels on the CPU. The second

@@ -1800,6 +1800,7 @@ void Bitmap::blur()
     
     shState->texPool().release(auxTex);
     
+    p->addTaintedArea(this->rect());
     p->onModified();
 }
 
@@ -1902,6 +1903,7 @@ void Bitmap::radialBlur(int angle, int divisions)
     shState->texPool().release(p->gl);
     p->gl = newTex;
     
+    p->addTaintedArea(rect());
     p->onModified();
 }
 
