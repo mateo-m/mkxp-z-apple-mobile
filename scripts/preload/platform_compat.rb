@@ -916,36 +916,34 @@ module DL
 
   # Hime's full keyboard script (LonaRPG) runs
   # `DL::CPtr.new(DL.malloc(256), 256)` and passes `ptr.to_i` to
-  # GetKeyboardState. There is no real memory here, so an address is a
-  # key that leads the Win32API stand-ins back to the bytes.
-  @memory = {}
-
+  # GetKeyboardState.
   def self.malloc(size)
-    address = 0x1000 * (@memory.size + 1)
-    @memory[address] = Array.new(size.to_i, 0)
-    address
-  end
-
-  def self.memory_at(address)
-    @memory[address]
+    Win32API_Impl::FakeHeap.alloc("\0" * size.to_i)
   end
 
   class CPtr
     def initialize(address, size = 0)
       @address = address.to_i
-      @bytes = DL.memory_at(@address) || Array.new(size.to_i, 0)
+      @bytes = Win32API_Impl::FakeHeap.block(@address) || ("\0" * size.to_i)
     end
 
     def to_i
       @address
     end
 
+    # Windows DL reads a signed char.
     def [](index)
-      @bytes[index]
+      byte = (defined?(Encoding) ? @bytes.getbyte(index) : @bytes[index]) || 0
+      byte >= 0x80 ? byte - 0x100 : byte
     end
 
     def []=(index, value)
-      @bytes[index] = value.to_i & 0xff
+      byte = value.to_i & 0xff
+      if defined?(Encoding)
+        @bytes.setbyte(index, byte)
+      else
+        @bytes[index] = byte
+      end
     end
   end
 end

@@ -14,7 +14,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('dl-memory', 3)
+EngineTest.suite('dl-memory', 5)
 
 EngineTest.load_preloads(%w[windows_fs platform_compat win32_wrap])
 
@@ -22,10 +22,15 @@ EngineTest.test('two DL.malloc calls give two addresses') do
   EngineTest.refute_equal(DL.malloc(4), DL.malloc(4), 'second address')
 end
 
+# Windows DL reads a signed char, so 0xff reads back as -1.
 EngineTest.test('a DL::CPtr keeps the bytes of its address') do
   address = DL.malloc(4)
   DL::CPtr.new(address, 4)[2] = 0x1ff
-  EngineTest.assert_equal([0, 0, 0xff, 0], (0...4).map { |i| DL::CPtr.new(address)[i] }, 'bytes')
+  EngineTest.assert_equal([0, 0, -1, 0], (0...4).map { |i| DL::CPtr.new(address)[i] }, 'bytes')
+end
+
+EngineTest.test('an address that DL.malloc did not give reads as 0') do
+  EngineTest.assert_equal(0, DL::CPtr.new(0x1234)[0], 'byte')
 end
 
 EngineTest.test('GetKeyboardState writes to the address of a DL::CPtr') do
@@ -35,6 +40,14 @@ EngineTest.test('GetKeyboardState writes to the address of a DL::CPtr') do
   EngineTest.assert_equal(1, result, 'GetKeyboardState result')
   # No key is down in the test host.
   EngineTest.assert_equal(0, state[0x41], 'state of the A key')
+end
+
+EngineTest.test('RtlMoveMemory reads the memory of DL.malloc') do
+  address = DL.malloc(4)
+  DL::CPtr.new(address, 4)[1] = 7
+  buffer = "\xff" * 4
+  Win32API.new('kernel32.dll', 'RtlMoveMemory', 'PII', 'V').call(buffer, address, 4)
+  EngineTest.assert_equal([0, 7, 0, 0], buffer.unpack('C*'), 'bytes')
 end
 
 EngineTest.finish

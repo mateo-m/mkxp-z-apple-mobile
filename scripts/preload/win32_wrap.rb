@@ -309,7 +309,7 @@ module Win32API_Impl
       PRESSED_BIT = 0x80
       def call(args)
         out_states = args[0]
-        out_states = DL.memory_at(out_states) if out_states.is_a?(Integer)
+        out_states = Win32API_Impl::FakeHeap.block(out_states) if out_states.is_a?(Integer)
         return 0 unless out_states
 
         Scancodes::WIN32.each do |_name, val|
@@ -1357,6 +1357,10 @@ module Win32API_Impl
 
       data = block[0, length].to_s
       data + ("\0" * (length - data.length))
+    end
+
+    def self.block(address)
+      @blocks[address]
     end
   end
 
