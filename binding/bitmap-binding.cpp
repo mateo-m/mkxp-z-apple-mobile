@@ -46,19 +46,26 @@ static const char *objAsStringPtr(VALUE obj) {
 static size_t pixelBytesSinceGC = 0;
 static const size_t pixelBytesPerGC = 256 * 1024 * 1024;
 
-static void countPixelsForGC(Bitmap *b, int frames) {
-    pixelBytesSinceGC += (size_t)b->width() * b->height() * 4 * frames;
+static void countPixelsForGC(size_t bytes) {
+    pixelBytesSinceGC += bytes;
     if (pixelBytesSinceGC < pixelBytesPerGC)
         return;
     pixelBytesSinceGC = 0;
     rb_gc();
 }
 
+static size_t frameBytes(Bitmap *b) {
+    return (size_t)b->width() * b->height() * 4;
+}
+
+static size_t pixelBytes(Bitmap *b) {
+    return frameBytes(b) * (b->isAnimated() ? b->numFrames() : 1);
+}
+
 void bitmapInitProps(Bitmap *b, VALUE self) {
-    int frames = b->isAnimated() ? b->numFrames() : 1;
-    countPixelsForGC(b, frames);
+    countPixelsForGC(pixelBytes(b));
     if (b->hasHires())
-        countPixelsForGC(b->getHires(), frames);
+        countPixelsForGC(pixelBytes(b->getHires()));
 
     /* Wrap properties */
     VALUE fontKlass = rb_const_get(rb_cObject, rb_intern("Font"));
@@ -673,7 +680,7 @@ RB_METHOD_GUARD(bitmapAddFrame){
     int ret;
     
     GFX_GUARD_EXC(ret = b->addFrame(*src, pos););
-    countPixelsForGC(b, 1);
+    countPixelsForGC(frameBytes(b));
     
     return INT2NUM(ret);
 }
