@@ -686,12 +686,12 @@ struct InputPrivate
     bool mouseInWindow;
     
     Input::ButtonCode repeating;
-    int rawRepeating;
-    int buttonRepeating;
+    int rawRepeating = -1;
+    int buttonRepeating = -1;
     
     unsigned int repeatCount;
-    unsigned int rawRepeatCount;
-    unsigned int buttonRepeatCount;
+    unsigned int rawRepeatCount = 0;
+    unsigned int buttonRepeatCount = 0;
     
     double repeatTime, rawRepeatTime, buttonRepeatTime;
     
