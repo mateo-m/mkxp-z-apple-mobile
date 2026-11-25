@@ -15,31 +15,37 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('input-repeat', 3)
+EngineTest.suite('input-repeat', 4)
 
 SCANCODE_DOWN = 81
 
 # Fills Graphics.average_frame_rate, which sets the repeat delay.
 60.times { Graphics.update }
 
-# The block gets the seconds since the press, before each update.
-def repeats_for_press(seconds)
+# Gives the seconds since the press of each Input.repeat?. The block
+# gets the seconds since the press and the repeats so far, before each
+# update.
+def repeat_times(seconds)
   msgbox("key #{SCANCODE_DOWN} #{seconds}")
-  repeats = 0
+  times = []
   pressed = false
   start = Time.now
   while Time.now - start < seconds + 2
-    yield Time.now - start if block_given?
+    yield Time.now - start, times if block_given?
     Graphics.update
     Input.update
     if Input.press?(Input::DOWN)
       pressed = true
-      repeats += 1 if Input.repeat?(Input::DOWN)
+      times << (Time.now - start) if Input.repeat?(Input::DOWN)
     elsif pressed
       break
     end
   end
-  repeats
+  times
+end
+
+def repeats_for_press(seconds, &block)
+  repeat_times(seconds, &block).size
 end
 
 EngineTest.test('a press of 0.25 s repeats once') do
@@ -57,7 +63,7 @@ end
 EngineTest.test('a press of 0.3 s repeats once when fast-forward stops during the press') do
   msgbox('fast-forward 4')
   stopped = false
-  repeats = repeats_for_press(0.3) do |held|
+  repeats = repeats_for_press(0.3) do |held, _so_far|
     if held >= 0.15 && !stopped
       msgbox('fast-forward 1')
       stopped = true
@@ -65,6 +71,22 @@ EngineTest.test('a press of 0.3 s repeats once when fast-forward stops during th
   end
   msgbox('fast-forward 0')
   EngineTest.assert(repeats == 1, "Input.repeat? was true #{repeats} times")
+end
+
+# Normal speed repeats each 0.1 s.
+EngineTest.test('a held key repeats 0.1 s after its last repeat when fast-forward starts') do
+  msgbox('fast-forward 1')
+  started = false
+  times = repeat_times(1.2) do |_held, so_far|
+    if so_far.size == 2 && !started
+      msgbox('fast-forward 4')
+      started = true
+    end
+  end
+  msgbox('fast-forward 0')
+  gap = times.size >= 3 ? times[2] - times[1] : 0
+  EngineTest.assert((0.07..0.15).include?(gap),
+                    "the repeat after the switch came #{gap} s after the last one")
 end
 
 EngineTest.finish
