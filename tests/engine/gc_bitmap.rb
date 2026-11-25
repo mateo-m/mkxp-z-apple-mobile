@@ -34,7 +34,7 @@ EngineTest.test('dropped bitmaps are collected before they fill the memory') do
   most = 0
   DROPS.times do |i|
     shown = source.clone
-    most = [most, live_bitmaps].max if i % 20 == 0
+    most = [most, live_bitmaps].max if (i % 20).zero?
   end
   EngineTest.assert(most <= MAX_LIVE, "#{most} bitmaps were alive at one time")
 end
