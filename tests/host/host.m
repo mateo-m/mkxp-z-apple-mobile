@@ -144,12 +144,18 @@ static void after(double seconds, dispatch_block_t block) {
 //   hold N            keep the dialog open for N seconds
 //   pause-cancel D S  ask for a pause after D seconds, and cancel it
 //                     S seconds later, while the suite draws no frame
+//   key C S           hold the key with scancode C for S seconds
 //
 // Every other dialog closes at once.
 static void answerGameDialog(const char *message, void *userdata) {
     (void)userdata;
     double first = 0, second = 0;
-    if (sscanf(message, "pause-cancel %lf %lf", &first, &second) == 2) {
+    int scancode = 0;
+    if (sscanf(message, "key %d %lf", &scancode, &first) == 2) {
+        mkxp_signalInfoDismissed();
+        mkxp_injectKeyEvent(scancode, 1);
+        after(first, ^{ mkxp_injectKeyEvent(scancode, 0); });
+    } else if (sscanf(message, "pause-cancel %lf %lf", &first, &second) == 2) {
         mkxp_signalInfoDismissed();
         // One timer, because a late second timer would let the engine
         // reach a frame while the pause is still asked for.
