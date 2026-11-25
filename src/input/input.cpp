@@ -697,6 +697,7 @@ struct InputPrivate
     
     unsigned int repeatStart;
     unsigned int repeatDelay;
+    int repeatFastForward = 1;
     
     double last_update;
 
@@ -1175,8 +1176,17 @@ double Input::getDelta() {
     return shState->runTime() - p->last_update;
 }
 
-void Input::recalcRepeat(unsigned int fps) {
-    p->recalcRepeatTime(fps);
+void Input::recalcRepeat(unsigned int fps, int fastForward) {
+    // The counts of a held key are in updates. A change of the
+    // fast-forward speed changes how long an update takes, so the
+    // counts change with it, and the time held stays the same.
+    if (fastForward > 0 && fastForward != p->repeatFastForward) {
+        p->repeatCount = p->repeatCount * fastForward / p->repeatFastForward;
+        p->rawRepeatCount = p->rawRepeatCount * fastForward / p->repeatFastForward;
+        p->buttonRepeatCount = p->buttonRepeatCount * fastForward / p->repeatFastForward;
+        p->repeatFastForward = fastForward;
+    }
+    p->recalcRepeatTime(fps * p->repeatFastForward);
 }
 
 void Input::update()

@@ -1380,7 +1380,7 @@ void Graphics::update(bool checkForShutdown) {
         // Input.update runs once per Graphics.update, and fast-forward
         // shows only one update in n. The rate of updates is what turns
         // the repeat delay into a count of updates.
-        shState->input().recalcRepeat(std::floor(afr) * mkxp_getFastForwardMultiplier());
+        shState->input().recalcRepeat(std::floor(afr), mkxp_getFastForwardMultiplier());
     }
     
     if (checkForShutdown)
