@@ -15,7 +15,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('gc-bitmap', 1)
+EngineTest.suite('gc-bitmap', 2)
 
 DROPS = 600
 # 400 MB of 1024x1024 bitmaps.
@@ -37,6 +37,22 @@ EngineTest.test('dropped bitmaps are collected before they fill the memory') do
     most = [most, live_bitmaps].max if (i % 20).zero?
   end
   EngineTest.assert(most <= MAX_LIVE, "#{most} bitmaps were alive at one time")
+end
+
+# Each clone of an animated bitmap makes a texture for each frame.
+EngineTest.test('dropped animated bitmaps are collected before they fill the memory') do
+  GC.start
+  source = Bitmap.new(256, 256)
+  frame = Bitmap.new(256, 256)
+  9.times { source.add_frame(frame) }
+  EngineTest.assert(source.frame_count == 10, "the source has #{source.frame_count} frames")
+  shown = nil
+  most = 0
+  400.times do |i|
+    shown = source.clone
+    most = [most, live_bitmaps].max if (i % 20).zero?
+  end
+  EngineTest.assert(most <= 150, "#{most} bitmaps were alive at one time")
 end
 
 EngineTest.finish
