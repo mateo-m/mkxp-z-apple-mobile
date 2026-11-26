@@ -696,11 +696,7 @@ struct InputPrivate
     
     double repeatTime, rawRepeatTime, buttonRepeatTime;
     
-    struct RepeatClock {
-        double since = 0;
-        unsigned int given = 0;
-        bool due = false;
-    };
+    struct RepeatClock { double next = 0; bool due = false; };
     RepeatClock repeatClock, rawRepeatClock, buttonRepeatClock;
 
     double repeatStart;
@@ -724,23 +720,20 @@ struct InputPrivate
     } dir8Data;
     
     void startRepeat(RepeatClock &clock, double since) {
-        clock.since = since;
-        clock.given = 0;
+        clock.next = since + repeatStart;
         clock.due = false;
     }
 
     // Real seconds, not updates: the rate of updates moves with
     // fast-forward, and a slow frame is no reason to repeat sooner.
+    // After a stall, the next repeat waits a full delay, so that a menu
+    // cursor does not take two quick steps.
     void advanceRepeat(RepeatClock &clock) {
-        double held = updateSeconds - clock.since;
-        clock.due = false;
-        if (held < repeatStart)
+        clock.due = updateSeconds >= clock.next;
+        if (!clock.due)
             return;
-        unsigned int repeats = 1 + (unsigned int)((held - repeatStart) / repeatDelay);
-        if (repeats <= clock.given)
-            return;
-        clock.given = repeats;
-        clock.due = true;
+        bool stalled = updateSeconds - clock.next >= repeatDelay / 2;
+        clock.next = (stalled ? updateSeconds : clock.next) + repeatDelay;
     }
     
     InputPrivate(const RGSSThreadData &rtData)
