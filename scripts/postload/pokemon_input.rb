@@ -232,6 +232,13 @@ unless $PokemonSystem.nil?
       jpress?(button)
     end
 
+    def self.mkxp_button_triggered?(button)
+      vkeys = mkxp_extended_vkeys(button)
+      return vkeys.any? { |vkey| jtriggerex?(vkey) } if vkeys
+
+      jtrigger?(button)
+    end
+
     # Fan games put hotkey handling inside their own `Input.update`.
     # Pokemon Rejuvenation toggles turbo (T), mute (M), and the
     # screenshot key (F3) there, and reads the gamepad triggers for
@@ -256,6 +263,25 @@ unless $PokemonSystem.nil?
       idle_before = mkxp_engine_idle_time
       mkxp_chained_update
       jupdate if mkxp_engine_update_missing?(idle_before)
+      mkxp_forget_released_buttons
+    end
+
+    # The engine gives a release or a new press on one update only, and
+    # the game can read the button many updates later. So a held button
+    # starts again from zero on the update that sees it go up or come
+    # down again, also when no read saw that update. A game that reads
+    # its hotkeys inside its own `update` already used the press, so
+    # that press stays counted.
+    def self.mkxp_forget_released_buttons
+      return unless @mkxp_counts
+
+      @mkxp_counts.each_key do |button|
+        next if @mkxp_counts[button].zero?
+        next if @mkxp_read && @mkxp_read[button]
+        next if mkxp_button_down?(button) && !mkxp_button_triggered?(button)
+
+        @mkxp_counts[button] = 0
+      end
     end
 
     # Seconds since the engine last refreshed its input state. The
@@ -324,7 +350,13 @@ unless $PokemonSystem.nil?
       @mkxp_read[button] = down && held.zero?
     end
 
+    # `trigger?` counts a press only when it is read. Pokemon Xenoverse's
+    # Pokedex reads `repeat? || trigger?`, so without this read the press
+    # stayed unread on its first frame, `trigger?` gave it on the next
+    # frame, and the cursor moved two cells.
     def self.repeat?(button)
+      return true if trigger?(button)
+
       vkeys = mkxp_extended_vkeys(button)
       return vkeys.any? { |vkey| jrepeatex?(vkey) } if vkeys
 

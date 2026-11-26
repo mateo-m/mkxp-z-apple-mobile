@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Mateo M. Additional terms apply: see ADDITIONAL-TERMS.md.
 
-# Unit tests for pokemon_input.rb: the Pokemon Essentials marker, and
-# the name screen with the "In-game keyboard" setting on.
+# Unit tests for pokemon_input.rb: the Pokemon Essentials marker, the
+# name screen with the "In-game keyboard" setting on, and the press and
+# repeat answers of the input module.
 # Run: ruby tools/test_pokemon_input.rb
 
 require 'tmpdir'
@@ -157,6 +158,146 @@ scene.pbStartScene('Your name?', 1, 7, '', 1)
 assert_eq(scene.pbEntry, :typed, 'a scene with no USEKEYBOARD of its own takes typed text')
 assert_eq(USEKEYBOARDTEXTENTRY, true, 'the top-level setting also goes to typing mode')
 
+# The engine side of the input module. Each frame sets the native
+# answers for one button.
+module Input
+  class << self
+    attr_accessor :engine
+  end
+
+  def self.jpress?(_button)
+    @engine[:press]
+  end
+
+  def self.jtrigger?(_button)
+    @engine[:trigger]
+  end
+
+  def self.jrepeat?(_button)
+    @engine[:repeat]
+  end
+
+  def self.jupdate; end
+end
+
+RELEASED = { press: false, trigger: false, repeat: false }.freeze
+PRESSED = { press: true, trigger: true, repeat: true }.freeze
+HELD = { press: true, trigger: false, repeat: false }.freeze
+HELD_REPEAT = { press: true, trigger: false, repeat: true }.freeze
+DOWN = 2
+
+def moves(frames)
+  frames.map do |state|
+    Input.engine = state
+    Input.update
+    yield ? 1 : 0
+  end
+end
+
+load SCRIPT
+frames = [RELEASED, PRESSED, HELD, HELD, HELD_REPEAT, HELD, RELEASED]
+# Pokemon Xenoverse's DexMain#inputHandle moves the cursor like this.
+assert_eq(moves(frames) { Input.repeat?(DOWN) || Input.trigger?(DOWN) }, [0, 1, 0, 0, 1, 0, 0],
+          'repeat? then trigger? moves once for a press and once for each repeat')
+assert_eq(moves(frames) { Input.trigger?(DOWN) }, [0, 1, 0, 0, 0, 0, 0],
+          'trigger? is true once for a press')
+assert_eq(moves(frames) { Input.repeat?(DOWN) }, [0, 1, 0, 0, 1, 0, 0],
+          'repeat? is true for a press and for each repeat')
+
+assert_eq(moves(frames) { Input.trigger?(DOWN) || Input.repeat?(DOWN) }, [0, 1, 0, 0, 1, 0, 0],
+          'trigger? then repeat? moves once for a press and once for each repeat')
+
+# The key goes up and down again while the game reads nothing, for
+# example during an animation.
+reads = [true, false, false, true, true]
+answers = [PRESSED, HELD, RELEASED, PRESSED, RELEASED].zip(reads).map do |state, read|
+  Input.engine = state
+  Input.update
+  read ? [Input.repeat?(DOWN), Input.trigger?(DOWN)] : nil
+end
+assert_eq(answers.compact, [[true, true], [true, true], [false, false]],
+          'a new press is a press, also when no read saw the release')
+
+# The game reads nothing from the release until the new press is held.
+reads = [true, false, false, true, true]
+answers = [PRESSED, RELEASED, PRESSED, HELD, RELEASED].zip(reads).map do |state, read|
+  Input.engine = state
+  Input.update
+  read ? [Input.repeat?(DOWN), Input.trigger?(DOWN)] : nil
+end
+assert_eq(answers.compact, [[true, true], [true, true], [false, false]],
+          'a new press is a press, also when no read saw its first frame')
+
+# A second Input.update before the read hides the native trigger edge.
+Input.engine = PRESSED
+Input.update
+Input.engine = HELD
+Input.update
+assert_eq([Input.repeat?(DOWN), Input.trigger?(DOWN)], [true, true],
+          'a press that a second update hides still counts once')
+Input.update
+assert_eq([Input.repeat?(DOWN), Input.trigger?(DOWN)], [false, false],
+          'the next frame of that press is not a new press')
+
+# A game that reads a button inside its own Input.update.
+module Input
+  class << self
+    alias test_game_update mkxp_chained_update
+    attr_accessor :hotkey_presses
+  end
+
+  def self.mkxp_chained_update
+    test_game_update
+    self.hotkey_presses += 1 if trigger?(DOWN)
+  end
+end
+
+Input.hotkey_presses = 0
+[RELEASED, PRESSED, HELD, HELD, RELEASED].each do |state|
+  Input.engine = state
+  Input.update
+end
+assert_eq(Input.hotkey_presses, 1, 'a hotkey that the game reads inside its update toggles once for a press')
+
+module Input
+  def self.mkxp_chained_update
+    test_game_update
+  end
+end
+
+# Pokemon Empyrean's KEY_ITEM_2 is 38, which the engine reads as the
+# left mouse button. The game maps it to a virtual key.
+module Input
+  def self.buttonToKey(button)
+    button == KEY_ITEM_2 ? [KEY_ITEM_2_VKEY] : []
+  end
+
+  def self.jpressex?(vkey)
+    vkey == KEY_ITEM_2_VKEY && @engine[:ex_press]
+  end
+
+  def self.jtriggerex?(vkey)
+    vkey == KEY_ITEM_2_VKEY && @engine[:ex_trigger]
+  end
+end
+
+KEY_ITEM_2 = 38
+KEY_ITEM_2_VKEY = 0x32
+item_frames = [
+  [{ ex_press: true, ex_trigger: true }, true],
+  # A tap of the touch screen as a left click.
+  [{ ex_press: true, trigger: true }, true],
+  [{ ex_press: false }, false],
+  [{ ex_press: true, ex_trigger: true }, true]
+]
+answers = item_frames.map do |state, read|
+  Input.engine = state
+  Input.update
+  read ? Input.trigger?(KEY_ITEM_2) : nil
+end
+assert_eq(answers.compact, [true, false, true],
+          'a mapped button reads its own key, also for a press that no read saw released')
+
 # Ruby 1.8 has no File.write.
 def without_file_write
   IO.singleton_class.send(:alias_method, :mkxp_test_write, :write)
@@ -180,4 +321,4 @@ end
 
 without_file_write { check_marker('Ruby 1.8') }
 
-test_passed('test_pokemon_input', 19)
+test_passed('test_pokemon_input', 29)
