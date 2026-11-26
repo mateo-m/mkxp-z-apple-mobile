@@ -2,7 +2,7 @@ diff --git a/src/misc/ios/SDL_sysurl.m b/src/misc/ios/SDL_sysurl.m
 index 61c931e..4bd4d66 100644
 --- a/src/misc/ios/SDL_sysurl.m
 +++ b/src/misc/ios/SDL_sysurl.m
-@@ -29,7 +29,16 @@ int SDL_SYS_OpenURL(const char *url)
+@@ -29,7 +29,31 @@ int SDL_SYS_OpenURL(const char *url)
  
          NSString *nsstr = [NSString stringWithUTF8String:url];
          NSURL *nsurl = [NSURL URLWithString:nsstr];
@@ -10,13 +10,28 @@ index 61c931e..4bd4d66 100644
 +        if (nsurl == nil) {
 +            return SDL_SetError("Not a valid URL");
 +        }
-+        /* iOS 18.2 and later refuse openURL: (libsdl-org/SDL#11728).
-+           UIKit wants the main thread, and mkxp-z calls this from the
-+           RGSS thread. */
-+        dispatch_async(dispatch_get_main_queue(), ^{
++        /* iOS 18.2 and later refuse openURL: (libsdl-org/SDL#11728). */
++        if ([NSThread isMainThread]) {
 +            [[UIApplication sharedApplication] openURL:nsurl options:@{} completionHandler:nil];
++            return 0;
++        }
++        /* UIKit wants the main thread, and mkxp-z calls this from the
++           RGSS thread. This thread waits for the answer of iOS: a
++           process that ends before the main thread sends the link
++           loses it. */
++        __block BOOL opened = NO;
++        dispatch_semaphore_t answered = dispatch_semaphore_create(0);
++        dispatch_async(dispatch_get_main_queue(), ^{
++            [[UIApplication sharedApplication] openURL:nsurl options:@{} completionHandler:^(BOOL success) {
++                opened = success;
++                dispatch_semaphore_signal(answered);
++            }];
 +        });
-+        return 0;
++        /* A guard for a main thread that waits for the RGSS thread. */
++        if (dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) != 0) {
++            return SDL_SetError("iOS did not answer the request to open the URL");
++        }
++        return opened ? 0 : SDL_SetError("iOS did not open the URL");
      }
  }
  
