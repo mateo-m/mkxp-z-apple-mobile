@@ -229,6 +229,39 @@ Input.update
 assert_eq([Input.repeat?(DOWN), Input.trigger?(DOWN)], [false, false],
           'the next frame of that press is not a new press')
 
+# Pokemon Empyrean's KEY_ITEM_2 is 38, which the engine reads as the
+# left mouse button. The game maps it to a virtual key.
+module Input
+  def self.buttonToKey(button)
+    button == KEY_ITEM_2 ? [KEY_ITEM_2_VKEY] : []
+  end
+
+  def self.jpressex?(vkey)
+    vkey == KEY_ITEM_2_VKEY && @engine[:ex_press]
+  end
+
+  def self.jtriggerex?(vkey)
+    vkey == KEY_ITEM_2_VKEY && @engine[:ex_trigger]
+  end
+end
+
+KEY_ITEM_2 = 38
+KEY_ITEM_2_VKEY = 0x32
+item_frames = [
+  [{ ex_press: true, ex_trigger: true }, true],
+  # A tap of the touch screen as a left click.
+  [{ ex_press: true, trigger: true }, true],
+  [{ ex_press: false }, false],
+  [{ ex_press: true, ex_trigger: true }, true]
+]
+answers = item_frames.map do |state, read|
+  Input.engine = state
+  Input.update
+  read ? Input.trigger?(KEY_ITEM_2) : nil
+end
+assert_eq(answers.compact, [true, false, true],
+          'a mapped button reads its own key, also for a press that no read saw released')
+
 # Ruby 1.8 has no File.write.
 def without_file_write
   IO.singleton_class.send(:alias_method, :mkxp_test_write, :write)
@@ -252,4 +285,4 @@ end
 
 without_file_write { check_marker('Ruby 1.8') }
 
-test_passed('test_pokemon_input', 26)
+test_passed('test_pokemon_input', 27)

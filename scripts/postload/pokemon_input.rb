@@ -232,6 +232,13 @@ unless $PokemonSystem.nil?
       jpress?(button)
     end
 
+    def self.mkxp_button_triggered?(button)
+      vkeys = mkxp_extended_vkeys(button)
+      return vkeys.any? { |vkey| jtriggerex?(vkey) } if vkeys
+
+      jtrigger?(button)
+    end
+
     # Fan games put hotkey handling inside their own `Input.update`.
     # Pokemon Rejuvenation toggles turbo (T), mute (M), and the
     # screenshot key (F3) there, and reads the gamepad triggers for
@@ -323,7 +330,7 @@ unless $PokemonSystem.nil?
       @mkxp_counts[button] = down ? held + 1 : 0
       # A native trigger means the key went up and down again since the
       # last read, also when no read saw it go up.
-      @mkxp_read[button] = down && (held.zero? || jtrigger?(button))
+      @mkxp_read[button] = down && (held.zero? || mkxp_button_triggered?(button))
     end
 
     # `trigger?` counts a press only when it is read. Pokemon Xenoverse's
