@@ -239,6 +239,32 @@ Input.update
 assert_eq([Input.repeat?(DOWN), Input.trigger?(DOWN)], [false, false],
           'the next frame of that press is not a new press')
 
+# A game that reads a button inside its own Input.update.
+module Input
+  class << self
+    alias test_game_update mkxp_chained_update
+    attr_accessor :hotkey_presses
+  end
+
+  def self.mkxp_chained_update
+    test_game_update
+    self.hotkey_presses += 1 if trigger?(DOWN)
+  end
+end
+
+Input.hotkey_presses = 0
+[RELEASED, PRESSED, HELD, HELD, RELEASED].each do |state|
+  Input.engine = state
+  Input.update
+end
+assert_eq(Input.hotkey_presses, 1, 'a hotkey that the game reads inside its update toggles once for a press')
+
+module Input
+  def self.mkxp_chained_update
+    test_game_update
+  end
+end
+
 # Pokemon Empyrean's KEY_ITEM_2 is 38, which the engine reads as the
 # left mouse button. The game maps it to a virtual key.
 module Input
@@ -295,4 +321,4 @@ end
 
 without_file_write { check_marker('Ruby 1.8') }
 
-test_passed('test_pokemon_input', 28)
+test_passed('test_pokemon_input', 29)

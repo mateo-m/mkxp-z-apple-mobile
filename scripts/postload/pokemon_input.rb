@@ -269,12 +269,15 @@ unless $PokemonSystem.nil?
     # The engine gives a release or a new press on one update only, and
     # the game can read the button many updates later. So a held button
     # starts again from zero on the update that sees it go up or come
-    # down again, also when no read saw that update.
+    # down again, also when no read saw that update. A game that reads
+    # its hotkeys inside its own `update` already used the press, so
+    # that press stays counted.
     def self.mkxp_forget_released_buttons
       return unless @mkxp_counts
 
       @mkxp_counts.each_key do |button|
         next if @mkxp_counts[button].zero?
+        next if @mkxp_read && @mkxp_read[button]
         next if mkxp_button_down?(button) && !mkxp_button_triggered?(button)
 
         @mkxp_counts[button] = 0
