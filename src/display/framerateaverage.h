@@ -4,10 +4,8 @@
 #ifndef FRAMERATEAVERAGE_H
 #define FRAMERATEAVERAGE_H
 
-#include <algorithm>
 #include <deque>
 #include <numeric>
-#include <vector>
 
 class FrameRateAverage
 {
@@ -31,20 +29,6 @@ public:
         if (total <= 0)
             return fallback;
         return intervals.size() / total;
-    }
-
-    /* One slow frame does not move the median, but a slowdown that
-     * lasts does. */
-    double medianRate(double fallback) const
-    {
-        if (intervals.empty())
-            return fallback;
-        std::vector<double> sorted(intervals.begin(), intervals.end());
-        auto middle = sorted.begin() + sorted.size() / 2;
-        std::nth_element(sorted.begin(), middle, sorted.end());
-        if (*middle <= 0)
-            return fallback;
-        return 1 / *middle;
     }
 
 private:

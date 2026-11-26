@@ -1147,13 +1147,6 @@ struct GraphicsPrivate {
         return ret;
     }
 
-    double medianFPS() {
-        SDL_LockMutex(avgFPSLock);
-        double ret = frameRateAverage.medianRate(frameRate);
-        SDL_UnlockMutex(avgFPSLock);
-        return ret;
-    }
-
     /* Under avgFPSLock, because the host reads frameRate through
      * averageFPS() from its own thread. */
     void storeFrameRate(int value) {
@@ -1378,20 +1371,6 @@ void Graphics::update(bool checkForShutdown) {
     }
     p->last_update = now;
     
-    // update Input.repeat timing, rounding the framerate to the nearest 2
-    {
-        static const double mult = 2.0;
-        // A slow step, such as a map load, stays in the average for about
-        // a second, and one press then moves a menu cursor two steps.
-        double afr = p->medianFPS();
-        afr += mult / 2;
-        afr -= std::fmod(afr, mult);
-        // Input.update runs once per Graphics.update, and fast-forward
-        // shows only one update in n. The rate of updates is what turns
-        // the repeat delay into a count of updates.
-        shState->input().recalcRepeat(std::floor(afr), mkxp_getFastForwardMultiplier());
-    }
-    
     if (checkForShutdown)
         p->checkShutDownReset();
     
@@ -1607,7 +1586,6 @@ void Graphics::setFrameRate(int value) {
     // DRAW presentation at the GL layer). See the rationale in
     // the Graphics ctor.
     p->fpsLimiter.setDesiredFPS(p->frameRate);
-    //shState->input().recalcRepeat((unsigned int)p->frameRate);
 }
 
 double Graphics::averageFrameRate() {
