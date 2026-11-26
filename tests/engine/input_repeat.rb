@@ -89,14 +89,16 @@ EngineTest.test('a press of 0.3 s repeats once when fast-forward stops during th
   EngineTest.assert(repeats == 1, "Input.repeat? was true #{repeats} times, #{longest_step}")
 end
 
-# Normal speed repeats each 0.1 s, also at 4x. A slow step of the runner
-# makes one gap longer by up to that step.
+# Normal speed repeats each 0.1 s, also at 4x. The stall makes the
+# third repeat late, and the fourth must still wait 0.1 s. A slow step of
+# the runner makes a gap longer by up to that step.
 EngineTest.test('a held key repeats 0.1 s after its last repeat when fast-forward starts') do
   msgbox('fast-forward 1')
   started = false
   times = repeat_times(1.2) do |_held, so_far|
     if so_far.size == 2 && !started
       msgbox('fast-forward 4')
+      sleep 0.25
       started = true
     end
   end
