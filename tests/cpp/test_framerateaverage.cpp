@@ -75,6 +75,38 @@ TEST(framerateaverage_counts_a_slow_frame)
     CHECK(rate.average(30) < 30);
 }
 
+TEST(framerateaverage_median_leaves_out_a_slow_frame)
+{
+    FrameRateAverage rate;
+    double now = showFrames(rate, 0, 40);
+
+    showFrames(rate, now + 2, 1);
+
+    CHECK(near60(rate.medianRate(30)));
+}
+
+TEST(framerateaverage_median_follows_a_slowdown_that_lasts)
+{
+    FrameRateAverage rate;
+    double now = showFrames(rate, 0, 40);
+    for (int i = 0; i < 40; ++i)
+    {
+        now += 2 * frame;
+        rate.frameShown(now);
+    }
+
+    CHECK(std::fabs(rate.medianRate(60) - 30) < 0.01);
+}
+
+TEST(framerateaverage_median_gives_the_fallback_until_two_frames_are_shown)
+{
+    FrameRateAverage rate;
+    CHECK(rate.medianRate(30) == 30);
+
+    rate.frameShown(5);
+    CHECK(rate.medianRate(30) == 30);
+}
+
 TEST(awayclock_stands_still_while_away)
 {
     AwayClock clock(at(0));
