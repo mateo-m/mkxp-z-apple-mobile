@@ -36,7 +36,9 @@ tip. The build applies more iOS fixes from `deps/sdl2/` with
   after the host moves SDL's view into its own window
 - Open a URL with `openURL:options:completionHandler:` on the main
   thread. iOS 18.2 and later refuse the old `openURL:`, so
-  `SDL_OpenURL` did nothing (libsdl-org/SDL#11728)
+  `SDL_OpenURL` did nothing (libsdl-org/SDL#11728). The calling
+  thread waits for the answer of iOS, because a process that ended
+  right after the call lost the link
 
 The first three change `SDL_uikitopengles.m` and
 `SDL_uikitopenglview.m`. Those files do not compile while

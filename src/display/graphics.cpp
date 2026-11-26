@@ -1292,6 +1292,7 @@ struct GraphicsPrivate {
             mkxp_setSnapshot(pixels.data(), w, h);
         }
 
+        endFrameWork();
         mkxp_checkPause();
     }
 
