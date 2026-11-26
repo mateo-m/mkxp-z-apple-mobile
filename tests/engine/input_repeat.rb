@@ -89,7 +89,8 @@ EngineTest.test('a press of 0.3 s repeats once when fast-forward stops during th
   EngineTest.assert(repeats == 1, "Input.repeat? was true #{repeats} times, #{longest_step}")
 end
 
-# Normal speed repeats each 0.1 s.
+# Normal speed repeats each 0.1 s, also at 4x. A slow step of the runner
+# makes one gap longer by up to that step.
 EngineTest.test('a held key repeats 0.1 s after its last repeat when fast-forward starts') do
   msgbox('fast-forward 1')
   started = false
@@ -100,9 +101,10 @@ EngineTest.test('a held key repeats 0.1 s after its last repeat when fast-forwar
     end
   end
   msgbox('fast-forward 0')
-  gap = times.size >= 3 ? times[2] - times[1] : 0
-  EngineTest.assert((0.07..0.15).include?(gap),
-                    "the repeat after the switch came #{gap} s after the last one, #{longest_step}")
+  gaps = times.size >= 4 ? [times[2] - times[1], times[3] - times[2]] : [0, 0]
+  longest = 0.1 + $longest_step + 0.03
+  EngineTest.assert(gaps.all? { |gap| gap.between?(0.07, longest) },
+                    "the repeats after the switch came #{gaps.inspect} s apart, #{longest_step}")
 end
 
 # Input.repeatex? first sees a key as held one update after the press.
