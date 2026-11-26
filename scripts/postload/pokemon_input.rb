@@ -321,10 +321,18 @@ unless $PokemonSystem.nil?
       held = @mkxp_counts[button] || 0
       down = mkxp_button_down?(button)
       @mkxp_counts[button] = down ? held + 1 : 0
-      @mkxp_read[button] = down && held.zero?
+      # A native trigger means the key went up and down again since the
+      # last read, also when no read saw it go up.
+      @mkxp_read[button] = down && (held.zero? || jtrigger?(button))
     end
 
+    # `trigger?` counts a press only when it is read. Pokemon Xenoverse's
+    # Pokedex reads `repeat? || trigger?`, so without this read the press
+    # stayed unread on its first frame, `trigger?` gave it on the next
+    # frame, and the cursor moved two cells.
     def self.repeat?(button)
+      return true if trigger?(button)
+
       vkeys = mkxp_extended_vkeys(button)
       return vkeys.any? { |vkey| jrepeatex?(vkey) } if vkeys
 
