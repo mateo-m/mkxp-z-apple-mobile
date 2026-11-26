@@ -263,6 +263,22 @@ unless $PokemonSystem.nil?
       idle_before = mkxp_engine_idle_time
       mkxp_chained_update
       jupdate if mkxp_engine_update_missing?(idle_before)
+      mkxp_forget_released_buttons
+    end
+
+    # The engine gives a release or a new press on one update only, and
+    # the game can read the button many updates later. So a held button
+    # starts again from zero on the update that sees it go up or come
+    # down again, also when no read saw that update.
+    def self.mkxp_forget_released_buttons
+      return unless @mkxp_counts
+
+      @mkxp_counts.each_key do |button|
+        next if @mkxp_counts[button].zero?
+        next if mkxp_button_down?(button) && !mkxp_button_triggered?(button)
+
+        @mkxp_counts[button] = 0
+      end
     end
 
     # Seconds since the engine last refreshed its input state. The
@@ -328,9 +344,7 @@ unless $PokemonSystem.nil?
       held = @mkxp_counts[button] || 0
       down = mkxp_button_down?(button)
       @mkxp_counts[button] = down ? held + 1 : 0
-      # A native trigger means the key went up and down again since the
-      # last read, also when no read saw it go up.
-      @mkxp_read[button] = down && (held.zero? || mkxp_button_triggered?(button))
+      @mkxp_read[button] = down && held.zero?
     end
 
     # `trigger?` counts a press only when it is read. Pokemon Xenoverse's

@@ -218,6 +218,16 @@ end
 assert_eq(answers.compact, [[true, true], [true, true], [false, false]],
           'a new press is a press, also when no read saw the release')
 
+# The game reads nothing from the release until the new press is held.
+reads = [true, false, false, true, true]
+answers = [PRESSED, RELEASED, PRESSED, HELD, RELEASED].zip(reads).map do |state, read|
+  Input.engine = state
+  Input.update
+  read ? [Input.repeat?(DOWN), Input.trigger?(DOWN)] : nil
+end
+assert_eq(answers.compact, [[true, true], [true, true], [false, false]],
+          'a new press is a press, also when no read saw its first frame')
+
 # A second Input.update before the read hides the native trigger edge.
 Input.engine = PRESSED
 Input.update
@@ -285,4 +295,4 @@ end
 
 without_file_write { check_marker('Ruby 1.8') }
 
-test_passed('test_pokemon_input', 27)
+test_passed('test_pokemon_input', 28)
