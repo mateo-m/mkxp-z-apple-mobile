@@ -705,6 +705,8 @@ struct InputPrivate
 
     double repeatStart;
     double repeatDelay = 0.100;
+    double updateSeconds = 0;
+    double previousUpdateSeconds = 0;
     
     double last_update;
 
@@ -721,8 +723,8 @@ struct InputPrivate
         int active;
     } dir8Data;
     
-    void startRepeat(RepeatClock &clock) {
-        clock.since = mkxp_engineSeconds();
+    void startRepeat(RepeatClock &clock, double since) {
+        clock.since = since;
         clock.given = 0;
         clock.due = false;
     }
@@ -730,7 +732,7 @@ struct InputPrivate
     // Real seconds, not updates: the rate of updates moves with
     // fast-forward, and a slow frame is no reason to repeat sooner.
     void advanceRepeat(RepeatClock &clock) {
-        double held = mkxp_engineSeconds() - clock.since;
+        double held = updateSeconds - clock.since;
         clock.due = false;
         if (held < repeatStart)
             return;
@@ -1055,7 +1057,7 @@ struct InputPrivate
                     rawRepeatCount = 0;
                     rawRepeatTime = shState->runTime();
                     rawRepeating = i;
-                    startRepeat(rawRepeatClock);
+                    startRepeat(rawRepeatClock, previousUpdateSeconds);
                 }
                 
                 return;
@@ -1087,7 +1089,7 @@ struct InputPrivate
                     buttonRepeatCount = 0;
                     buttonRepeatTime = shState->runTime();
                     buttonRepeating = i;
-                    startRepeat(buttonRepeatClock);
+                    startRepeat(buttonRepeatClock, previousUpdateSeconds);
                 }
                 
                 return;
@@ -1196,6 +1198,8 @@ void Input::update()
     
     p->swapBuffers();
     p->clearBuffer();
+    p->previousUpdateSeconds = p->updateSeconds;
+    p->updateSeconds = mkxp_engineSeconds();
     
     ButtonCode repeatCand = None;
     
@@ -1218,7 +1222,7 @@ void Input::update()
         p->repeating = repeatCand;
         p->repeatCount = 0;
         p->repeatTime = shState->runTime();
-        p->startRepeat(p->repeatClock);
+        p->startRepeat(p->repeatClock, p->updateSeconds);
         p->getState(repeatCand).repeated = true;
         
         p->last_update = p->repeatTime;

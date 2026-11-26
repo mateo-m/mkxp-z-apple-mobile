@@ -15,7 +15,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('input-repeat', 5)
+EngineTest.suite('input-repeat', 6)
 
 SCANCODE_DOWN = 81
 
@@ -103,6 +103,30 @@ EngineTest.test('a held key repeats 0.1 s after its last repeat when fast-forwar
   gap = times.size >= 3 ? times[2] - times[1] : 0
   EngineTest.assert((0.07..0.15).include?(gap),
                     "the repeat after the switch came #{gap} s after the last one, #{longest_step}")
+end
+
+# Input.repeatex? first sees a key as held one update after the press.
+EngineTest.test('Input.repeatex? repeats 0.4 s after the press also when a slow step follows it') do
+  msgbox("key #{SCANCODE_DOWN} 1.0")
+  start = Time.now
+  first = nil
+  slowed = false
+  while first.nil? && Time.now - start < 3
+    Graphics.update
+    Input.update
+    pressed = Input.pressex?(:DOWN)
+    break if slowed && !pressed
+
+    first = Time.now - start if Input.repeatex?(:DOWN)
+    next unless pressed && !slowed
+
+    sleep 0.5
+    slowed = true
+  end
+  sleep 1
+  Graphics.update
+  Input.update
+  EngineTest.assert(first && first < 0.7, "the first Input.repeatex? came #{first.inspect} s after the press")
 end
 
 EngineTest.finish
