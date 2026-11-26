@@ -726,14 +726,12 @@ struct InputPrivate
 
     // Real seconds, not updates: the rate of updates moves with
     // fast-forward, and a slow frame is no reason to repeat sooner.
-    // After a stall, the next repeat waits a full delay, so that a menu
-    // cursor does not take two quick steps.
+    // Each repeat waits a full delay after the last one, as the frame
+    // count of RGSS does, so a late repeat is not followed by a quick one.
     void advanceRepeat(RepeatClock &clock) {
         clock.due = updateSeconds >= clock.next;
-        if (!clock.due)
-            return;
-        bool stalled = updateSeconds - clock.next >= repeatDelay / 2;
-        clock.next = (stalled ? updateSeconds : clock.next) + repeatDelay;
+        if (clock.due)
+            clock.next = updateSeconds + repeatDelay;
     }
     
     InputPrivate(const RGSSThreadData &rtData)
