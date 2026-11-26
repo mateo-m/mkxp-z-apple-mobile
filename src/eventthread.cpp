@@ -53,6 +53,7 @@ extern "C" bool mkxp_getTouchMouseEnabled(void);
 
 #include <TargetConditionals.h>
 #include "app_bridge.h"
+#include "framedeadline.h"
 extern void mkxpGL_GetDrawableSize(SDL_Window *win, int *w, int *h);
 extern void mkxpGL_RefreshDrawableSize(SDL_Window *win, int *w, int *h);
 
@@ -843,6 +844,7 @@ void EventThread::showMessageBox(const char *body, int flags)
      * else (exceptions, script-load failures) stays on the error
      * channel. */
     if (body && body[0]) {
+        endFrameWork();
         if (flags & SDL_MESSAGEBOX_INFORMATION)
             mkxp_presentInfoAndWait(body);
         else
