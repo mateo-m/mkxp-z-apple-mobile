@@ -19,9 +19,6 @@ EngineTest.suite('input-repeat', 5)
 
 SCANCODE_DOWN = 81
 
-# Fills Graphics.average_frame_rate, which sets the repeat delay.
-60.times { Graphics.update }
-
 # Gives the seconds since the press of each Input.repeat?. The block
 # gets the seconds since the press and the repeats so far, before each
 # update.
@@ -54,7 +51,7 @@ EngineTest.test('a press of 0.25 s repeats once') do
 end
 
 # A slow step, such as a map that loads, stays in
-# Graphics.average_frame_rate for 40 more frames.
+# Graphics.average_frame_rate for about a second.
 EngineTest.test('a press of 0.25 s right after a slow step repeats once') do
   sleep 2
   Graphics.update

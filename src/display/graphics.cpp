@@ -1374,10 +1374,8 @@ void Graphics::update(bool checkForShutdown) {
     // update Input.repeat timing, rounding the framerate to the nearest 2
     {
         static const double mult = 2.0;
-        // A slow step, such as a map load, stays in the average for 40
-        // frames. The repeat delay then gets so short that one press
-        // moves a menu cursor two steps. The limiter keeps the updates
-        // at its own rate, so use that rate while it runs.
+        // A slow step, such as a map load, stays in the average for about
+        // a second, and one press then moves a menu cursor two steps.
         double afr = p->fpsLimiter.disabled ? std::abs(averageFrameRate())
                                             : 1.0 / p->fpsLimiter.frameSeconds();
         afr += mult / 2;
