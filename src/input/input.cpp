@@ -20,6 +20,7 @@
  */
 
 #include "input.h"
+#include "app_bridge.h"
 #include "config.h"
 #include "sharedstate.h"
 #include "eventthread.h"
@@ -695,9 +696,17 @@ struct InputPrivate
     
     double repeatTime, rawRepeatTime, buttonRepeatTime;
     
-    unsigned int repeatStart;
-    unsigned int repeatDelay;
-    int repeatFastForward = 1;
+    struct RepeatClock {
+        double since = 0;
+        unsigned int given = 0;
+        bool due = false;
+    };
+    RepeatClock repeatClock, rawRepeatClock, buttonRepeatClock;
+
+    double repeatStart;
+    double repeatDelay = 0.100;
+    double updateSeconds = 0;
+    double previousUpdateSeconds = 0;
     
     double last_update;
 
@@ -714,24 +723,24 @@ struct InputPrivate
         int active;
     } dir8Data;
     
-    void recalcRepeatTime(unsigned int fps, int fastForward = 1) {
-        // 0 fps would cause a divide by zero segfault later.
-        // Bail in that case.
-        if (fps == 0)
-        {
-            return;
-        }
+    void startRepeat(RepeatClock &clock, double since) {
+        clock.since = since;
+        clock.given = 0;
+        clock.due = false;
+    }
 
-        double framems = 1.f / fps;
-        
-        // Approximate time in milliseconds
-        double start = (rgssVer >= 2) ? 0.375 : 0.400;
-        double delay = 0.100;
-        
-        // Round at normal speed, then multiply. A change of speed then
-        // scales the delay exactly, and the repeats keep their phase.
-        repeatStart = ceil(start / framems) * fastForward;
-        repeatDelay = ceil(delay / framems) * fastForward;
+    // Real seconds, not updates: the rate of updates moves with
+    // fast-forward, and a slow frame is no reason to repeat sooner.
+    void advanceRepeat(RepeatClock &clock) {
+        double held = updateSeconds - clock.since;
+        clock.due = false;
+        if (held < repeatStart)
+            return;
+        unsigned int repeats = 1 + (unsigned int)((held - repeatStart) / repeatDelay);
+        if (repeats <= clock.given)
+            return;
+        clock.given = repeats;
+        clock.due = true;
     }
     
     InputPrivate(const RGSSThreadData &rtData)
@@ -744,9 +753,7 @@ struct InputPrivate
         /* Main thread should have these posted by now */
         checkBindingChange(rtData);
         
-        int fps = rtData.config.fixedFramerate;
-        if (!fps) fps = (rgssVer >= 2) ? 60 : 40;
-        recalcRepeatTime(fps);
+        repeatStart = (rgssVer >= 2) ? 0.375 : 0.400;
         
         states    = stateArray;
         statesOld = stateArray + Input::ButtonCodeCount;
@@ -839,7 +846,7 @@ struct InputPrivate
         b.triggered = (rawStates[scancode] && !rawStatesOld[scancode]);
         b.released = (!rawStates[scancode] && rawStatesOld[scancode]);
         
-        b.repeated = (rawRepeating == scancode) && (rawRepeatCount >= repeatStart && ((rawRepeatCount+1) % repeatDelay) == 0);
+        b.repeated = (rawRepeating == scancode) && rawRepeatClock.due;
         
         return b;
     }
@@ -851,7 +858,7 @@ struct InputPrivate
         b.triggered = (rawButtonStates[button] && !rawButtonStatesOld[button]);
         b.released = (!rawButtonStates[button] && rawButtonStatesOld[button]);
         
-        b.repeated = (buttonRepeating == button) && (buttonRepeatCount >= repeatStart && ((buttonRepeatCount+1) % repeatDelay) == 0);
+        b.repeated = (buttonRepeating == button) && buttonRepeatClock.due;
         
         return b;
     }
@@ -1043,12 +1050,14 @@ struct InputPrivate
                 if (rawRepeating == i)
                 {
                     rawRepeatCount++;
+                    advanceRepeat(rawRepeatClock);
                 }
                 else
                 {
                     rawRepeatCount = 0;
                     rawRepeatTime = shState->runTime();
                     rawRepeating = i;
+                    startRepeat(rawRepeatClock, previousUpdateSeconds);
                 }
                 
                 return;
@@ -1071,12 +1080,16 @@ struct InputPrivate
             if (rawButtonStates[i] && rawButtonStatesOld[i])
             {
                 if (buttonRepeating == i)
+                {
                     buttonRepeatCount++;
+                    advanceRepeat(buttonRepeatClock);
+                }
                 else
                 {
                     buttonRepeatCount = 0;
                     buttonRepeatTime = shState->runTime();
                     buttonRepeating = i;
+                    startRepeat(buttonRepeatClock, previousUpdateSeconds);
                 }
                 
                 return;
@@ -1178,26 +1191,6 @@ double Input::getDelta() {
     return shState->runTime() - p->last_update;
 }
 
-// The counts of a held key are in updates, and a change of the
-// fast-forward speed changes how long an update takes. A key repeats
-// when count + 1 is a multiple of the delay, so count + 1 changes with
-// the speed. The time held and the time to the next repeat stay the same.
-static unsigned int rescaleRepeatCount(unsigned int count, int from, int to) {
-    unsigned int scaled = (count + 1) * to / from;
-    return scaled > 0 ? scaled - 1 : 0;
-}
-
-void Input::recalcRepeat(unsigned int fps, int fastForward) {
-    if (fastForward > 0 && fastForward != p->repeatFastForward) {
-        int from = p->repeatFastForward;
-        p->repeatCount = rescaleRepeatCount(p->repeatCount, from, fastForward);
-        p->rawRepeatCount = rescaleRepeatCount(p->rawRepeatCount, from, fastForward);
-        p->buttonRepeatCount = rescaleRepeatCount(p->buttonRepeatCount, from, fastForward);
-        p->repeatFastForward = fastForward;
-    }
-    p->recalcRepeatTime(fps, p->repeatFastForward);
-}
-
 void Input::update()
 {
     shState->checkShutdown();
@@ -1205,6 +1198,8 @@ void Input::update()
     
     p->swapBuffers();
     p->clearBuffer();
+    p->previousUpdateSeconds = p->updateSeconds;
+    p->updateSeconds = mkxp_engineSeconds();
     
     ButtonCode repeatCand = None;
     
@@ -1227,6 +1222,7 @@ void Input::update()
         p->repeating = repeatCand;
         p->repeatCount = 0;
         p->repeatTime = shState->runTime();
+        p->startRepeat(p->repeatClock, p->updateSeconds);
         p->getState(repeatCand).repeated = true;
         
         p->last_update = p->repeatTime;
@@ -1237,16 +1233,8 @@ void Input::update()
     if (p->getState(p->repeating).pressed)
     {
         p->repeatCount++;
-        
-        /*
-         bool repeated;
-         if (rgssVer >= 2)
-         repeated = p->repeatCount >= 23 && ((p->repeatCount+1) % 6) == 0;
-         else
-         repeated = p->repeatCount >= 15 && ((p->repeatCount+1) % 4) == 0;
-         */
-        bool repeated = p->repeatCount >= p->repeatStart && ((p->repeatCount+1) % p->repeatDelay) == 0;
-        p->getState(p->repeating).repeated |= repeated;
+        p->advanceRepeat(p->repeatClock);
+        p->getState(p->repeating).repeated |= p->repeatClock.due;
         
         p->last_update = shState->runTime();
         return;

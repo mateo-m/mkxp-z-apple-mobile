@@ -1371,18 +1371,6 @@ void Graphics::update(bool checkForShutdown) {
     }
     p->last_update = now;
     
-    // update Input.repeat timing, rounding the framerate to the nearest 2
-    {
-        static const double mult = 2.0;
-        double afr = std::abs(averageFrameRate()); // abs shouldn't be necessary but that's ok
-        afr += mult / 2;
-        afr -= std::fmod(afr, mult);
-        // Input.update runs once per Graphics.update, and fast-forward
-        // shows only one update in n. The rate of updates is what turns
-        // the repeat delay into a count of updates.
-        shState->input().recalcRepeat(std::floor(afr), mkxp_getFastForwardMultiplier());
-    }
-    
     if (checkForShutdown)
         p->checkShutDownReset();
     
@@ -1598,7 +1586,6 @@ void Graphics::setFrameRate(int value) {
     // DRAW presentation at the GL layer). See the rationale in
     // the Graphics ctor.
     p->fpsLimiter.setDesiredFPS(p->frameRate);
-    //shState->input().recalcRepeat((unsigned int)p->frameRate);
 }
 
 double Graphics::averageFrameRate() {
