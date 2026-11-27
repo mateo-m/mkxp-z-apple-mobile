@@ -627,4 +627,17 @@ $VERBOSE = prev_verbose
 assert_eq(Win32API_Impl::FakeHeap.block(old_block), 'old block', 'a reload of win32_wrap.rb keeps the old blocks')
 assert_true(Win32API_Impl::FakeHeap.alloc('new block') != old_block, 'a reload of win32_wrap.rb gives a new block a new address')
 
-test_passed('test_win32_stubs', 117)
+# Pokemon Dark Light runs mkxp-z's own win32_wrap.rb (4bb13b9) after
+# ours. It wraps our Win32API#initialize, Win32API#call and
+# Graphics.update under its own alias names.
+$VERBOSE = nil
+load File.join(ROOT, 'tools', 'mkxp_z_win32_wrap_4bb13b9.rb')
+$VERBOSE = prev_verbose
+
+assert_eq(Win32API.new('kernel32', 'LoadLibrary', 'p', 'l').call('gif.dll'), 0, "a call with no stand-in returns 0 under mkxp-z's Win32API")
+assert_eq(Win32API.new('user32', 'GetSystemMetrics', 'I', 'I').call(0), 512, "a stand-in still answers under mkxp-z's Win32API")
+$win32KeyStates = [true]
+Graphics.update
+assert_eq($win32KeyStates, nil, "Graphics.update clears the key states under mkxp-z's wrap")
+
+test_passed('test_win32_stubs', 120)
