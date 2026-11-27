@@ -36,6 +36,8 @@
 //   MKXP_TEST_FAST_FORWARD  the fast-forward multiplier.
 //   MKXP_TEST_CONFIG JSON that the engine reads on top of mkxp.json,
 //                    as a launcher's settings do.
+//   MKXP_TEST_NETWORK 1 gives the game network access, as a launcher
+//                    does per game.
 //
 // They belong to the launch and not to the build, so one build of
 // this host runs every game and suite on every interpreter.
@@ -211,6 +213,9 @@ static void engineTestHostStart(void) {
             mkxp_setFastForwardMultiplier(atoi(fastForward));
 
         mkxp_setConfigOverlayJSON(getenv("MKXP_TEST_CONFIG"));
+
+        const char *network = getenv("MKXP_TEST_NETWORK");
+        mkxp_setNetworkEnabled(network && !strcmp(network, "1"));
         mkxp_setInfoMessageCallback(answerGameDialog, NULL);
 
         mkxp_setLauncherIdentity("mkxp-z engine tests", NULL);

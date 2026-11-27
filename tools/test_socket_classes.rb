@@ -5,6 +5,8 @@
 # Unit tests for the socket classes that a game sees when the network
 # is on: win32_wrap.rb hides Ruby's socket classes on the 1.8 and 1.9
 # VMs and keeps them for its Winsock bridge.
+# tests/engine/socket_classes.rb runs the same game code on the real
+# VMs.
 # Run: ruby tools/test_socket_classes.rb
 
 require_relative 'assertion_count'
@@ -13,6 +15,10 @@ require 'tmpdir'
 
 ROOT = File.expand_path('..', __dir__)
 WRAP = File.join(ROOT, 'scripts', 'preload', 'win32_wrap.rb')
+GAME_SOCKETS = File.join(ROOT, 'tests', 'engine', 'xenoverse_sockets.rb')
+SOCKET_CLASSES = %w[Socket BasicSocket IPSocket TCPSocket TCPServer UDPSocket
+                    UNIXSocket UNIXServer SOCKSSocket Addrinfo].freeze
+REAL_CLASSES = SOCKET_CLASSES.select { |name| Object.const_defined?(name) }.to_h { |name| [name, Object.const_get(name)] }
 
 def assert_eq(actual, expected, label)
   asserted
@@ -22,7 +28,7 @@ def assert_eq(actual, expected, label)
   exit 1
 end
 
-$ruby_version = '3.1.3'
+$ruby_version = nil
 Object.const_set(:System, Module.new do
   module_function
 
@@ -36,68 +42,39 @@ module Graphics
   def self.update; end
 end
 
-def load_wrap
+# Each VM boots with Ruby's classes and runs the preload once.
+def boot_vm(ruby_version)
   verbose = $VERBOSE
   $VERBOSE = nil
+  SOCKET_CLASSES.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name) }
+  REAL_CLASSES.each { |name, klass| Object.const_set(name, klass) }
+  $ruby_version = ruby_version
   load WRAP
   $VERBOSE = verbose
 end
 
-real_socket = Socket
+def defined_socket_classes
+  %w[Socket TCPSocket TCPServer].select { |name| Object.const_defined?(name) }
+end
+
+def run_game_sockets
+  load GAME_SOCKETS
+end
+
 server = TCPServer.new('127.0.0.1', 0)
 port = server.addr[1]
+refused = TCPServer.new('127.0.0.1', 0)
+refused_port = refused.addr[1]
+refused.close
 
-load_wrap
-assert_eq(Socket.equal?(real_socket), true, 'the 3.1 VM keeps the real Socket')
+boot_vm('3.1')
+assert_eq(Socket.equal?(REAL_CLASSES['Socket']), true, 'the 3.1 VM keeps the real Socket')
 
-# The 1.9 VM starts only socket.so and ships socket.rb, which
-# defines the classes again. A stand-in for its class lines:
-# https://github.com/ruby/ruby/blob/v1_9_3_551/ext/socket/lib/socket.rb
-socket_rb_dir = Dir.mktmpdir
-File.write(File.join(socket_rb_dir, 'socket.rb'), <<~RUBY)
-  class Addrinfo; end
-  class BasicSocket < IO; end
-  class Socket < BasicSocket; end
-RUBY
-$LOADED_FEATURES.reject! { |feature| File.basename(feature) == 'socket.rb' }
-$LOAD_PATH.unshift(socket_rb_dir)
+# The 1.8 VM ships no socket.rb.
+boot_vm('1.8')
+assert_eq(defined_socket_classes, [], 'the 1.8 VM hides the real socket classes')
 
-$ruby_version = '1.9.3'
-load_wrap
-assert_eq(%w[Socket TCPSocket TCPServer].select { |name| Object.const_defined?(name) }, [],
-          'the 1.9 VM hides the real socket classes')
-require 'socket'
-assert_eq(Object.const_defined?(:Socket), false, "a require 'socket' after the preload does not define Socket again")
-
-# Pokemon Xenoverse, script 005_Sockets, cut down: its own Winsock
-# classes load only when no Socket exists.
-# rubocop:disable all -- the game's code as it ships
-if !Object.const_defined?(:Socket) # for compatibility
-class Socket
-  AF_INET = 2
-  SOCK_STREAM = 1
-  IPPROTO_TCP = 6
-  attr_reader :fd
-
-  def initialize(domain, type, protocol, blocking=false)
-    @fd = Win32API.new('ws2_32', 'socket', 'lll', 'l').call(domain, type, protocol)
-  end
-
-  def connect(sockaddr)
-    Win32API.new('ws2_32', 'connect', 'ppl', 'l').call(@fd, sockaddr, sockaddr.size)
-  end
-end
-
-class TCPSocket < Socket
-  def initialize(host, port, blocking = false)
-    super(AF_INET, SOCK_STREAM, IPPROTO_TCP, blocking)
-    @connected = connect([AF_INET, port].pack('sn') + host.split('.').map { |b| b.to_i }.pack('C4') + [].pack('x8'))
-  end
-  attr_reader :connected
-end
-end
-# rubocop:enable all
-
+run_game_sockets
 socket = begin
   TCPSocket.new('127.0.0.1', port, true)
 rescue TypeError => e
@@ -107,13 +84,36 @@ assert_eq(socket.class.name, 'TCPSocket', "Xenoverse's TCPSocket.new(host, port,
 assert_eq(socket.connected, 0, "Xenoverse's socket connects through the Winsock bridge")
 server.accept.close
 
+assert_eq(TCPSocket.new('127.0.0.1', refused_port, true).connected, -1, 'a refused connect fails')
+assert_eq(Win32API.new('ws2_32', 'WSAGetLastError', '', 'l').call, Errno::ECONNREFUSED::Errno,
+          'a refused connect gives ECONNREFUSED')
+
+# F12 runs the game's script sections again, but not the preloads.
 game_socket = Socket
-load_wrap
+run_game_sockets
 assert_eq(Socket.equal?(game_socket), true, "F12 keeps the game's Socket")
-assert_eq(Win32API_Impl::Ws2_32.available?, true, 'F12 keeps the Winsock bridge')
 assert_eq(TCPSocket.new('127.0.0.1', port, true).connected, 0, 'the bridge connects after F12')
 server.accept.close
 server.close
-FileUtils.remove_entry(socket_rb_dir)
 
-test_passed('test_socket_classes', 8)
+# The 1.9 VM starts only socket.so. A stand-in for the shipped
+# socket.rb shows that a later `require 'socket'` would define Socket
+# again.
+Dir.mktmpdir do |dir|
+  File.write(File.join(dir, 'socket.rb'), <<~RUBY)
+    class Addrinfo; end
+    class BasicSocket < IO; end
+    class Socket < BasicSocket; end
+  RUBY
+  $LOADED_FEATURES.reject! { |path| File.basename(path) == 'socket.rb' }
+  $LOAD_PATH.unshift(dir)
+
+  boot_vm('1.9')
+  assert_eq(defined_socket_classes, [], 'the 1.9 VM hides the real socket classes')
+  require 'socket'
+  assert_eq(Object.const_defined?(:Socket), false, "a require 'socket' after the preload does not define Socket again")
+
+  $LOAD_PATH.delete(dir)
+end
+
+test_passed('test_socket_classes', 10)
