@@ -1702,10 +1702,21 @@ end
 class Win32API
   TOLERATE_ERRORS = true unless const_defined?('TOLERATE_ERRORS')
 
+  # Some games freeze their Win32API objects, so the log-once record
+  # lives on the class.
+  @logged_missing = {}
+
+  def self.log_missing_once(dll, func, args)
+    name = "#{dll}:#{func}"
+    return if @logged_missing[name]
+
+    @logged_missing[name] = true
+    System.puts("[Win32API] [#{name}] #{args}")
+  end
+
   def initialize(dll, func, *_args)
     @dll = dll
     @func = func
-    @called = false
 
     dll = kappatalize(dll.chomp('.dll'))
     func = kappatalize(func)
@@ -1720,8 +1731,7 @@ class Win32API
 
     raise "[Win32API] [#{@dll}:#{@func}] #{args}" unless TOLERATE_ERRORS
 
-    System.puts("[Win32API] [#{@dll}:#{@func}] #{args}") unless @called
-    @called = true
+    Win32API.log_missing_once(@dll, @func, args)
     0
   end
 end
