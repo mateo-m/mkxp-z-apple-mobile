@@ -627,4 +627,60 @@ $VERBOSE = prev_verbose
 assert_eq(Win32API_Impl::FakeHeap.block(old_block), 'old block', 'a reload of win32_wrap.rb keeps the old blocks')
 assert_true(Win32API_Impl::FakeHeap.alloc('new block') != old_block, 'a reload of win32_wrap.rb gives a new block a new address')
 
-test_passed('test_win32_stubs', 117)
+# Pokemon Dark Light runs mkxp-z's own win32_wrap.rb after ours. Its
+# Win32API class (mkxp-z 4bb13b9) wraps our initialize and call as the
+# "native" ones.
+# rubocop:disable all -- the class as mkxp-z ships it
+class Win32API
+	NATIVE_ON_WINDOWS = true unless const_defined?("NATIVE_ON_WINDOWS")
+
+	alias_method :mkxp_native_initialize, :initialize
+	def initialize(dll, func, *args)
+		@dll = dll
+		@func = func
+		@called = false
+
+		dll = kappatalize(dll.chomp(".dll"))
+		func = kappatalize(func)
+
+		if !System.is_windows? or !NATIVE_ON_WINDOWS
+			if Win32API_Impl.const_defined?(dll)
+				dll_impl = Win32API_Impl.const_get(dll)
+				if dll_impl.const_defined?(func)
+					@mkxp_wrap_impl = dll_impl.const_get(func).new
+					return
+				end
+			end
+		end
+
+		@mkxp_native_available = false
+		begin
+			mkxp_native_initialize(@dll, @func, *args)
+			@mkxp_native_available = true
+			return
+		rescue
+		end
+
+	end
+
+	alias_method :mkxp_native_call, :call
+	def call(*args)
+		if @mkxp_wrap_impl
+			return @mkxp_wrap_impl.call(args)
+		end
+
+		if @mkxp_native_available
+			return mkxp_native_call(*args)
+		end
+
+		System.puts("[Win32API] [#{@dll}:#{@func}] #{args.to_s}") if !@called
+		@called = true
+		return 0
+	end
+end
+# rubocop:enable all
+
+assert_eq(Win32API.new('kernel32', 'LoadLibrary', 'p', 'l').call('gif.dll'), 0, "a call with no stand-in returns 0 under mkxp-z's Win32API")
+assert_eq(Win32API.new('user32', 'GetSystemMetrics', 'I', 'I').call(0), 512, "a stand-in still answers under mkxp-z's Win32API")
+
+test_passed('test_win32_stubs', 119)

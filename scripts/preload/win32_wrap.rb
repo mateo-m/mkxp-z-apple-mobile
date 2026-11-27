@@ -12,12 +12,10 @@
 # This preload script provides a subset of Win32API in a cross-platform way, so
 # you can play Win32API-based games on Linux and macOS.
 
-# To tweak behavior, you can set the following Win32API class constants in an
-# earlier preload script (these are usually only helpful for debugging):
+# To raise on a Win32API call that has no stand-in, set this Win32API class
+# constant in an earlier preload script (usually only helpful for debugging):
 #
-# NATIVE_ON_WINDOWS=false
 # TOLERATE_ERRORS=false
-# LOG_NATIVE=true
 
 # RGSS Linker (berka_91) compatibility: stub Kernel#load_module so
 # games that call it (FMODEX wrapper, network loaders, etc.) don't
@@ -1701,66 +1699,24 @@ def kappatalize(s)
   s
 end
 
-# `method_defined?` does not see private methods. Treat both public
-# and private methods as "already defined" for our idempotency guards.
-def mkxp_method_or_alias_defined?(klass, name)
-  klass.method_defined?(name) || klass.private_method_defined?(name)
-end
-
 class Win32API
-  NATIVE_ON_WINDOWS = true unless const_defined?('NATIVE_ON_WINDOWS')
   TOLERATE_ERRORS = true unless const_defined?('TOLERATE_ERRORS')
-  LOG_NATIVE = false unless const_defined?('LOG_NATIVE')
 
-  # mkxp-z-apple-mobile has no native Win32API implementation - the
-  # MiniFFI binding is Windows-only and was dropped when the fork
-  # narrowed to iOS/iPadOS/tvOS. The alias_method calls below check
-  # whether a native :initialize / :call exists before capturing it,
-  # so this file works both with and without the native binding.
-  if mkxp_method_or_alias_defined?(self,
-                                   :initialize) && !mkxp_method_or_alias_defined?(self,
-                                                                                  :mkxp_native_initialize)
-    alias mkxp_native_initialize initialize
-  end
-  def initialize(dll, func, *args)
+  def initialize(dll, func, *_args)
     @dll = dll
     @func = func
     @called = false
 
     dll = kappatalize(dll.chomp('.dll'))
     func = kappatalize(func)
+    return unless Win32API_Impl.const_defined?(dll)
 
-    if (!System.is_windows? || !NATIVE_ON_WINDOWS) && Win32API_Impl.const_defined?(dll)
-      dll_impl = Win32API_Impl.const_get(dll)
-      if dll_impl.const_defined?(func)
-        @mkxp_wrap_impl = dll_impl.const_get(func).new
-        return
-      end
-    end
-
-    @mkxp_native_available = false
-    return unless respond_to?(:mkxp_native_initialize)
-
-    begin
-      mkxp_native_initialize(@dll, @func, *args)
-      @mkxp_native_available = true
-      nil
-    rescue StandardError
-      # Native initialiser missing on this Win32API build. The
-      # Ruby-only fallback path above is enough for compat.
-    end
+    dll_impl = Win32API_Impl.const_get(dll)
+    @mkxp_wrap_impl = dll_impl.const_get(func).new if dll_impl.const_defined?(func)
   end
 
-  if mkxp_method_or_alias_defined?(self, :call) && !mkxp_method_or_alias_defined?(self, :mkxp_native_call)
-    alias mkxp_native_call call
-  end
   def call(*args)
     return @mkxp_wrap_impl.call(args) if @mkxp_wrap_impl
-
-    if @mkxp_native_available
-      System.puts("[Win32API] [#{@dll}:#{@func}] #{args}") if LOG_NATIVE
-      return mkxp_native_call(*args)
-    end
 
     raise "[Win32API] [#{@dll}:#{@func}] #{args}" unless TOLERATE_ERRORS
 
