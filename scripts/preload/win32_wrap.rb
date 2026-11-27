@@ -1418,6 +1418,8 @@ module Win32API_Impl
                      :connect => ::Socket.instance_method(:connect_nonblock),
                      :pack => ::Socket.method(:pack_sockaddr_in),
                      :recv => ::Socket.instance_method(:recv),
+                     :sockopt => ::Socket.instance_method(:getsockopt),
+                     :so_error => [::Socket::SOL_SOCKET, ::Socket::SO_ERROR],
                      :write => ::IO.instance_method(:write),
                      :close => ::IO.instance_method(:close),
                      :closed => ::IO.instance_method(:closed?),
@@ -1553,6 +1555,14 @@ module Win32API_Impl
           NATIVE[:close].bind(io).call
           return nil
         end
+        # A refused connect also makes the socket writable. macOS then
+        # answers the second connect with EISCONN, and only SO_ERROR
+        # holds the refusal.
+        errno = pending_error(io)
+        if errno != 0
+          NATIVE[:close].bind(io).call
+          raise SystemCallError.new('connect', errno)
+        end
         begin
           NATIVE[:connect].bind(io).call(address)
         rescue Errno::EISCONN
@@ -1560,6 +1570,13 @@ module Win32API_Impl
         end
       end
       io
+    end
+
+    # Ruby 2.0 and later give a Socket::Option, 1.8 and 1.9 a String.
+    def self.pending_error(io)
+      option = NATIVE[:sockopt].bind(io).call(*NATIVE[:so_error])
+      option = option.data if option.respond_to?(:data)
+      option.unpack('i')[0].to_i
     end
 
     def self.send_on(handle, data, length)
