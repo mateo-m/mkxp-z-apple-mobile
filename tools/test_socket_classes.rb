@@ -9,6 +9,7 @@
 
 require_relative 'assertion_count'
 require 'socket'
+require 'tmpdir'
 
 ROOT = File.expand_path('..', __dir__)
 WRAP = File.join(ROOT, 'scripts', 'preload', 'win32_wrap.rb')
@@ -49,10 +50,24 @@ port = server.addr[1]
 load_wrap
 assert_eq(Socket.equal?(real_socket), true, 'the 3.1 VM keeps the real Socket')
 
-$ruby_version = '1.8.7'
+# The 1.9 VM starts only socket.so and ships socket.rb, which
+# defines the classes again. A stand-in for its class lines:
+# https://github.com/ruby/ruby/blob/v1_9_3_551/ext/socket/lib/socket.rb
+socket_rb_dir = Dir.mktmpdir
+File.write(File.join(socket_rb_dir, 'socket.rb'), <<~RUBY)
+  class Addrinfo; end
+  class BasicSocket < IO; end
+  class Socket < BasicSocket; end
+RUBY
+$LOADED_FEATURES.reject! { |feature| File.basename(feature) == 'socket.rb' }
+$LOAD_PATH.unshift(socket_rb_dir)
+
+$ruby_version = '1.9.3'
 load_wrap
 assert_eq(%w[Socket TCPSocket TCPServer].select { |name| Object.const_defined?(name) }, [],
-          'the 1.8 VM hides the real socket classes')
+          'the 1.9 VM hides the real socket classes')
+require 'socket'
+assert_eq(Object.const_defined?(:Socket), false, "a require 'socket' after the preload does not define Socket again")
 
 # Pokemon Xenoverse, script 005_Sockets, cut down: its own Winsock
 # classes load only when no Socket exists.
@@ -99,5 +114,6 @@ assert_eq(Win32API_Impl::Ws2_32.available?, true, 'F12 keeps the Winsock bridge'
 assert_eq(TCPSocket.new('127.0.0.1', port, true).connected, 0, 'the bridge connects after F12')
 server.accept.close
 server.close
+FileUtils.remove_entry(socket_rb_dir)
 
-test_passed('test_socket_classes', 7)
+test_passed('test_socket_classes', 8)

@@ -1434,9 +1434,16 @@ module Win32API_Impl
     # skips its classes when `::Socket` exists, and then calls the real
     # TCPSocket.new with a Winsock "blocking" flag (TypeError). On the
     # 1.8 and 1.9 VMs, keep the real classes for this bridge only, the
-    # same as when the network is off.
+    # same as when the network is off. The 1.9 VM starts only
+    # socket.so, so a later `require 'socket'` would load the shipped
+    # socket.rb and define `Socket` again. Load it now.
     if NATIVE && defined?(::Socket) && ::Socket.equal?(NATIVE[:klass]) &&
        System.respond_to?(:ruby_version) && System.ruby_version.to_f < 3.1
+      begin
+        require 'socket'
+      rescue LoadError
+        nil
+      end
       %w[Socket BasicSocket IPSocket TCPSocket TCPServer UDPSocket
          UNIXSocket UNIXServer SOCKSSocket Addrinfo].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name)
