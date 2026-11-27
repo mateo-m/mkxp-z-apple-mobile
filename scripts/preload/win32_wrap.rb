@@ -1407,24 +1407,41 @@ module Win32API_Impl
     # Capture the socket entry points while they are still pristine.
     # The games this module exists for reopen `Socket` and add their
     # own Winsock wrappers, so calling a reopened method later would
-    # recurse straight back into this module.
-    NATIVE = if defined?(::Socket) && defined?(::IO)
-               begin
-                 {
-                   :klass => ::Socket,
-                   :init => ::Socket.instance_method(:initialize),
-                   :connect => ::Socket.instance_method(:connect_nonblock),
-                   :pack => ::Socket.method(:pack_sockaddr_in),
-                   :recv => ::Socket.instance_method(:recv),
-                   :write => ::IO.instance_method(:write),
-                   :close => ::IO.instance_method(:close),
-                   :closed => ::IO.instance_method(:closed?),
-                   :select => ::IO.method(:select)
-                 }
-               rescue StandardError
-                 nil
+    # recurse straight back into this module. F12 loads this file
+    # again, when `Socket` can be the game's own class.
+    unless const_defined?(:NATIVE)
+      NATIVE = if defined?(::Socket) && defined?(::IO)
+                 begin
+                   {
+                     :klass => ::Socket,
+                     :init => ::Socket.instance_method(:initialize),
+                     :connect => ::Socket.instance_method(:connect_nonblock),
+                     :pack => ::Socket.method(:pack_sockaddr_in),
+                     :recv => ::Socket.instance_method(:recv),
+                     :write => ::IO.instance_method(:write),
+                     :close => ::IO.instance_method(:close),
+                     :closed => ::IO.instance_method(:closed?),
+                     :select => ::IO.method(:select)
+                   }
+                 rescue StandardError
+                   nil
+                 end
                end
-             end
+    end
+
+    # RGSS1 to RGSS3 had no socket library, so their games define
+    # `Socket` and `TCPSocket` on top of Winsock. Pokemon Xenoverse
+    # skips its classes when `::Socket` exists, and then calls the real
+    # TCPSocket.new with a Winsock "blocking" flag (TypeError). On the
+    # 1.8 and 1.9 VMs, keep the real classes for this bridge only, the
+    # same as when the network is off.
+    if NATIVE && defined?(::Socket) && ::Socket.equal?(NATIVE[:klass]) &&
+       System.respond_to?(:ruby_version) && System.ruby_version.to_f < 3.1
+      %w[Socket BasicSocket IPSocket TCPSocket TCPServer UDPSocket
+         UNIXSocket UNIXServer SOCKSSocket Addrinfo].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name)
+      end
+    end
 
     @sockets = {}
     @next_handle = 3

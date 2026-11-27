@@ -1147,7 +1147,8 @@ end
 # statically-linked ext instead (gated in extinit so offline mode
 # still matches this old behavior). Games that call Winsock
 # through Win32API reach the network through Win32API_Impl::Ws2_32
-# in win32_wrap.rb.
+# in win32_wrap.rb. On the 1.8 and 1.9 VMs that bridge then hides
+# the real classes from the game.
 
 # --- Eager static extension load ---
 # The socket and openssl extensions are statically linked into the
