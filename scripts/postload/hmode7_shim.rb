@@ -43,6 +43,21 @@
 # can be added incrementally as we port them.
 
 return unless defined?(HM7)
+
+# Insurgence 2.0 is an mkxp-z port. Its HM7 calls its own native
+# libhmode7, which iOS cannot load, and raises HM7::Error when the map
+# opens. Draw its [HM7] maps flat instead.
+if HM7.respond_to?(:available?) && !HM7.available?
+  class Game_System
+    # rubocop:disable Naming/PredicateMethod -- the game reads this name
+    def hm7
+      false
+    end
+    # rubocop:enable Naming/PredicateMethod
+  end
+  return
+end
+
 return unless defined?(HM7::Native)
 return unless HM7::Native.const_defined?(:AVAILABLE) && HM7::Native::AVAILABLE
 
