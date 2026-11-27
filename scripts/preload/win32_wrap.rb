@@ -1395,9 +1395,9 @@ module Win32API_Impl
   # player pressed cancel.
   #
   # Ruby's socket extension only initialises when the host grants the
-  # game network access (ios/Dependencies/ruby18/extinit.c). When it
-  # is absent every call here reports failure, so the game takes the
-  # offline path it already has for an unreachable server.
+  # game network access (deps/ruby18/extinit.c, deps/ruby19/extinit.c).
+  # When it is absent every call here reports failure, so the game
+  # takes the offline path it already has for an unreachable server.
   module Ws2_32
     AF_INET = 2
     SOCK_STREAM = 1
@@ -1416,6 +1416,8 @@ module Win32API_Impl
                    :connect => ::Socket.instance_method(:connect_nonblock),
                    :pack => ::Socket.method(:pack_sockaddr_in),
                    :recv => ::Socket.instance_method(:recv),
+                   :sockopt => ::Socket.instance_method(:getsockopt),
+                   :so_error => [::Socket::SOL_SOCKET, ::Socket::SO_ERROR],
                    :write => ::IO.instance_method(:write),
                    :close => ::IO.instance_method(:close),
                    :closed => ::IO.instance_method(:closed?),
@@ -1425,6 +1427,27 @@ module Win32API_Impl
                  nil
                end
              end
+
+    # RGSS1 to RGSS3 had no socket library, so their games define
+    # `Socket` and `TCPSocket` on top of Winsock. Pokemon Xenoverse
+    # skips its classes when `::Socket` exists, and then calls the real
+    # TCPSocket.new with a Winsock "blocking" flag (TypeError). On the
+    # 1.8 and 1.9 VMs, keep the real classes for this bridge only, the
+    # same as when the network is off. The 1.9 VM starts only
+    # socket.so, so a later `require 'socket'` would load the shipped
+    # socket.rb and define `Socket` again. Load it now.
+    if NATIVE && defined?(::Socket) && ::Socket.equal?(NATIVE[:klass]) &&
+       System.respond_to?(:ruby_version) && System.ruby_version.to_f < 3.1
+      begin
+        require 'socket'
+      rescue LoadError
+        nil
+      end
+      %w[Socket BasicSocket IPSocket TCPSocket TCPServer UDPSocket
+         UNIXSocket UNIXServer SOCKSSocket Addrinfo].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name)
+      end
+    end
 
     @sockets = {}
     @next_handle = 3
@@ -1529,6 +1552,14 @@ module Win32API_Impl
           NATIVE[:close].bind(io).call
           return nil
         end
+        # A refused connect also makes the socket writable. macOS then
+        # answers the second connect with EISCONN, and only SO_ERROR
+        # holds the refusal.
+        errno = pending_error(io)
+        if errno != 0
+          NATIVE[:close].bind(io).call
+          raise SystemCallError.new('connect', errno)
+        end
         begin
           NATIVE[:connect].bind(io).call(address)
         rescue Errno::EISCONN
@@ -1536,6 +1567,13 @@ module Win32API_Impl
         end
       end
       io
+    end
+
+    # Ruby 2.0 and later give a Socket::Option, 1.8 and 1.9 a String.
+    def self.pending_error(io)
+      option = NATIVE[:sockopt].bind(io).call(*NATIVE[:so_error])
+      option = option.data if option.respond_to?(:data)
+      option.unpack('i')[0].to_i
     end
 
     def self.send_on(handle, data, length)

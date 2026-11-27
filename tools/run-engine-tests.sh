@@ -13,7 +13,8 @@
 #   tools/run-engine-tests.sh [--device <name or udid>] [--game <dir>]
 #                             [--suite <file> ...] [--ruby 18|19|31]
 #                             [--fast-forward <n>] [--config <json>]
-#                             [--timeout <seconds>] [--keep] [--no-build]
+#                             [--network] [--timeout <seconds>] [--keep]
+#                             [--no-build]
 #
 # --suite names another file in the game folder to run in place of
 # the one mkxp.json points at. The suite must call
@@ -36,6 +37,9 @@
 # --config gives JSON that the engine reads on top of mkxp.json, for
 # example '{"pathCache":false}'.
 #
+# --network gives the game network access, as a launcher does per
+# game.
+#
 # Exit status:
 #   0  every test passed
 #   1  at least one test failed, or the suite never finished
@@ -51,6 +55,7 @@ SUITES=""
 RUBY=""
 FAST_FORWARD=""
 CONFIG=""
+NETWORK=0
 KEEP=0
 BUILD=1
 BUNDLE_ID=sh.mateo.mkxpz.enginetests
@@ -84,6 +89,7 @@ do
             RUBY="$2"; shift 2 ;;
         --fast-forward) FAST_FORWARD="$2"; shift 2 ;;
         --config) CONFIG="$2"; shift 2 ;;
+        --network) NETWORK=1; shift ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --keep) KEEP=1; shift ;;
         --no-build) BUILD=0; shift ;;
@@ -190,6 +196,7 @@ fi
 if [ -n "$CONFIG" ]; then
     export SIMCTL_CHILD_MKXP_TEST_CONFIG="$CONFIG"
 fi
+export SIMCTL_CHILD_MKXP_TEST_NETWORK="$NETWORK"
 xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE_ID" > "$CONSOLE" 2>&1 &
 LAUNCH_PID=$!
 

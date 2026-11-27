@@ -1147,7 +1147,8 @@ end
 # statically-linked ext instead (gated in extinit so offline mode
 # still matches this old behavior). Games that call Winsock
 # through Win32API reach the network through Win32API_Impl::Ws2_32
-# in win32_wrap.rb.
+# in win32_wrap.rb. On the 1.8 and 1.9 VMs that bridge then hides
+# the real classes from the game.
 
 # --- Eager static extension load ---
 # The socket and openssl extensions are statically linked into the
@@ -1168,8 +1169,8 @@ end
 # paths in $LOADED_FEATURES. Replacement loaders honor that list, so
 # they skip these files and the real classes stay in place. The
 # eager load does not conflict with the stub-removal note above: the
-# 1.8/1.9 VMs do not link the extensions, and the version gate skips
-# them, so no class appears there. The gate reads System.ruby_version
+# version gate skips the 1.8/1.9 VMs, so this load adds no class
+# there. The gate reads System.ruby_version
 # (the C API version), not RUBY_VERSION, because the syntax-transform
 # layer can mimic an old RUBY_VERSION on the 3.1 VM. When networking
 # is off, the airplane-mode section below still patches the connect
