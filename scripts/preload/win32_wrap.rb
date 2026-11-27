@@ -1727,6 +1727,22 @@ module Win32API_Impl
       end
     end
   end
+
+  # A game can ship its own H-Mode7 library and call its hm7_* exports
+  # through Win32API. binding/hmode7-flat-binding.cpp
+  # implements each export on HM7::Native.
+  module Hmode7
+    if defined?(::HM7::Native)
+      ::HM7::Native.singleton_methods.each do |name|
+        name = name.to_s
+        next unless name =~ /\Ahm7_/
+
+        const_set(name.sub(/\Ah/, 'H'), Class.new do
+          define_method(:call) { |args| ::HM7::Native.send(name, *args) }
+        end)
+      end
+    end
+  end
 end
 
 def kappatalize(s)
@@ -1756,6 +1772,9 @@ class Win32API
     @dll = dll
     @func = func
 
+    # A game that ships its own library names the file of each
+    # platform, such as "./libhmode7.so". Use the library name.
+    dll = dll.sub(%r{\A(?:.*[/\\])?lib([^/\\]+)\.(?:so|dylib)\z}i, '\1')
     dll = kappatalize(dll.chomp('.dll'))
     func = kappatalize(func)
     return unless Win32API_Impl.const_defined?(dll)

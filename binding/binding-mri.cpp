@@ -142,6 +142,7 @@ void httpBindingInit();
 void cryptoBindingInit();
 
 void hmode7BindingInit();
+void hmode7FlatBindingInit();
 
 RB_METHOD(mkxpDelta);
 RB_METHOD(mriPrint);
@@ -510,6 +511,7 @@ static void mriBindingInit() {
      * module that the postload shim forwards HM7.self.xxx
      * method calls to. See binding/hmode7-binding.cpp. */
     hmode7BindingInit();
+    hmode7FlatBindingInit();
     
     if (rgssVer >= 3) {
         _rb_define_module_function(rb_mKernel, "rgss_main", mriRgssMain);
