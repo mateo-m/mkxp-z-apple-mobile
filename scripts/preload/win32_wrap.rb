@@ -185,9 +185,9 @@ $win32KeyStates = nil
 
 module Graphics
   class << self
-    alias win32wrap_update update unless method_defined?(:win32wrap_update)
+    alias mkxp_engine_graphics_update update unless method_defined?(:mkxp_engine_graphics_update)
     def update
-      win32wrap_update
+      mkxp_engine_graphics_update
       $win32KeyStates = nil
     end
   end
