@@ -1395,9 +1395,9 @@ module Win32API_Impl
   # player pressed cancel.
   #
   # Ruby's socket extension only initialises when the host grants the
-  # game network access (ios/Dependencies/ruby18/extinit.c). When it
-  # is absent every call here reports failure, so the game takes the
-  # offline path it already has for an unreachable server.
+  # game network access (deps/ruby18/extinit.c, deps/ruby19/extinit.c).
+  # When it is absent every call here reports failure, so the game
+  # takes the offline path it already has for an unreachable server.
   module Ws2_32
     AF_INET = 2
     SOCK_STREAM = 1
@@ -1407,29 +1407,26 @@ module Win32API_Impl
     # Capture the socket entry points while they are still pristine.
     # The games this module exists for reopen `Socket` and add their
     # own Winsock wrappers, so calling a reopened method later would
-    # recurse straight back into this module. F12 loads this file
-    # again, when `Socket` can be the game's own class.
-    unless const_defined?(:NATIVE)
-      NATIVE = if defined?(::Socket) && defined?(::IO)
-                 begin
-                   {
-                     :klass => ::Socket,
-                     :init => ::Socket.instance_method(:initialize),
-                     :connect => ::Socket.instance_method(:connect_nonblock),
-                     :pack => ::Socket.method(:pack_sockaddr_in),
-                     :recv => ::Socket.instance_method(:recv),
-                     :sockopt => ::Socket.instance_method(:getsockopt),
-                     :so_error => [::Socket::SOL_SOCKET, ::Socket::SO_ERROR],
-                     :write => ::IO.instance_method(:write),
-                     :close => ::IO.instance_method(:close),
-                     :closed => ::IO.instance_method(:closed?),
-                     :select => ::IO.method(:select)
-                   }
-                 rescue StandardError
-                   nil
-                 end
+    # recurse straight back into this module.
+    NATIVE = if defined?(::Socket) && defined?(::IO)
+               begin
+                 {
+                   :klass => ::Socket,
+                   :init => ::Socket.instance_method(:initialize),
+                   :connect => ::Socket.instance_method(:connect_nonblock),
+                   :pack => ::Socket.method(:pack_sockaddr_in),
+                   :recv => ::Socket.instance_method(:recv),
+                   :sockopt => ::Socket.instance_method(:getsockopt),
+                   :so_error => [::Socket::SOL_SOCKET, ::Socket::SO_ERROR],
+                   :write => ::IO.instance_method(:write),
+                   :close => ::IO.instance_method(:close),
+                   :closed => ::IO.instance_method(:closed?),
+                   :select => ::IO.method(:select)
+                 }
+               rescue StandardError
+                 nil
                end
-    end
+             end
 
     # RGSS1 to RGSS3 had no socket library, so their games define
     # `Socket` and `TCPSocket` on top of Winsock. Pokemon Xenoverse
