@@ -13,7 +13,7 @@ unless defined?(EngineTest)
 end
 
 EngineTest.suite('hmode7-flat', 7)
-EngineTest.load_preloads(%w[windows_fs platform_compat pokemon_compat win32_wrap])
+EngineTest.load_preloads(%w[windows_fs platform_compat win32_wrap])
 
 module FlatHM7
   LIB = './libhmode7.so'.freeze
