@@ -640,4 +640,15 @@ $win32KeyStates = [true]
 Graphics.update
 assert_eq($win32KeyStates, nil, "Graphics.update clears the key states under mkxp-z's wrap")
 
-test_passed('test_win32_stubs', 120)
+
+logged = []
+System.define_singleton_method(:puts) { |*args| logged << args.join }
+frozen = Win32API.new('nosuch', 'Missing', '', '').freeze
+assert_eq(frozen.call, 0, 'a frozen Win32API with no stand-in returns 0')
+assert_eq(frozen.call, 0, 'a frozen Win32API with no stand-in returns 0 again')
+Win32API.new('nosuch', 'Missing', '', '').call
+assert_eq(logged, ['[Win32API] [nosuch:Missing] []'], 'a missing call logs once, also from another object')
+Win32API.new('nosuch', 'Other', '', '').call
+assert_eq(logged.last, '[Win32API] [nosuch:Other] []', 'another missing call logs too')
+
+test_passed('test_win32_stubs', 124)
