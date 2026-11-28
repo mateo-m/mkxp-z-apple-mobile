@@ -146,6 +146,7 @@ bool Movie::preparePlayback()
 
     if (!hasVideo) {
         THEORAPLAY_stopDecode(decoder);
+        decoder = nullptr;
         return false;
     }
 
