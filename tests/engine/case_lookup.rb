@@ -18,7 +18,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('case-lookup', 10)
+EngineTest.suite('case-lookup', 13)
 
 EngineTest.load_preloads(%w[windows_fs])
 
@@ -158,13 +158,82 @@ EngineTest.test('a file from launch is found in another case') do
   EngineTest.assert_equal(File.read(real), File.read(variant), 'text')
 end
 
+# A script spells "\303\251" as one code point. A file that an Apple app
+# unpacked can spell it as "e" and a combining accent.
+ACCENT_ONE = "Caf\303\251 lookup".freeze
+ACCENT_TWO = "Cafe\314\201 lookup".freeze
+ACCENT_SPELLINGS = [[ACCENT_TWO, ACCENT_ONE], [ACCENT_ONE, ACCENT_TWO]].freeze
+
+def accent_file(name)
+  "Audio/BGM/#{name}.ogg"
+end
+
+def with_accent_file(name)
+  Dir.mkdir('Audio/BGM') unless File.directory?('Audio/BGM')
+  sound = File.open('Audio/SE/read_noise.ogg', 'rb', &:read) # rubocop:disable Style/FileRead -- not on Ruby 1.8.
+  File.open(accent_file(name), 'wb') { |file| file.write(sound) }
+  System.reload_cache
+  yield
+ensure
+  File.delete(accent_file(name))
+  System.reload_cache
+end
+
+EngineTest.test('a sound plays when the disk spells its accent in another form') do
+  ACCENT_SPELLINGS.each do |disk, asked|
+    with_accent_file(disk) do
+      names = Dir._mkxp_orig_entries('Audio/BGM').grep(/lookup/)
+      EngineTest.assert_equal(["#{disk}.ogg"], names, 'name on disk')
+      Audio.bgm_play("Audio/BGM/#{asked}", 0)
+      Audio.bgm_stop
+      Audio.se_play("Audio/BGM/#{asked}", 0)
+      Audio.se_stop
+      EngineTest.asserted
+    end
+  end
+end
+
+EngineTest.test('a file opens when the disk spells its accent in another form') do
+  ACCENT_SPELLINGS.each do |disk, asked|
+    with_accent_file(disk) do
+      EngineTest.assert_equal(true, File.exist?(accent_file(asked)), 'File.exist?')
+      size = File.read(accent_file(asked)).bytesize
+      EngineTest.assert_equal(File.size(accent_file(disk)), size, 'File.read')
+    end
+  end
+end
+
+# A path of 512 bytes or more, asked for in another case. The path
+# cache keeps paths of at most 511 bytes, so only a run without it
+# finds this path.
+EngineTest.test('a long path is found in another case and another accent form') do
+  next EngineTest.asserted unless CFG['pathCache'] == false
+
+  [[ACCENT_TWO, ACCENT_TWO]].concat(ACCENT_SPELLINGS).each do |disk, asked|
+    parts = Array.new(5) { |i| "#{disk} #{i} #{'d' * 100}" }
+    dirs = Array.new(parts.size) { |i| parts[0..i].join('/') }
+    dirs.each { |dir| Dir.mkdir(dir) }
+    path = "#{dirs.last}/meta.txt"
+    File.open(path, 'w') { |file| file.write('long') }
+    begin
+      wanted = path.gsub(disk, asked).tr('d', 'D')
+      EngineTest.assert(wanted.bytesize >= 512, "#{wanted.bytesize} bytes")
+      EngineTest.assert_equal(true, File.exist?(wanted), 'File.exist?')
+      EngineTest.assert_equal('long', File.read(wanted), 'File.read')
+    ensure
+      File.delete(path)
+      dirs.reverse_each { |dir| Dir.rmdir(dir) }
+    end
+  end
+end
+
 EngineTest.test('a missing file still raises ENOENT') do
   EngineTest.assert_raises('No such file', 'File.mtime') { File.mtime("#{LOOKUP_DIR_VARIANT}/missing.txt") }
   EngineTest.assert_raises('No such file', 'File.read') { File.read("#{LOOKUP_DIR_VARIANT}/missing.txt") }
   EngineTest.assert_equal(nil, File.size?("#{LOOKUP_DIR_VARIANT}/missing.txt"), 'File.size?')
 end
 
-# Pokemon Ancient Platinum calls File.delete(path) if File.exist?(path)
+# A game calls File.delete(path) if File.exist?(path)
 # with an empty path, and the engine's game folder lookup reads an
 # empty path as the game folder itself.
 EngineTest.test('an empty path names no file or folder') do
