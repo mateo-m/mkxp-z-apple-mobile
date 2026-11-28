@@ -304,6 +304,24 @@ if System.rpg_version == 1
   end
 end
 
+# --- Bitmap#save_to_file ---
+# Games call this when `$MKXP` is set, and `export` on Windows. It must
+# work also with the fix-up scripts off. A name with no extension gets
+# `.png`, as the Windows `export` writes.
+class Bitmap
+  def save_to_file(filename)
+    format = File.extname(filename).downcase
+    if format.empty?
+      filename = "#{filename}.png"
+    elsif !%w[.png .bmp .jpg .jpeg].include?(format)
+      print("Export format '#{format}' not supported.")
+      return nil
+    end
+    to_file(filename)
+    filename
+  end
+end
+
 # --- Null mouse shim ---
 # Pokemon Essentials games set $mouse = Game_Mouse.new. The MkxpNullMouse
 # class absorbs any method call, returning false/0/nil. Some PE forks
