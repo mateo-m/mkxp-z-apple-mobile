@@ -58,7 +58,7 @@ unless $PokemonSystem.nil?
     class Window_TextEntry_Keyboard
       unless method_defined?(:_mkxp_pre_backspace_orig_update)
         alias _mkxp_pre_backspace_orig_update update
-        def update
+        def update(*args)
           if @helper && @helper.cursor > 0 &&
              begin
                Input.triggerex?(:BACKSPACE)
@@ -73,7 +73,7 @@ unless $PokemonSystem.nil?
             delete
             return
           end
-          _mkxp_pre_backspace_orig_update
+          _mkxp_pre_backspace_orig_update(*args)
         end
       end
     end
@@ -257,11 +257,11 @@ unless $PokemonSystem.nil?
       alias mkxp_chained_update update unless method_defined?(:mkxp_chained_update)
     end
 
-    def self.update
+    def self.update(*args)
       @mkxp_read = nil
       @mkxp_release_read = nil
       idle_before = mkxp_engine_idle_time
-      mkxp_chained_update
+      mkxp_chained_update(*args)
       jupdate if mkxp_engine_update_missing?(idle_before)
       mkxp_forget_released_buttons
     end
