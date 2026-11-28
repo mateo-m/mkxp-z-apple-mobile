@@ -156,17 +156,17 @@ static inline int Mutex_Create(TheoraDecoder *ctx)
     ctx->lock = CreateMutex(NULL, FALSE, NULL);
     return (ctx->lock == NULL);
 }
-static inline void Mutex_Destroy(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Destroy(THEORAPLAY_MUTEX_T *mutex)
 {
-    CloseHandle(mutex);
+    CloseHandle(*mutex);
 }
-static inline void Mutex_Lock(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Lock(THEORAPLAY_MUTEX_T *mutex)
 {
-    WaitForSingleObject(mutex, INFINITE);
+    WaitForSingleObject(*mutex, INFINITE);
 }
-static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T *mutex)
 {
-    ReleaseMutex(mutex);
+    ReleaseMutex(*mutex);
 }
 #else
 static inline int Thread_Create(TheoraDecoder *ctx, void *(*routine) (void*))
@@ -181,17 +181,17 @@ static inline int Mutex_Create(TheoraDecoder *ctx)
 {
     return pthread_mutex_init(&ctx->lock, NULL);
 }
-static inline void Mutex_Destroy(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Destroy(THEORAPLAY_MUTEX_T *mutex)
 {
-    pthread_mutex_destroy(&mutex);
+    pthread_mutex_destroy(mutex);
 }
-static inline void Mutex_Lock(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Lock(THEORAPLAY_MUTEX_T *mutex)
 {
-    pthread_mutex_lock(&mutex);
+    pthread_mutex_lock(mutex);
 }
-static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T mutex)
+static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T *mutex)
 {
-    pthread_mutex_unlock(&mutex);
+    pthread_mutex_unlock(mutex);
 }
 #endif
 
@@ -375,11 +375,11 @@ static void WorkerThread(TheoraDecoder *ctx)
     // Now we can start the actual decoding!
     // Note that audio and video don't _HAVE_ to start simultaneously.
 
-    Mutex_Lock(ctx->lock);
+    Mutex_Lock(&ctx->lock);
     ctx->prepped = 1;
     ctx->hasvideo = (tpackets != 0);
     ctx->hasaudio = (vpackets != 0);
-    Mutex_Unlock(ctx->lock);
+    Mutex_Unlock(&ctx->lock);
 
     while (!ctx->halt && !eos)
     {
@@ -424,7 +424,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                 audioframes += frames;
 
                 //printf("Decoded %d frames of audio.\n", (int) frames);
-                Mutex_Lock(ctx->lock);
+                Mutex_Lock(&ctx->lock);
                 ctx->audioms += item->playms;
                 if (ctx->audiolisttail)
                 {
@@ -437,7 +437,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                     ctx->audiolist = item;
                 } // else
                 ctx->audiolisttail = item;
-                Mutex_Unlock(ctx->lock);
+                Mutex_Unlock(&ctx->lock);
             } // if
 
             else  // no audio available left in current packet?
@@ -494,7 +494,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                         } // if
 
                         //printf("Decoded another video frame.\n");
-                        Mutex_Lock(ctx->lock);
+                        Mutex_Lock(&ctx->lock);
                         if (ctx->videolisttail)
                         {
                             assert(ctx->videolist);
@@ -507,7 +507,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                         } // else
                         ctx->videolisttail = item;
                         ctx->videocount++;
-                        Mutex_Unlock(ctx->lock);
+                        Mutex_Unlock(&ctx->lock);
 
                         saw_video_frame = 1;
                     } // if
@@ -537,9 +537,9 @@ static void WorkerThread(TheoraDecoder *ctx)
             while (go_on)
             {
                 // !!! FIXME: This is stupid. I should use a semaphore for this.
-                Mutex_Lock(ctx->lock);
+                Mutex_Lock(&ctx->lock);
                 go_on = !ctx->halt && (ctx->videocount >= ctx->maxframes);
-                Mutex_Unlock(ctx->lock);
+                Mutex_Unlock(&ctx->lock);
                 if (go_on)
                     sleepms(10);
             } // while
@@ -550,7 +550,6 @@ static void WorkerThread(TheoraDecoder *ctx)
     was_error = 0;
 
 cleanup:
-    ctx->decode_error = (!ctx->halt && was_error);
     if (tdec != NULL) th_decode_free(tdec);
     if (tsetup != NULL) th_setup_free(tsetup);
     if (vblock_init) vorbis_block_clear(&vblock);
@@ -563,7 +562,10 @@ cleanup:
     vorbis_info_clear(&vinfo);
     ogg_sync_clear(&sync);
     ctx->io->close(ctx->io);
+    Mutex_Lock(&ctx->lock);
+    ctx->decode_error = (!ctx->halt && was_error);
     ctx->thread_done = 1;
+    Mutex_Unlock(&ctx->lock);
 } // WorkerThread
 
 
@@ -650,9 +652,8 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
         ctx->thread_created = (Thread_Create(ctx, WorkerThreadEntry) == 0);
         if (ctx->thread_created)
             return (THEORAPLAY_Decoder *) ctx;
+        Mutex_Destroy(&ctx->lock);
     } // if
-
-    Mutex_Destroy(ctx->lock);
 
 startdecode_failed:
     io->close(io);
@@ -671,7 +672,7 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
     {
         ctx->halt = 1;
         Thread_Join(ctx->worker);
-        Mutex_Destroy(ctx->lock);
+        Mutex_Destroy(&ctx->lock);
     } // if
 
     VideoFrame *videolist = ctx->videolist;
@@ -702,10 +703,10 @@ int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder)
     int retval = 0;
     if (ctx)
     {
-        Mutex_Lock(ctx->lock);
+        Mutex_Lock(&ctx->lock);
         retval = ( ctx && (ctx->audiolist || ctx->videolist ||
                    (ctx->thread_created && !ctx->thread_done)) );
-        Mutex_Unlock(ctx->lock);
+        Mutex_Unlock(&ctx->lock);
     } // if
     return retval;
 } // THEORAPLAY_isDecoding
@@ -715,9 +716,9 @@ int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder)
     TheoraDecoder *ctx = (TheoraDecoder *) decoder; \
     typ retval = defval; \
     if (ctx) { \
-        Mutex_Lock(ctx->lock); \
+        Mutex_Lock(&ctx->lock); \
         retval = ctx->member; \
-        Mutex_Unlock(ctx->lock); \
+        Mutex_Unlock(&ctx->lock); \
     } \
     return retval;
 
@@ -762,7 +763,7 @@ const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
     TheoraDecoder *ctx = (TheoraDecoder *) decoder;
     AudioPacket *retval;
 
-    Mutex_Lock(ctx->lock);
+    Mutex_Lock(&ctx->lock);
     retval = ctx->audiolist;
     if (retval)
     {
@@ -772,7 +773,7 @@ const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
         if (ctx->audiolist == NULL)
             ctx->audiolisttail = NULL;
     } // if
-    Mutex_Unlock(ctx->lock);
+    Mutex_Unlock(&ctx->lock);
 
     return retval;
 } // THEORAPLAY_getAudio
@@ -795,7 +796,7 @@ const THEORAPLAY_VideoFrame *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
     TheoraDecoder *ctx = (TheoraDecoder *) decoder;
     VideoFrame *retval;
 
-    Mutex_Lock(ctx->lock);
+    Mutex_Lock(&ctx->lock);
     retval = ctx->videolist;
     if (retval)
     {
@@ -806,7 +807,7 @@ const THEORAPLAY_VideoFrame *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
         assert(ctx->videocount > 0);
         ctx->videocount--;
     } // if
-    Mutex_Unlock(ctx->lock);
+    Mutex_Unlock(&ctx->lock);
 
     return retval;
 } // THEORAPLAY_getVideo
