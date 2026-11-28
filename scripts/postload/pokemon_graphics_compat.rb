@@ -381,28 +381,13 @@ if defined?(Bitmap) &&
     end
 
     def export(filename, &on_finish)
-      format = File.extname(filename).downcase
-      case format
-      when '.png', '.bmp', '.jpg', '.jpeg'
-        to_file(filename)
-      when ''
-        filename = "#{filename}.png"
-        to_file(filename)
-      else
-        print("Export format '#{format}' not supported.")
-        return nil
-      end
-      on_finish.call if on_finish
+      filename = save_to_file(filename)
+      on_finish.call if filename && on_finish
       filename
     end
 
     def save(filename, &on_finish)
       export(filename, &on_finish)
-    end
-
-    # Games call this when `$MKXP` is set, and `export` on Windows.
-    def save_to_file(filename)
-      export(filename)
     end
 
     def export_png(filename, &on_finish)
