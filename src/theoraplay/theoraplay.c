@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -108,7 +109,7 @@ typedef struct TheoraDecoder
     // Thread wrangling...
     int thread_created;
     THEORAPLAY_MUTEX_T lock;
-    volatile int halt;
+    atomic_int halt;
     int thread_done;
     THEORAPLAY_THREAD_T worker;
 
