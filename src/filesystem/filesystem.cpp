@@ -80,20 +80,31 @@ struct NFCConverter {
     *bufPtr = 0;
     strcpy(inout, buf);
   }
-#else
-  void toNFC(char *) {}
-#endif
 
   std::string toNFC(const std::string &name) {
-    char out[512];
-    if (name.size() >= sizeof(out) ||
+    if (nfd2nfc == (iconv_t)-1 ||
         std::all_of(name.begin(), name.end(),
                     [](unsigned char c) { return c < 0x80; }))
       return name;
-    strcpy(out, name.c_str());
-    toNFC(out);
+
+    /* NFC is at most three times as long as its source (UAX #15). */
+    std::string out(name.size() * 3, '\0');
+    char *src = const_cast<char *>(name.data());
+    size_t srcSize = name.size();
+    char *dst = &out[0];
+    size_t dstSize = out.size();
+
+    iconv(nfd2nfc, NULL, NULL, NULL, NULL);
+    if (iconv(nfd2nfc, &src, &srcSize, &dst, &dstSize) == (size_t)-1)
+      return name;
+
+    out.resize(out.size() - dstSize);
     return out;
   }
+#else
+  void toNFC(char *) {}
+  std::string toNFC(const std::string &name) { return name; }
+#endif
 };
 
 struct SDLRWIoContext {

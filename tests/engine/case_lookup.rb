@@ -18,7 +18,7 @@ unless defined?(EngineTest)
   eval(File.read(harness_path), TOPLEVEL_BINDING, harness_path) # rubocop:disable Security/Eval
 end
 
-EngineTest.suite('case-lookup', 12)
+EngineTest.suite('case-lookup', 13)
 
 EngineTest.load_preloads(%w[windows_fs])
 
@@ -199,6 +199,30 @@ EngineTest.test('a file opens when the disk spells its accent in another form') 
       EngineTest.assert_equal(true, File.exist?(accent_file(asked)), 'File.exist?')
       size = File.read(accent_file(asked)).bytesize
       EngineTest.assert_equal(File.size(accent_file(disk)), size, 'File.read')
+    end
+  end
+end
+
+# A path of 512 bytes or more, asked for in another case. The path
+# cache keeps paths of at most 511 bytes, so only a run without it
+# finds this path.
+EngineTest.test('a long path is found in another case and another accent form') do
+  next EngineTest.asserted unless CFG['pathCache'] == false
+
+  [[ACCENT_TWO, ACCENT_TWO]].concat(ACCENT_SPELLINGS).each do |disk, asked|
+    parts = Array.new(5) { |i| "#{disk} #{i} #{'d' * 100}" }
+    dirs = Array.new(parts.size) { |i| parts[0..i].join('/') }
+    dirs.each { |dir| Dir.mkdir(dir) }
+    path = "#{dirs.last}/meta.txt"
+    File.open(path, 'w') { |file| file.write('long') }
+    begin
+      wanted = path.gsub(disk, asked).tr('d', 'D')
+      EngineTest.assert(wanted.bytesize >= 512, "#{wanted.bytesize} bytes")
+      EngineTest.assert_equal(true, File.exist?(wanted), 'File.exist?')
+      EngineTest.assert_equal('long', File.read(wanted), 'File.read')
+    ensure
+      File.delete(path)
+      dirs.reverse_each { |dir| Dir.rmdir(dir) }
     end
   end
 end
