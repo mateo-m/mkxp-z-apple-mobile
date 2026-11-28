@@ -24,7 +24,15 @@ if Object.const_defined?('GameData') || Object.const_defined?('PBItems')
   ENABLE_GET_ITEM = Object.const_defined?('PokemonMartScreen')
 
   if ENABLE_GET_ITEM
-    class CheatItemsAdapter < PokemonMartAdapter
+    # Some Essentials v21.1 kits make PokemonMartAdapter abstract and
+    # put the item mart methods in PokemonItemMartAdapter.
+    item_mart_adapter = if Object.const_defined?('PokemonItemMartAdapter')
+                          PokemonItemMartAdapter
+                        else
+                          PokemonMartAdapter
+                        end
+
+    class CheatItemsAdapter < item_mart_adapter
       def getPrice(_item, _selling = false)
         0
       end
