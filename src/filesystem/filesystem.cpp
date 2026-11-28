@@ -36,6 +36,8 @@
 #include <algorithm>
 #include <functional>
 #include <stack>
+#include <string>
+#include <utility>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -46,24 +48,53 @@
 #include <iconv.h>
 #endif
 
+/* A script spells "é" as one code point (NFC). A file that an Apple app
+ * wrote can spell it as "e" and a combining accent (NFD). A name compare
+ * needs the same bytes, so each compare uses NFC on both sides. */
+struct NFCConverter {
 #ifdef __APPLE__
-static void toNFC(char *inout, iconv_t nfd2nfc, char *buf, size_t bufBytes) {
-  if (nfd2nfc == (iconv_t)-1 || bufBytes == 0)
-    return;
+  iconv_t nfd2nfc;
+  char buf[512];
 
-  size_t srcSize = strlen(inout);
-  size_t bufSize = bufBytes - 1;
-  char *bufPtr = buf;
-  char *inoutPtr = inout;
+  NFCConverter() : nfd2nfc(iconv_open("utf-8", "utf-8-mac")) {}
 
-  iconv(nfd2nfc, NULL, NULL, NULL, NULL);
-  if (iconv(nfd2nfc, &inoutPtr, &srcSize, &bufPtr, &bufSize) == (size_t)-1)
-    return;
+  ~NFCConverter() {
+    if (nfd2nfc != (iconv_t)-1)
+      iconv_close(nfd2nfc);
+  }
 
-  *bufPtr = 0;
-  strcpy(inout, buf);
-}
+  /* Converts in-place */
+  void toNFC(char *inout) {
+    if (nfd2nfc == (iconv_t)-1)
+      return;
+
+    size_t srcSize = strlen(inout);
+    size_t bufSize = sizeof(buf) - 1;
+    char *bufPtr = buf;
+    char *inoutPtr = inout;
+
+    iconv(nfd2nfc, NULL, NULL, NULL, NULL);
+    if (iconv(nfd2nfc, &inoutPtr, &srcSize, &bufPtr, &bufSize) == (size_t)-1)
+      return;
+
+    *bufPtr = 0;
+    strcpy(inout, buf);
+  }
+#else
+  void toNFC(char *) {}
 #endif
+
+  std::string toNFC(const std::string &name) {
+    char out[512];
+    if (name.size() >= sizeof(out) ||
+        std::all_of(name.begin(), name.end(),
+                    [](unsigned char c) { return c < 0x80; }))
+      return name;
+    strcpy(out, name.c_str());
+    toNFC(out);
+    return out;
+  }
+};
 
 struct SDLRWIoContext {
   SDL_RWops *ops;
@@ -376,32 +407,9 @@ void FileSystem::removePath(const char *path, bool reload) {
 struct CacheEnumData {
   FileSystemPrivate *p;
   std::stack<std::vector<std::string> *> fileLists;
+  NFCConverter nfc;
 
-#ifdef __APPLE__
-  iconv_t nfd2nfc;
-  char buf[512];
-#endif
-
-  CacheEnumData(FileSystemPrivate *p) : p(p) {
-#ifdef __APPLE__
-    nfd2nfc = iconv_open("utf-8", "utf-8-mac");
-#endif
-  }
-
-  ~CacheEnumData() {
-#ifdef __APPLE__
-    iconv_close(nfd2nfc);
-#endif
-  }
-
-  /* Converts in-place */
-  void toNFC(char *inout) {
-#ifdef __APPLE__
-    ::toNFC(inout, nfd2nfc, buf, sizeof(buf));
-#else
-    (void)inout;
-#endif
-  }
+  CacheEnumData(FileSystemPrivate *p) : p(p) {}
 };
 
 static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
@@ -421,7 +429,7 @@ static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
   strcpySafe(originalPath, fullPath, sizeof(originalPath), -1);
 
   /* Deal with OSX' weird UTF-8 standards */
-  data.toNFC(fullPath);
+  data.nfc.toNFC(fullPath);
 
   std::string mixedCase(fullPath);
   std::string lowerCase = mixedCase;
@@ -445,7 +453,7 @@ static PHYSFS_EnumerateCallbackResult cacheEnumCB(void *d, const char *origdir,
 
     char filename[512];
     strcpySafe(filename, fname, sizeof(filename), -1);
-    data.toNFC(filename);
+    data.nfc.toNFC(filename);
 
     std::string lowerFilename(filename);
     strTolower(lowerFilename);
@@ -492,34 +500,11 @@ struct DirRefreshEnumData {
    * Keys are rebuilt from this rather than from the on-disk dirpath so
    * they land exactly where openReadEnumCB's translation looks. */
   std::string lowerDir;
-
-#ifdef __APPLE__
-  iconv_t nfd2nfc;
-  char buf[512];
-#endif
+  NFCConverter nfc;
 
   DirRefreshEnumData(FileSystemPrivate *p, std::vector<std::string> *list,
                      const char *lowerDir)
-      : p(p), list(list), lowerDir(lowerDir) {
-#ifdef __APPLE__
-    nfd2nfc = iconv_open("utf-8", "utf-8-mac");
-#endif
-  }
-
-  ~DirRefreshEnumData() {
-#ifdef __APPLE__
-    iconv_close(nfd2nfc);
-#endif
-  }
-
-  /* Converts in-place */
-  void toNFC(char *inout) {
-#ifdef __APPLE__
-    ::toNFC(inout, nfd2nfc, buf, sizeof(buf));
-#else
-    (void)inout;
-#endif
-  }
+      : p(p), list(list), lowerDir(lowerDir) {}
 };
 
 static PHYSFS_EnumerateCallbackResult
@@ -540,7 +525,7 @@ dirRefreshEnumCB(void *d, const char *origdir, const char *fname) {
 
   char filename[512];
   strcpySafe(filename, fname, sizeof(filename), -1);
-  data.toNFC(filename);
+  data.nfc.toNFC(filename);
 
   std::string lowerFilename(filename);
   strTolower(lowerFilename);
@@ -651,9 +636,10 @@ struct OpenReadEnumData {
         physfsError(0) {}
 };
 
+/* `key` is `filename` in NFC, the form that `data.filename` has. */
 static PHYSFS_EnumerateCallbackResult
-openReadEnumCB(void *d, const char *dirpath, const char *filename) {
-  OpenReadEnumData &data = *static_cast<OpenReadEnumData *>(d);
+openReadEnumCB(OpenReadEnumData &data, const char *dirpath,
+               const char *filename, const char *key) {
   char buffer[512];
   const char *fullPath;
 
@@ -661,7 +647,7 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
     return PHYSFS_ENUM_STOP;
 
   /* If there's not even a partial match, continue searching */
-  if (strncasecmp(filename, data.filename, data.filenameN) != 0)
+  if (strncasecmp(key, data.filename, data.filenameN) != 0)
     return PHYSFS_ENUM_OK;
 
   if (!*dirpath) {
@@ -671,7 +657,7 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
     fullPath = buffer;
   }
 
-  char last = filename[data.filenameN];
+  char last = key[data.filenameN];
   /* If fname matches up to a following '.' (meaning the rest is part
    * of the extension), or up to a following '\0' (full match), we've
    * found our file */
@@ -685,8 +671,8 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
 
   /* Without the path cache, the listing has folders too. PhysFS opens a
    * folder on disk as a file, and the image loader then fails it with
-   * SDLError, which a game's `rescue` does not catch. Pokemon Insurgence
-   * loads "Graphics/Characters/" for an event with no sprite. */
+   * SDLError, which a game's `rescue` does not catch. A game loads
+   * "Graphics/Characters/" for an event with no sprite. */
   PHYSFS_Stat stat;
   if (PHYSFS_stat(fullPath, &stat) &&
       stat.filetype == PHYSFS_FILETYPE_DIRECTORY)
@@ -716,21 +702,29 @@ openReadEnumCB(void *d, const char *dirpath, const char *filename) {
 
 /* Windows lists a folder in name order, so a game that asks for "x"
  * always got "x.png" before "x.xcf". readdir order on iOS is arbitrary,
- * and SDL_image also decodes XCF (as an empty image, for Pokemon Silver
- * Chronicle's tileset), so try the candidates in name order too. */
+ * and SDL_image also decodes XCF (as an empty image, for a game's
+ * tileset), so try the candidates in name order too. */
 static void openReadInOrder(OpenReadEnumData &data, const char *dir,
-                            const std::vector<std::string> &fileList) {
-  std::vector<const char *> names;
-  for (size_t i = 0; i < fileList.size(); ++i)
-    if (strncasecmp(fileList[i].c_str(), data.filename, data.filenameN) == 0)
-      names.push_back(fileList[i].c_str());
+                            const std::vector<std::string> &fileList,
+                            NFCConverter &nfc) {
+  /* Each match, as {NFC name, name on disk}. The path cache lists its
+   * names in NFC already. */
+  std::vector<std::pair<std::string, const char *>> names;
+  for (size_t i = 0; i < fileList.size(); ++i) {
+    std::string key = data.pathTrans ? fileList[i] : nfc.toNFC(fileList[i]);
+    if (strncasecmp(key.c_str(), data.filename, data.filenameN) == 0)
+      names.push_back(std::make_pair(key, fileList[i].c_str()));
+  }
 
   /* Without the path cache, "Twin.png" and "twin.png" can both match.
    * The name in the case the game asked for goes first. */
   const char *want = data.filename;
   const size_t wantN = data.filenameN;
   std::stable_sort(names.begin(), names.end(),
-                   [want, wantN](const char *a, const char *b) {
+                   [want, wantN](const std::pair<std::string, const char *> &x,
+                                 const std::pair<std::string, const char *> &y) {
+                     const char *a = x.first.c_str();
+                     const char *b = y.first.c_str();
                      int c = strcasecmp(a, b);
                      if (c != 0)
                        return c < 0;
@@ -742,7 +736,7 @@ static void openReadInOrder(OpenReadEnumData &data, const char *dir,
                    });
 
   for (size_t i = 0; i < names.size() && !data.stopSearching; ++i)
-    openReadEnumCB(&data, dir, names[i]);
+    openReadEnumCB(data, dir, names[i].second, names[i].first.c_str());
 }
 
 static PHYSFS_EnumerateCallbackResult
@@ -752,15 +746,15 @@ listEnumCB(void *d, const char *, const char *filename) {
 }
 
 /* PhysFS finds archive entries, and files on an iOS device, only by
- * exact case. Windows games often ask for another case: Pokemon
- * Insurgence's Game.rgssad holds "Data/map150.rxdata" and the game
- * loads "Data/Map150.rxdata". Without the path cache, match each part
+ * exact case. Windows games often ask for another case: a game's
+ * Game.rgssad holds "Data/map150.rxdata" and the game loads
+ * "Data/Map150.rxdata". Without the path cache, match each part
  * of the path against a live listing of its folder. "Data" and "data"
  * can both exist, so each match is tried, the exact case first.
- * `visit` gets each full path that exists and stops the walk when it
- * returns true. */
+ * `path` is in NFC. `visit` gets each full path that exists and stops
+ * the walk when it returns true. */
 static bool liveCaseWalk(const std::string &path, size_t start,
-                         const std::string &prefix,
+                         const std::string &prefix, NFCConverter &nfc,
                          const std::function<bool(const std::string &)> &visit) {
   size_t slash = path.find('/', start);
   std::string part = path.substr(
@@ -769,18 +763,23 @@ static bool liveCaseWalk(const std::string &path, size_t start,
   std::vector<std::string> names;
   PHYSFS_enumerate(prefix.c_str(), listEnumCB, &names);
 
+  std::vector<std::string> keys;
+  for (size_t i = 0; i < names.size(); ++i)
+    keys.push_back(nfc.toNFC(names[i]));
+
   std::vector<const std::string *> matches;
   for (size_t i = 0; i < names.size(); ++i)
-    if (names[i] == part)
+    if (keys[i] == part)
       matches.push_back(&names[i]);
   for (size_t i = 0; i < names.size(); ++i)
-    if (names[i] != part && strcasecmp(names[i].c_str(), part.c_str()) == 0)
+    if (keys[i] != part && strcasecmp(keys[i].c_str(), part.c_str()) == 0)
       matches.push_back(&names[i]);
 
   for (size_t i = 0; i < matches.size(); ++i) {
     std::string full = prefix.empty() ? *matches[i] : prefix + '/' + *matches[i];
     if (slash == std::string::npos ? visit(full)
-                                   : liveCaseWalk(path, slash + 1, full, visit))
+                                   : liveCaseWalk(path, slash + 1, full, nfc,
+                                                  visit))
       return true;
   }
   return false;
@@ -792,18 +791,13 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
   size_t len = strcpySafe(buffer, filename_nm.c_str(), sizeof(buffer), -1);
   char *delim;
 
-  if (p->havePathCache) {
-#ifdef __APPLE__
-    iconv_t nfd2nfc = iconv_open("utf-8", "utf-8-mac");
-    char nfcBuf[512];
-    toNFC(buffer, nfd2nfc, nfcBuf, sizeof(nfcBuf));
-    if (nfd2nfc != (iconv_t)-1)
-      iconv_close(nfd2nfc);
-    len = strlen(buffer);
-#endif
+  NFCConverter nfc;
+  nfc.toNFC(buffer);
+  len = strlen(buffer);
+
+  if (p->havePathCache)
     for (size_t i = 0; i < len; ++i)
       buffer[i] = tolower(static_cast<unsigned char>(buffer[i]));
-  }
 
   /* Find the deliminator separating directory and file name */
   for (delim = buffer + len; delim > buffer; --delim)
@@ -828,19 +822,19 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
   if (p->havePathCache) {
     /* Get the list of files contained in this directory
      * and manually iterate over them */
-    openReadInOrder(data, dir, p->fileLists[dir]);
+    openReadInOrder(data, dir, p->fileLists[dir], nfc);
   } else {
     std::vector<std::string> fileList;
     PHYSFS_enumerate(dir, listEnumCB, &fileList);
-    openReadInOrder(data, dir, fileList);
+    openReadInOrder(data, dir, fileList, nfc);
 
     if (*dir && !data.stopSearching)
-      liveCaseWalk(dir, 0, "", [&](const std::string &liveDir) {
+      liveCaseWalk(dir, 0, "", nfc, [&](const std::string &liveDir) {
         if (liveDir == dir)
           return false;
         std::vector<std::string> liveList;
         PHYSFS_enumerate(liveDir.c_str(), listEnumCB, &liveList);
-        openReadInOrder(data, liveDir.c_str(), liveList);
+        openReadInOrder(data, liveDir.c_str(), liveList, nfc);
         return data.stopSearching;
       });
   }
@@ -860,16 +854,9 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
    * which no handler took a file. */
   if (p->havePathCache && !data.stopSearching) {
     char obuffer[512];
-    size_t olen = strcpySafe(obuffer, filename_nm.c_str(), sizeof(obuffer), -1);
-
-#ifdef __APPLE__
-    iconv_t nfd2nfc = iconv_open("utf-8", "utf-8-mac");
-    char nfcBuf[512];
-    toNFC(obuffer, nfd2nfc, nfcBuf, sizeof(nfcBuf));
-    if (nfd2nfc != (iconv_t)-1)
-      iconv_close(nfd2nfc);
-    olen = strlen(obuffer);
-#endif
+    strcpySafe(obuffer, filename_nm.c_str(), sizeof(obuffer), -1);
+    nfc.toNFC(obuffer);
+    size_t olen = strlen(obuffer);
 
     char *odelim;
     for (odelim = obuffer + olen; odelim > obuffer; --odelim)
@@ -888,7 +875,7 @@ void FileSystem::openRead(OpenHandler &handler, const char *filename) {
     if (PHYSFS_enumerate(odir, dirRefreshEnumCB, &refresh)) {
       p->fileLists[dir] = fresh;
 
-      openReadInOrder(data, dir, fresh);
+      openReadInOrder(data, dir, fresh, nfc);
 
       if (data.physfsError)
         throw Exception(Exception::PHYSFSError, "PhysFS: %s", data.physfsError);
@@ -1119,11 +1106,10 @@ std::string FileSystem::resolveFeaturePath(const char *filename) {
 }
 
 const char *FileSystem::desensitize(const char *filename) {
-  std::string fn_lower(filename);
-    
-  std::transform(fn_lower.begin(), fn_lower.end(), fn_lower.begin(), [](unsigned char c){
-      return std::tolower(c);
-  });
+  NFCConverter nfc;
+  std::string fn_nfc = nfc.toNFC(filename);
+  std::string fn_lower(fn_nfc);
+  strTolower(fn_lower);
   if (p->havePathCache) {
     if (p->pathCache.contains(fn_lower))
       return p->pathCache[fn_lower].c_str();
@@ -1134,7 +1120,7 @@ const char *FileSystem::desensitize(const char *filename) {
     return filename;
 
   static thread_local std::string live;
-  if (liveCaseWalk(filename, 0, "", [](const std::string &found) {
+  if (liveCaseWalk(fn_nfc, 0, "", nfc, [](const std::string &found) {
         live = found;
         return true;
       }))
